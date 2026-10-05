@@ -1,0 +1,11 @@
+.build/
+.swiftpm/
+.tools/
+build/
+upstream/
+.DS_Store
+*.xcuserstate
+*.dSYM/
+.env
+
+*.log

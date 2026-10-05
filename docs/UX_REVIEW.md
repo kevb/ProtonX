@@ -1,0 +1,35 @@
+# macOS UX review
+
+Review date: 2026-10-05. Source-backed review of the pinned desktop/native clients,
+not a usability study or an account-based walkthrough of official installed apps.
+
+| Area | Observation / tension | ProtonX response |
+| --- | --- | --- |
+| Menu-bar slots | Separate product identities can duplicate persistent controls in a narrow menu bar | One optional suite item with direct product actions; users can remove it |
+| Product separation | Mail and a password vault have different tasks and lock lifetimes | Separate native windows and sessions; shared app commands, preferences and lock action |
+| Login | Desktop web/browser handoffs interrupt the app's context | Native Pass username/password/verification fields driven by Proton's client; Mail still authenticates through Bridge |
+| Keychain | Session ownership and local encryption must be deliberate | Dedicated Pass Keychain namespace and encrypted profile; separate Mail credentials; no account password in preferences |
+| Clipboard | Copies may persist or sync; a timer must not erase the user's next unrelated copy | Concealed/transient pasteboard markers and a 30-second change-count lease; lock clears owned copy only |
+| Windows | Electron windows can miss expected native sizing, toolbars and keyboard behavior | SwiftUI split views, standard resizing/toolbar/search, Window menu and product shortcuts |
+| Resource usage | Shipping native UI doesn't establish an end-to-end memory win | On-demand helpers and measurements; Mail's Bridge cost included in future comparisons |
+| Secret visibility | Bulk payloads and selection races can expose more decrypted data than needed | Metadata lists, selected-item details, concealed fields, cancel and epoch guards on lock |
+| Lock behavior | Global lock is useful; every focus change would make mail/vault switching frustrating | Sleep, screen lock, user-switch and inactivity lock; no focus-loss lock |
+| Remote message content | Rendering mail can introduce trackers or active content | Native text rendering; no remote image loading; HTML-only state explicit |
+| Upstream complexity | Full vault parity includes autofill, passkeys, sharing and recovery | Alpha limitations surfaced in README; no fake buttons for unimplemented services |
+
+## Intentional limitations
+
+No unified cross-product search: vault titles and mail subjects have different
+privacy and indexing requirements. No central shared Proton token: sharing account
+identity does not mean sharing product encryption keys/session lifetime. No
+assumption that hiding the app's menu item saves runtime resources. No automatic
+background polling or OS login item in 0.1. Refresh is explicit. Global quick
+access is opt-in; registration failure disables it, preserving another app's key.
+
+## Follow-up evaluation
+
+Verify VoiceOver navigation with real users, keyboard-only creation/editing,
+long vault/title names, large vault counts, high-contrast appearance, non-Latin
+mailboxes, reduced motion, multiple displays, menu-bar overflow, session expiry,
+network failures, and blocked account login. Test native autofill/passkey system
+extensions before treating Pass as a day-to-day replacement.

@@ -1,0 +1,100 @@
+diff --git a/pass-cli/src/commands/item/update.rs b/pass-cli/src/commands/item/update.rs
+index f4d1d5a..49e2b2b 100644
+--- a/pass-cli/src/commands/item/update.rs
++++ b/pass-cli/src/commands/item/update.rs
+@@ -46,6 +46,12 @@ pub async fn run(
+     item_query: ItemQuery,
+     fields: Vec<String>,
+ ) -> Result<()> {
++    let fields = if std::env::var("PROTONX_NATIVE").as_deref() == Ok("1") && fields == ["@stdin"] {
++        use std::io::Read;
++        let mut input = zeroize::Zeroizing::new(String::new());
++        std::io::stdin().read_to_string(&mut input)?;
++        serde_json::from_str::<Vec<String>>(&input)?
++    } else { fields };
+     let parsed_fields = parse_fields(fields)?;
+ 
+     if parsed_fields.is_empty() {
+diff --git a/pass-cli/src/features/keyring.rs b/pass-cli/src/features/keyring.rs
+index 2fed7a9..5673a84 100644
+--- a/pass-cli/src/features/keyring.rs
++++ b/pass-cli/src/features/keyring.rs
+@@ -28,7 +28,7 @@ use sha2::{Digest, Sha256};
+ use std::path::PathBuf;
+ use tokio::sync::RwLock;
+ 
+-const KEYRING_SERVICE_NAME: &str = "ProtonPassCLI";
++const KEYRING_SERVICE_NAME: &str = "org.kevb.ProtonX.Pass";
+ const KEYRING_CREDENTIAL_NAME: &str = "cli-local-key";
+ const XOR_KEY_LENGTH: usize = 32;
+ 
+diff --git a/pass-cli/src/main.rs b/pass-cli/src/main.rs
+index 5530278..31572ad 100644
+--- a/pass-cli/src/main.rs
++++ b/pass-cli/src/main.rs
+@@ -260,7 +260,7 @@ async fn run() -> Result<()> {
+ 
+     // Check for updates in the background (non-blocking, weekly check)
+     // This runs for all commands except update itself to avoid recursion
+-    if !matches!(
++    if std::env::var("PROTONX_NATIVE").as_deref() != Ok("1") && !matches!(
+         cli.command,
+         Commands::Update { .. } | Commands::Completions { .. }
+     ) {
+diff --git a/pass-cli/src/utils.rs b/pass-cli/src/utils.rs
+index 474bb3a..c2c867a 100644
+--- a/pass-cli/src/utils.rs
++++ b/pass-cli/src/utils.rs
+@@ -28,6 +28,13 @@ const PROTON_PASS_SESSION_DIR_ENV: &str = "PROTON_PASS_SESSION_DIR";
+ const PROTON_PASS_EXPERIMENTAL_FEATURES_ENV: &str = "PROTON_PASS_EXPERIMENTAL_FEATURES";
+ 
+ pub fn ask_for_input(prompt: &str, secure: bool) -> anyhow::Result<String> {
++    // ProtonX uses a private pipe instead of a terminal or credential environment variables.
++    if std::env::var("PROTONX_NATIVE").as_deref() == Ok("1") {
++        let mut stderr = std::io::stderr().lock();
++        writeln!(stderr, "PROTONX:{}", serde_json::json!({"prompt": prompt, "secure": secure}))?;
++        stderr.flush()?;
++        return read_native_reply(&mut std::io::stdin().lock());
++    }
+     if secure {
+         let input = rpassword::prompt_password(prompt).context("Error prompting for password")?;
+         Ok(input.replace("\n", "").trim().to_string())
+@@ -167,3 +174,38 @@ pub fn format_timestamp_with_time(timestamp: Timestamp) -> String {
+         zoned.second()
+     )
+ }
++
++// Kept separate so the native protocol is tested without account/network/Keychain access.
++fn read_native_reply(reader: &mut impl std::io::BufRead) -> anyhow::Result<String> {
++    let mut line = zeroize::Zeroizing::new(String::new());
++    if std::io::BufRead::read_line(&mut std::io::Read::take(reader, 65_537), &mut line)? == 0 {
++        anyhow::bail!("Native authentication cancelled");
++    }
++    if line.len() > 65_536 { anyhow::bail!("Native credential exceeds size limit"); }
++    Ok(serde_json::from_str(&line)?)
++}
++
++#[cfg(test)]
++mod protonx_tests {
++    use super::read_native_reply;
++    use std::io::Cursor;
++    #[test]
++    fn reply_preserves_whitespace_and_newlines() {
++        let value = "  synthetic \n \" secret  ";
++        let json = serde_json::to_string(value).unwrap() + "\n";
++        assert_eq!(read_native_reply(&mut Cursor::new(json)).unwrap(), value);
++    }
++    #[test]
++    fn eof_cancels_instead_of_returning_an_empty_password() {
++        assert!(read_native_reply(&mut Cursor::new("")).is_err());
++    }
++    #[test]
++    fn non_string_reply_is_rejected() {
++        assert!(read_native_reply(&mut Cursor::new("{\"password\":\"synthetic\"}\n")).is_err());
++    }
++    #[test]
++    fn oversized_reply_is_rejected() {
++        let value = serde_json::to_string(&"x".repeat(65_537)).unwrap() + "\n";
++        assert!(read_native_reply(&mut Cursor::new(value)).is_err());
++    }
++}

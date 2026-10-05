@@ -1,0 +1,48 @@
+{
+  "schema": 1,
+  "reviewed_on": "2026-10-05",
+  "sources": [
+    {
+      "name": "pass-cli",
+      "url": "https://github.com/protonpass/pass-cli.git",
+      "revision": "7ae51e52818bca8df905988e4b149d43d31d4c83",
+      "role": "runtime",
+      "license": "GPL-3.0-or-later"
+    },
+    {
+      "name": "proton-pass-common",
+      "url": "https://github.com/protonpass/proton-pass-common.git",
+      "revision": "af901bef505e848db7d7691b49c85750a55c52f4",
+      "role": "reference; helper uses locked tag 2.1.1",
+      "license": "GPL-3.0-or-later"
+    },
+    {
+      "name": "WebClients",
+      "url": "https://github.com/ProtonMail/WebClients.git",
+      "revision": "0b1d912065235b251adc545c1d91cb615bfab73b",
+      "role": "UX and protocol reference",
+      "license": "GPL-3.0"
+    },
+    {
+      "name": "ios-pass",
+      "url": "https://github.com/protonpass/ios-pass.git",
+      "revision": "0b0fc360656e566c20bda61f87631173d70e3da0",
+      "role": "native architecture reference",
+      "license": "GPL-3.0-or-later"
+    },
+    {
+      "name": "ios-mail",
+      "url": "https://github.com/ProtonMail/ios-mail.git",
+      "revision": "701463fe4542945c49ac5d326b0c27e91441e02f",
+      "role": "native architecture reference",
+      "license": "See repository notices; not redistributed"
+    },
+    {
+      "name": "proton-bridge",
+      "url": "https://github.com/ProtonMail/proton-bridge.git",
+      "revision": "b9c5dac1651437100c40896dacd778a0518a26f2",
+      "role": "Mail protocol and TLS reference; separate runtime",
+      "license": "GPL-3.0"
+    }
+  ]
+}

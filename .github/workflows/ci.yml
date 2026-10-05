@@ -1,0 +1,31 @@
+name: macOS
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  native:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Swift contracts and security policies
+        run: swift test
+      - name: Synthetic Bridge TLS integration
+        run: |
+          scripts/test-bridge.sh
+          scripts/test-bridge.sh --starttls
+      - name: Native app build
+        run: swift build -c release
+  helper:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Build pinned Proton helper and run public tests
+        run: |
+          scripts/build-helper.sh
+          scripts/test-helper.sh
