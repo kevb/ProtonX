@@ -44,7 +44,7 @@ git rev-parse HEAD > "$PROTONX_SOURCE/SOURCE_REVISION.txt"
 python3 - "$PROTONX_SOURCE" "$PROTONX_ROOT/upstream/pass-cli" <<'PYNOTICES'
 import json, shutil, subprocess, sys
 from pathlib import Path
-root = Path(sys.argv[1])
+root = Path(sys.argv[1]).resolve()
 original = json.loads(subprocess.check_output(
     ['cargo', 'metadata', '--offline', '--locked', '--format-version', '1'], cwd=sys.argv[2]))
 # Cargo's git vendoring can omit a workspace-root license. Preserve it separately
@@ -54,7 +54,7 @@ for package in original['packages']:
         continue
     directory = Path(package['manifest_path']).parent
     for parent in [directory, *directory.parents]:
-        if '.cargo' in str(parent) and parent.name in ('git', 'checkouts'):
+        if parent.name in ('git', 'checkouts'):
             break
         for name in ('LICENSE', 'COPYING', 'LICENSE.md', 'LICENSE.txt'):
             license_file = parent/name
