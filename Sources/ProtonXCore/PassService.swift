@@ -44,6 +44,7 @@ public final class PassService: Sendable {
         do {
             try Task.checkCancellation()
             let data = try await runner.run(command, challenge: challenge)
+            try Task.checkCancellation()
             await gate.release()
             return data
         } catch { await gate.release(); throw error }

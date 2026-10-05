@@ -50,3 +50,17 @@ private func fixture(_ script: String) throws -> (URL, URL) {
 @Test func missingHelperFailsBeforeStarting() async throws {
     await #expect(throws: ProtonXError.helperMissing) { try await NativeProcess(executable: URL(fileURLWithPath: "/nonexistent/protonx-helper"), directory: URL(fileURLWithPath: "/tmp")).run(HelperCommand([]), challenge: nil) }
 }
+
+@Test func timedOutAuthenticationCancelsPendingCredentialPrompt() async throws {
+    let (root, executable) = try fixture("printf 'PROTONX:{\"prompt\":\"Enter password: \",\"secure\":true}\\n' >&2\nIFS= read -r answer\n")
+    defer { try? FileManager.default.removeItem(at: root) }
+    let runner = NativeProcess(executable: executable, directory: root, authenticationTimeout: .milliseconds(150))
+    let start = ContinuousClock.now
+    await #expect(throws: Error.self) {
+        try await runner.run(HelperCommand(["login"])) { _ in
+            try await Task.sleep(for: .seconds(30))
+            return "UNREACHABLE"
+        }
+    }
+    #expect(start.duration(to: .now) < .seconds(5))
+}

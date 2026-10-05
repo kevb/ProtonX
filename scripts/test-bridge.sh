@@ -21,7 +21,7 @@ CONF
 openssl req -x509 -newkey rsa:2048 -nodes -days 1 -config "$PROTONX_FIXTURE/openssl.cnf" -keyout "$PROTONX_FIXTURE/private-key.pem" -out "$PROTONX_FIXTURE/certificate.pem" >/dev/null 2>&1
 # A different self-signed certificate must not authenticate the fixture's TLS endpoint.
 openssl req -x509 -newkey rsa:2048 -nodes -days 1 -config "$PROTONX_FIXTURE/openssl.cnf" -keyout "$PROTONX_FIXTURE/untrusted-key.pem" -out "$PROTONX_FIXTURE/untrusted.pem" >/dev/null 2>&1
-python3 tests/bridge_fixture.py --directory "$PROTONX_FIXTURE" "${@}" &
+python3 Tests/bridge_fixture.py --directory "$PROTONX_FIXTURE" "$@" &
 PROTONX_FIXTURE_PID=$!
 for ((i=0; i<100; i++)); do [[ -f "$PROTONX_FIXTURE/config.json" ]] && break; sleep 0.05; done
 [[ -f "$PROTONX_FIXTURE/config.json" ]] || { echo 'Fixture did not start.' >&2; exit 1; }

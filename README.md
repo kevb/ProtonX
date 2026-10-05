@@ -39,7 +39,7 @@ cd ProtonX
 open build/ProtonX.app
 ```
 
-Choose **Explore with demo data** to inspect Pass. Use **ProtonX → Open Mail**
+Choose **Explore with demo data** to inspect Pass. Use **Products → Open Mail**
 to explore the separate demo inbox. Build output is ad-hoc signed for local use;
 it is not notarized. No global dependencies are installed by the build scripts.
 
@@ -86,7 +86,7 @@ check Sent before retrying: a lost acknowledgement can mean mail was delivered.
 - ⌘1 / ⌘2: open Pass / Mail.
 - ⌘N: new Pass item. ⌘F: search Pass. ⌘R: refresh Pass.
 - ⌘L: lock both products. ⌘,: settings. ⌘Q: quit.
-- Optional ⌃⌥P: bring Pass forward; focus search on macOS 15+.
+- Optional ⌃⌥P: bring Pass forward; focus search.
 - Settings can remove the ProtonX menu-bar item entirely. The Dock and Window menu
   remain available. Closing windows keeps the suite running; Quit ends it.
 

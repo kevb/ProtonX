@@ -42,7 +42,9 @@ public struct ItemDetail: Sendable {
     public let urls: [String]
     public let hasTOTP: Bool
     public let attachmentCount: Int
-    public init(title: String, note: String, fields: [SecretField], urls: [String] = [], hasTOTP: Bool = false, attachmentCount: Int = 0) {
+    public let passkeyCount: Int
+    public init(title: String, note: String, fields: [SecretField], urls: [String] = [], hasTOTP: Bool = false, attachmentCount: Int = 0, passkeyCount: Int = 0) {
+        self.passkeyCount = passkeyCount
         self.title = title; self.note = note; self.fields = fields; self.urls = urls; self.hasTOTP = hasTOTP; self.attachmentCount = attachmentCount
     }
     public static func decode(_ data: Data) throws -> ItemDetail {
@@ -55,20 +57,40 @@ public struct ItemDetail: Sendable {
             ("email", "Email", false), ("username", "Username", false), ("password", "Password", true),
             ("cardholder_name", "Cardholder", false), ("number", "Card number", true), ("verification_number", "Security code", true),
             ("expiration_date", "Expiry", false), ("ssid", "Network", false), ("private_key", "Private key", true),
-            ("public_key", "Public key", false), ("email", "Alias", false)]
+            ("public_key", "Public key", false), ("pin", "PIN", true)]
         var seen = Set<String>()
         var fields = labels.compactMap { key, label, concealed -> SecretField? in
             guard seen.insert(key).inserted, let string = value[key] as? String, !string.isEmpty else { return nil }
             return SecretField(label: label, value: string, concealed: concealed)
         }
-        for extra in content["extra_fields"] as? [[String: Any]] ?? [] {
-            guard let name = extra["name"] as? String, let values = extra["content"] as? [String: Any],
-                  let first = values.first, let string = first.value as? String else { continue }
-            fields.append(SecretField(label: "Custom: " + name, value: string, concealed: first.key != "Text"))
+        if let alias = item["alias_email"] as? String, !alias.isEmpty { fields.append(SecretField(label: "Alias", value: alias, concealed: false)) }
+        if variant.key == "Identity" {
+            for key in value.keys.sorted() where !seen.contains(key) {
+                if let text = value[key] as? String, !text.isEmpty {
+                    fields.append(SecretField(label: key.replacingOccurrences(of: "_", with: " ").capitalized, value: text))
+                }
+            }
         }
+        func appendExtra(_ extras: [[String: Any]], prefix: String) {
+            for extra in extras {
+                guard let name = extra["name"] as? String, let values = extra["content"] as? [String: Any],
+                      let first = values.first, let string = first.value as? String else { continue }
+                fields.append(SecretField(label: prefix + name, value: string, concealed: first.key != "Text"))
+            }
+        }
+        appendExtra(content["extra_fields"] as? [[String: Any]] ?? [], prefix: "Custom: ")
+        for key in ["extra_personal_details", "extra_address_details", "extra_contact_details", "extra_work_details"] {
+            appendExtra(value[key] as? [[String: Any]] ?? [], prefix: key.replacingOccurrences(of: "_", with: " ").capitalized + ": ")
+        }
+        for section in (value["sections"] as? [[String: Any]] ?? []) + (value["extra_sections"] as? [[String: Any]] ?? []) {
+            appendExtra(section["section_fields"] as? [[String: Any]] ?? [], prefix: (section["section_name"] as? String ?? "Custom") + ": ")
+        }
+        let modernURLs = (value["autofill_urls"] as? [[String: Any]] ?? []).compactMap { $0["url"] as? String }
+        let allURLs = (value["urls"] as? [String] ?? []) + modernURLs
+        var uniqueURLs = Set<String>()
         return ItemDetail(title: title, note: content["note"] as? String ?? "", fields: fields,
-                          urls: value["urls"] as? [String] ?? [], hasTOTP: !(value["totp_uri"] as? String ?? "").isEmpty,
-                          attachmentCount: (root["attachments"] as? [Any])?.count ?? 0)
+                          urls: allURLs.filter { uniqueURLs.insert($0).inserted }, hasTOTP: !(value["totp_uri"] as? String ?? "").isEmpty,
+                          attachmentCount: (root["attachments"] as? [Any])?.count ?? 0, passkeyCount: (value["passkeys"] as? [Any])?.count ?? 0)
     }
 }
 

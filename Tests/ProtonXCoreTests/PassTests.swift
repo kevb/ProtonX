@@ -75,3 +75,21 @@ private final class RecordingRunner: HelperRunning, @unchecked Sendable {
     await #expect(throws: ProtonXError.self) { try await service.createLogin(draft, vault: Vault(name: "v", vaultID: "v", shareID: "v")) }
     #expect(runner.last() == nil)
 }
+
+@Test func newerAutofillURLsAndPasskeysRemainVisibleWithoutExposingKeyMaterial() throws {
+    let data = Data(#"{"item":{"content":{"title":"Modern login","content":{"Login":{"urls":[],"autofill_urls":[{"url":"https://example.com","mode":"Default"}],"passkeys":[{"content":"SYNTHETIC-KEY-MATERIAL"}]}},"extra_fields":[]}},"attachments":[]}"#.utf8)
+    let detail = try ItemDetail.decode(data)
+    #expect(detail.urls == ["https://example.com"]); #expect(detail.passkeyCount == 1)
+    #expect(detail.fields.allSatisfy { !$0.value.contains("SYNTHETIC-KEY-MATERIAL") })
+}
+@Test func aliasAndCardPINContractsAreSupported() throws {
+    let alias = try ItemDetail.decode(Data(#"{"item":{"alias_email":"alias@example.com","content":{"title":"Alias","content":{"Alias":null}}},"attachments":[]}"#.utf8))
+    #expect(alias.fields.first?.value == "alias@example.com")
+    let card = try ItemDetail.decode(Data(#"{"item":{"content":{"title":"Synthetic card","content":{"CreditCard":{"pin":"1234","number":"4111111111111111"}}}},"attachments":[]}"#.utf8))
+    #expect(card.fields.first { $0.label == "PIN" }?.concealed == true)
+}
+@Test func customSectionsAndIdentityFieldsDefaultToConcealed() throws {
+    let identity = try ItemDetail.decode(Data(#"{"item":{"content":{"title":"Synthetic identity","content":{"Identity":{"passport_number":"DEMO1234","extra_sections":[{"section_name":"Recovery","section_fields":[{"name":"Code","content":{"Hidden":"DEMO-ONLY"}}]}]}}}},"attachments":[]}"#.utf8))
+    #expect(identity.fields.first { $0.label == "Passport Number" }?.concealed == true)
+    #expect(identity.fields.first { $0.label == "Recovery: Code" }?.value == "DEMO-ONLY")
+}

@@ -15,7 +15,7 @@ struct ProtonXApp: App {
             CommandGroup(replacing: .newItem) {
                 Button("New Pass Item") { NotificationCenter.default.post(name: .protonXNewItem, object: nil) }.keyboardShortcut("n").disabled(pass.phase != .open || pass.busy)
             }
-            CommandMenu("ProtonX") {
+            CommandMenu("Products") {
                 Button("Open Pass") { SystemIntegration.shared.openPass?() }.keyboardShortcut("1")
                 Button("Open Mail") { SystemIntegration.shared.openMail?() }.keyboardShortcut("2")
                 Divider()

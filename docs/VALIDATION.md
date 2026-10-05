@@ -7,7 +7,7 @@ Rust 1.99.0. All test content is synthetic. No Proton account was accessed.
 
 - Native Swift app compiles in debug and release; release app bundle is locally
   ad-hoc signed and verifies with strict code-signature verification.
-- 22 Swift unit/contract/transport tests pass. One optional Bridge integration
+- 26 Swift unit/contract/transport tests pass. One optional Bridge integration
   test is explicitly disabled without the local fixture configuration.
 - Synthetic TLS IMAP/SMTP integration: verified certificate/hostname, mailbox
   list, UID search, header list, full message read, SMTP submission and received
@@ -23,7 +23,7 @@ Rust 1.99.0. All test content is synthetic. No Proton account was accessed.
 - Core tests cover no secrets in create/update arguments, metadata-only listing,
   unsupported URL blocking, clipboard ownership, epoch invalidation, MIME plain
   text/HTML-only handling, header injection, Unicode mail encoding, helper error
-  sanitization, large stdin payloads, process deadlines and cancellation.
+  sanitization, large stdin payloads, process deadlines, cancellation, and cancellation of a pending credential prompt.
 
 Tests caught and fixed a short-read deadlock in credential IPC and Unicode CRLF
 handling in subject validation. Runtime reads use `read(2)` on utility queues,

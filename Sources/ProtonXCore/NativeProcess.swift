@@ -6,10 +6,11 @@ public final class NativeProcess: HelperRunning, @unchecked Sendable {
     private let executable: URL
     private let directory: URL
     private let timeout: Duration
+    private let authenticationTimeout: Duration
     private let lock = NSLock()
     private var active: [UUID: Process] = [:]
-    public init(executable: URL, directory: URL, timeout: Duration = .seconds(120)) {
-        self.executable = executable; self.directory = directory; self.timeout = timeout
+    public init(executable: URL, directory: URL, timeout: Duration = .seconds(120), authenticationTimeout: Duration = .seconds(300)) {
+        self.executable = executable; self.directory = directory; self.timeout = timeout; self.authenticationTimeout = authenticationTimeout
     }
     public func cancelAll() {
         let processes = lock.withLock { Array(active.values) }
@@ -53,8 +54,8 @@ public final class NativeProcess: HelperRunning, @unchecked Sendable {
                 try? stdin.fileHandleForWriting.close()
             }
             if Task.isCancelled { throw CancellationError() }
-            let watchdog = Task.detached { [timeout] in
-                try? await Task.sleep(for: challenge == nil ? timeout : .seconds(300))
+            let watchdog = Task.detached { [timeout, authenticationTimeout] in
+                try? await Task.sleep(for: challenge == nil ? timeout : authenticationTimeout)
                 if !Task.isCancelled { Self.stop(process) }
             }
             defer { watchdog.cancel() }
@@ -72,6 +73,7 @@ public final class NativeProcess: HelperRunning, @unchecked Sendable {
                         buffer.removeSubrange(...newline)
                         guard line.starts(with: Data("PROTONX:".utf8)) else { continue }
                         guard let challenge else { Self.stop(process); throw ProtonXError.invalidResponse }
+                        try Task.checkCancellation()
                         let request = try JSONDecoder().decode(AuthChallenge.self, from: line.dropFirst(8))
                         do {
                             let answer = try await challenge(request)
@@ -89,9 +91,17 @@ public final class NativeProcess: HelperRunning, @unchecked Sendable {
             await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
                 DispatchQueue.global(qos: .utility).async { process.waitUntilExit(); continuation.resume() }
             }
+            // A helper that exits while a credential prompt is awaiting input must
+            // cancel that prompt too; otherwise its continuation outlives the deadline.
+            errors.cancel()
             let result: Data
             do { result = try await output.value; try await errors.value }
-            catch { Self.stop(process); throw error }
+            catch {
+                Self.stop(process)
+                try Task.checkCancellation()
+                if process.terminationStatus != 0 { throw ProtonXError.helperFailed(process.terminationStatus) }
+                throw error
+            }
             try Task.checkCancellation()
             guard process.terminationStatus == 0 else { throw ProtonXError.helperFailed(process.terminationStatus) }
             return result

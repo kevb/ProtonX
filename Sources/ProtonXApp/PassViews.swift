@@ -9,7 +9,6 @@ struct PassWindow: View {
     @State private var showingEdit = false
     @State private var confirmTrash = false
     @State private var confirmSignOut = false
-    @FocusState private var searchFocused: Bool
     var body: some View {
         Group {
             if store.phase == .open { workspace } else { WelcomeView() }
@@ -33,7 +32,6 @@ struct PassWindow: View {
             if phase != .open { showingCreate = false; showingEdit = false; confirmTrash = false }
         }
         .onReceive(NotificationCenter.default.publisher(for: .protonXNewItem)) { _ in if store.phase == .open { showingCreate = true } }
-        .onReceive(NotificationCenter.default.publisher(for: .protonXFocusSearch)) { _ in searchFocused = true }
         .onAppear {
             SystemIntegration.shared.openPass = { openWindow(id: "pass"); NSApp.activate(ignoringOtherApps: true) }
             SystemIntegration.shared.openMail = { openWindow(id: "mail"); NSApp.activate(ignoringOtherApps: true) }
@@ -87,10 +85,11 @@ struct PassWindow: View {
                 }.padding(.vertical, 4).tag(item.id)
             }
             .navigationSplitViewColumnWidth(min: 240, ideal: 300, max: 440)
-            .searchable(text: $store.query, placement: .automatic, prompt: "Search Pass")
-            .modifier(SearchFocus(focused: $searchFocused))
             .overlay { if store.filteredItems.isEmpty { ContentUnavailableView.search(text: store.query) } }
             .onChange(of: store.selectedItem) { _, _ in store.selectItem() }
+            .onChange(of: store.filteredItems.map(\.id)) { _, ids in
+                if let selected = store.selectedItem, !ids.contains(selected) { store.selectedItem = nil }
+            }
         } detail: {
             if let item = store.currentItem {
                 if let detail = store.detail {
@@ -101,12 +100,17 @@ struct PassWindow: View {
                                 Button { confirmTrash = true } label: { Label(store.showingTrash ? "Restore" : "Trash", systemImage: store.showingTrash ? "arrow.uturn.backward" : "trash") }.disabled(store.busy)
                             }
                         }
+                } else if store.error != nil {
+                    ContentUnavailableView { Label("Could not open item", systemImage: "exclamationmark.triangle") }
+                        description: { Text("Your vault is unchanged. You can retry when your connection is available.") }
+                        actions: { Button("Retry") { store.selectItem() } }
                 } else { ProgressView("Opening item…").frame(maxWidth: .infinity, maxHeight: .infinity) }
             } else { ContentUnavailableView("Your vault, at home on Mac", systemImage: "key", description: Text("Choose an item to view its details.")) }
         }
         .navigationTitle("ProtonX Pass")
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
+                NativeSearchField(text: $store.query).frame(width: 220)
                 if store.busy { ProgressView().controlSize(.small).accessibilityLabel("Working") }
                 Button { store.refresh() } label: { Label("Refresh", systemImage: "arrow.clockwise") }.disabled(store.busy || store.isDemo)
                 Button { showingCreate = true } label: { Label("New Item", systemImage: "plus") }.disabled(store.busy || store.vaults.isEmpty).accessibilityIdentifier("newItem")
@@ -196,6 +200,7 @@ struct ItemDetailView: View {
                 if !detail.note.isEmpty {
                     VStack(alignment: .leading, spacing: 10) { Text("Notes").font(.caption).foregroundStyle(.secondary); Text(detail.note).textSelection(.enabled) }
                 }
+                if detail.passkeyCount > 0 { Label("\(detail.passkeyCount) passkey(s) · use the official app for authentication", systemImage: "person.badge.key").font(.caption).foregroundStyle(.secondary) }
                 if detail.attachmentCount > 0 { Label("\(detail.attachmentCount) attachment(s) · use the official app to download", systemImage: "paperclip").font(.caption).foregroundStyle(.secondary) }
                 Text("Copied values clear after 30 seconds. Locking clears the item from this window.").font(.caption).foregroundStyle(.secondary)
                 Spacer()
@@ -214,6 +219,7 @@ struct ItemEditor: View {
     @State private var website = ""
     @State private var vaultID = ""
     @State private var localError: String?
+    @State private var saving = false
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             Text(editing ? "Edit item" : "New item").font(.title2.weight(.semibold))
@@ -234,7 +240,7 @@ struct ItemEditor: View {
                 }
             }.formStyle(.grouped)
             if let localError { Text(localError).foregroundStyle(.red).font(.callout) }
-            HStack { Button("Cancel") { clear(); dismiss() }.keyboardShortcut(.cancelAction); Spacer(); Button("Save", action: save).keyboardShortcut(.defaultAction).disabled(draft.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || store.busy) }
+            HStack { Button("Cancel") { clear(); dismiss() }.keyboardShortcut(.cancelAction).disabled(saving && store.busy); Spacer(); Button("Save", action: save).keyboardShortcut(.defaultAction).disabled(draft.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || store.busy) }
         }.padding(24).frame(width: 500)
         .onAppear {
             vaultID = store.selectedVault ?? store.vaults.first?.id ?? ""
@@ -245,25 +251,59 @@ struct ItemEditor: View {
                 draft.email = detail.fields.first { $0.label == "Email" }?.value ?? ""
                 draft.password = detail.fields.first { $0.label == "Password" }?.value ?? ""
             }
-        }.onDisappear(perform: clear)
+        }
+        .onChange(of: store.busy) { _, busy in
+            guard saving && !busy else { return }
+            saving = false
+            if let error = store.error { localError = error } else { clear(); dismiss() }
+        }
+        .onDisappear(perform: clear)
     }
     private func save() {
         draft.urls = website.isEmpty ? [] : [website]
         do { try draft.validate() } catch { localError = error.localizedDescription; return }
         guard note.utf8.count + draft.password.utf8.count < 262144 else { localError = "Keep items below 256 KB."; return }
+        saving = true; localError = nil
         if editing {
             var fields = ["title": draft.title, "note": note]
             if !isNote { fields["username"] = draft.username; fields["email"] = draft.email; fields["password"] = draft.password }
             store.updateCurrent(fields: fields)
         } else { store.create(draft: draft, note: isNote ? note : nil, vaultID: vaultID) }
-        clear(); dismiss()
     }
     private func clear() { draft = LoginDraft(); note = ""; website = "" }
 }
 
-private struct SearchFocus: ViewModifier {
-    var focused: FocusState<Bool>.Binding
-    @ViewBuilder func body(content: Content) -> some View {
-        if #available(macOS 15, *) { content.searchFocused(focused) } else { content }
+struct NativeSearchField: NSViewRepresentable {
+    @Binding var text: String
+    func makeCoordinator() -> Coordinator { Coordinator(text: $text) }
+    func makeNSView(context: Context) -> NSSearchField {
+        let field = NSSearchField()
+        field.placeholderString = "Search Pass"
+        field.setAccessibilityLabel("Search Pass")
+        field.delegate = context.coordinator
+        context.coordinator.field = field
+        context.coordinator.observe()
+        return field
+    }
+    func updateNSView(_ field: NSSearchField, context: Context) {
+        context.coordinator.text = $text
+        if field.stringValue != text { field.stringValue = text }
+    }
+    static func dismantleNSView(_ view: NSSearchField, coordinator: Coordinator) { coordinator.stopObserving() }
+    @MainActor final class Coordinator: NSObject, NSSearchFieldDelegate {
+        var text: Binding<String>
+        weak var field: NSSearchField?
+        var observer: NSObjectProtocol?
+        init(text: Binding<String>) { self.text = text }
+        func observe() {
+            observer = NotificationCenter.default.addObserver(forName: .protonXFocusSearch, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let field = self?.field else { return }
+                    field.window?.makeFirstResponder(field)
+                }
+            }
+        }
+        func controlTextDidChange(_ notification: Notification) { text.wrappedValue = field?.stringValue ?? "" }
+        func stopObserving() { if let observer { NotificationCenter.default.removeObserver(observer) }; observer = nil }
     }
 }

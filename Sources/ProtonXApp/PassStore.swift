@@ -18,6 +18,7 @@ final class PassStore: ObservableObject {
     @Published private(set) var busy = false
     @Published var error: String?
     @Published private(set) var challenge: AuthChallenge?
+    private var credentialRequestID: UUID?
     private var credentialContinuation: CheckedContinuation<String, Error>?
     private var epoch = SessionEpoch()
     private var selectionEpoch = SessionEpoch()
@@ -52,13 +53,23 @@ final class PassStore: ObservableObject {
         }
     }
     private func requestCredential(_ prompt: AuthChallenge) async throws -> String {
-        try Task.checkCancellation()
-        return try await withCheckedThrowingContinuation { continuation in
-            credentialContinuation = continuation; challenge = prompt
+        let id = UUID()
+        return try await withTaskCancellationHandler {
+            try Task.checkCancellation()
+            return try await withCheckedThrowingContinuation { continuation in
+                credentialRequestID = id; credentialContinuation = continuation; challenge = prompt
+            }
+        } onCancel: {
+            Task { @MainActor [weak self] in
+                guard let self, self.credentialRequestID == id else { return }
+                let continuation = self.credentialContinuation
+                self.credentialRequestID = nil; self.credentialContinuation = nil; self.challenge = nil
+                continuation?.resume(throwing: ProtonXError.cancelled)
+            }
         }
     }
     func answerCredential(_ answer: String) {
-        let continuation = credentialContinuation; credentialContinuation = nil; challenge = nil
+        let continuation = credentialContinuation; credentialContinuation = nil; credentialRequestID = nil; challenge = nil
         continuation?.resume(returning: answer)
     }
     func cancelLogin() { lock(); phase = hasSession ? .locked : .welcome }
@@ -78,14 +89,14 @@ final class PassStore: ObservableObject {
         epoch.invalidate(); selectionEpoch.invalidate()
         authContext?.invalidate(); authContext = nil
         operation?.cancel(); selectionTask?.cancel(); service.cancel()
-        let continuation = credentialContinuation; credentialContinuation = nil; challenge = nil
+        let continuation = credentialContinuation; credentialContinuation = nil; credentialRequestID = nil; challenge = nil
         continuation?.resume(throwing: ProtonXError.cancelled)
         ClipboardController.shared.clearOwned()
         vaults = []; items = []; detail = nil; demoDetails = [:]
         selectedItem = nil; selectedVault = nil; query = ""; busy = false; error = nil
         phase = hasSession || isDemo ? .locked : .welcome
     }
-    func refresh() { perform { [self] in try await loadSnapshot() } }
+    func refresh() { perform { [self] in try await loadSnapshot(); selectItem() } }
     private func loadSnapshot() async throws {
         guard !isDemo else { return }
         let captured = epoch.value
@@ -99,7 +110,7 @@ final class PassStore: ObservableObject {
         if let selectedVault, !vaults.contains(where: { $0.id == selectedVault }) { self.selectedVault = nil }
     }
     func selectItem() {
-        selectionEpoch.invalidate(); selectionTask?.cancel(); detail = nil
+        selectionEpoch.invalidate(); selectionTask?.cancel(); detail = nil; error = nil
         guard phase == .open, let item = currentItem else { return }
         if isDemo { detail = demoDetails[item.id]; return }
         let captured = epoch.value, selection = selectionEpoch.value
@@ -116,6 +127,7 @@ final class PassStore: ObservableObject {
         guard let vault = vaults.first(where: { $0.id == vaultID }) else { return }
         perform { [self] in
             if isDemo {
+                selectedVault = vault.id; kind = nil; query = ""
                 let item = PassItem(itemID: UUID().uuidString, shareID: vault.id, title: draft.title, kind: note == nil ? "login" : "note")
                 items.append(item)
                 demoDetails[item.id] = ItemDetail(title: draft.title, note: note ?? "", fields: note == nil ?
@@ -124,6 +136,8 @@ final class PassStore: ObservableObject {
             } else {
                 if let note { try await service.createNote(title: draft.title, note: note, vault: vault) }
                 else { try await service.createLogin(draft, vault: vault) }
+                try Task.checkCancellation()
+                selectedVault = vault.id; kind = nil; query = ""
                 try await loadSnapshot()
             }
         }
