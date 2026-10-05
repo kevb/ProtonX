@@ -43,3 +43,7 @@ and dependency notices. `scripts/source-bundle.sh` creates a source bundle with
 the pinned helper, the patch, Cargo lockfile, vendored Rust dependencies and their
 licenses. Keep the resulting bundle beside any binary, and include this file and
 `LICENSE` in the app. No official Proton release binaries are repackaged.
+
+Several exact Proton registry packages omit license declarations/root license
+files. The local source archive is for review; binary and complete vendored-source
+publication remains pending resolution of [the recorded license review](docs/LICENSE_REVIEW.md).

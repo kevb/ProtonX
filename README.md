@@ -9,6 +9,8 @@ client built on Proton's open-source Rust Pass library and desktop API protocol,
 client for Proton Bridge. It is not a full replacement for all official apps.
 Real-account interoperability has not yet been validated. Use a disposable test
 account before trusting this alpha with your vault.
+Builds are available locally; binary publication also awaits the recorded
+[dependency license review](docs/LICENSE_REVIEW.md).
 
 ProtonX is independent of Proton AG. GPL-3.0-or-later.
 

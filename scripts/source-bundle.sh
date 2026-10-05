@@ -5,7 +5,9 @@ source "$(dirname "$0")/env.sh"
 cd "$PROTONX_ROOT"
 scripts/build-helper.sh
 mkdir -p "$PROTONX_ROOT/build"
-PROTONX_STAGE="$(mktemp -d "$PROTONX_ROOT/build/.source-stage.XXXXXX")"
+# Outside the checkout: git apply otherwise discovers the enclosing ProtonX
+# repository and can silently skip paths outside its current directory prefix.
+PROTONX_STAGE="$(mktemp -d "${TMPDIR:-/tmp}/ProtonX-source.XXXXXX")"
 trap 'rm -rf "$PROTONX_STAGE"' EXIT
 PROTONX_SOURCE="$PROTONX_STAGE/ProtonX-0.1.0-source"
 mkdir -p "$PROTONX_SOURCE/helper" "$PROTONX_SOURCE/protonx"
@@ -17,6 +19,21 @@ cp Resources/PassHelper.lock "$PROTONX_SOURCE/helper/Cargo.lock"
 sed -i.bak 's|directory = ".*"|directory = "vendor"|' "$PROTONX_SOURCE/helper/vendor-config.toml"
 rm "$PROTONX_SOURCE/helper/vendor-config.toml.bak"
 (cd "$PROTONX_SOURCE/helper" && git apply "$PROTONX_ROOT/patches/pass-cli.patch")
+# Corresponding source must match every tracked file of the built helper,
+# including new patched modules, rather than merely compiling an upstream CLI.
+python3 - "$PROTONX_ROOT" "$PROTONX_SOURCE/helper" <<'PYCHECK'
+import subprocess, sys
+from pathlib import Path
+project, bundle = map(Path, sys.argv[1:])
+checkout = project/'upstream/pass-cli'
+paths = subprocess.check_output(['git', 'ls-files', '-z'], cwd=checkout).decode().split('\0')
+for path in filter(None, paths):
+    expected = project/'Resources/PassHelper.lock' if path == 'Cargo.lock' else checkout/path
+    actual = bundle/path
+    if not actual.is_file() or actual.read_bytes() != expected.read_bytes():
+        raise SystemExit('Corresponding-source mismatch: '+path)
+print('Corresponding helper source matches every tracked build input')
+PYCHECK
 mkdir -p "$PROTONX_SOURCE/helper/.cargo"
 printf '\n' >> "$PROTONX_SOURCE/helper/.cargo/config.toml"
 cat "$PROTONX_SOURCE/helper/vendor-config.toml" >> "$PROTONX_SOURCE/helper/.cargo/config.toml"
@@ -24,10 +41,29 @@ cp THIRD_PARTY_NOTICES.md LICENSE "$PROTONX_SOURCE/"
 git rev-parse HEAD > "$PROTONX_SOURCE/SOURCE_REVISION.txt"
 # An inventory points to the original license declarations; vendor directories
 # contain the original source, copyright notices and license files.
-python3 - "$PROTONX_SOURCE" <<'PYNOTICES'
-import json, subprocess, sys
+python3 - "$PROTONX_SOURCE" "$PROTONX_ROOT/upstream/pass-cli" <<'PYNOTICES'
+import json, shutil, subprocess, sys
 from pathlib import Path
 root = Path(sys.argv[1])
+original = json.loads(subprocess.check_output(
+    ['cargo', 'metadata', '--offline', '--locked', '--format-version', '1'], cwd=sys.argv[2]))
+# Cargo's git vendoring can omit a workspace-root license. Preserve it separately
+# from the unmodified/checksummed vendor crate directories.
+for package in original['packages']:
+    if not (package.get('source') or '').startswith('git+'):
+        continue
+    directory = Path(package['manifest_path']).parent
+    for parent in [directory, *directory.parents]:
+        if '.cargo' in str(parent) and parent.name in ('git', 'checkouts'):
+            break
+        for name in ('LICENSE', 'COPYING', 'LICENSE.md', 'LICENSE.txt'):
+            license_file = parent/name
+            if license_file.is_file():
+                destination = root/'helper/workspace-licenses'/f"{package['name']}-{package['version']}"
+                destination.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(license_file, destination/name)
+        if (parent/'.git').exists():
+            break
 metadata = json.loads(subprocess.check_output(
     ['cargo', 'metadata', '--offline', '--locked', '--format-version', '1'], cwd=root/'helper'))
 with (root/'DEPENDENCIES.tsv').open('w') as output:
