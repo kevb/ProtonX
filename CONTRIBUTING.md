@@ -13,7 +13,9 @@ and user-visible behavior. Error messages must never echo raw helper output.
 A patch touching Proton code must preserve its copyright/license notices, remain
 reviewable in `patches/pass-cli.patch`, and have an accompanying pinned-source
 update and contract tests. Do not replace crypto, skip certificate verification,
-or bypass Proton's account eligibility restrictions.
+or bypass server product permissions. Keep CLI eligibility in the CLI product
+policy; the explicit desktop policy uses the pinned desktop account protocol.
+Do not log or include account-fork URLs in reports: they contain one-use secrets.
 
 PRs should explain the problem, final behavior, validation, and remaining limits.
 Review security-sensitive storage/login/clipboard changes separately. See the
