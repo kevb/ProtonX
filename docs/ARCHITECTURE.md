@@ -26,13 +26,14 @@ sandboxing require another decision and tests, not merely changing a target name
   Keychain access, adapters and bounded private process transport.
 - `CBridgeTransport`: small system-libcurl boundary. Handles IMAP/SMTP transport,
   TLS verification, cancellation and output bounds. It does not implement Proton crypto.
-- Pinned Proton Pass helper: upstream Rust CLI with a small explicit patch.
-  Retains Proton's encryption, SRP/authentication, account checks and sync.
+- Pinned Proton Pass helper: a native desktop build of Proton's Rust Pass library
+  and command implementation. Retains Proton's encryption, SRP/authentication,
+  product APIs and sync.
   All secret-bearing create/update data uses stdin. Native authentication is a
   private line-oriented challenge protocol, independent of terminal control.
 
-No permanent Pass helper, browser engine, WebView, Electron or JavaScript runtime
-is loaded. Helpers start on demand. Commands serialize to avoid racing encrypted
+No permanent Pass helper, embedded web product UI, Electron or JavaScript
+runtime is loaded in ProtonX. The system browser is used only during authentication. Helpers start on demand. Commands serialize to avoid racing encrypted
 session refreshes and SQLCipher writes. Pass list responses contain metadata;
 secret details are fetched for the selected item. Generation tokens prevent late
 responses from restoring a locked window or a previous selection.
@@ -50,7 +51,48 @@ written Proton cryptographic stack or an embedded website.
 `upstream.lock.json` records the original repositories and revisions.
 `Resources/PassHelper.lock` pins the build's resolved transitive dependencies.
 `patches/pass-cli.patch` is the full behavioral delta from upstream, applied by
-a checked script. The app never disables upstream CLI account eligibility.
+a checked script.
+
+## Desktop protocol, not CLI eligibility
+
+The first adapter used the unmodified CLI product policy, which requires both
+`PassCanUseCli` and the account's `CliAllowed` entitlement. A live account reached
+successful authentication but failed that product-specific check. That is not a
+requirement of a native password-manager UI.
+
+ProtonX now builds an explicit `protonx-desktop` feature. Only that build **and**
+the private native transport select the desktop policy. The original CLI identity
+always retains its CLI eligibility check. We do not build the upstream
+`no-login-restriction` feature.
+
+The native helper uses `x-pm-appversion: macos-pass@1.42.0`, the protocol identity
+from the pinned Electron desktop source. This is a compatibility identifier,
+not a claim that ProtonX is an official Proton app. Its User-Agent identifies
+`ProtonX/0.1.0`. `Resources/DesktopProtocol.json` and the build-time contract check
+bind the identity/version to the immutable WebClients revision. TLS, SRP,
+encryption, server responses and product limits remain in Proton's library.
+
+The primary sign-in uses Proton's existing device-fork account flow targeting
+`macos-pass`, displayed in `ASWebAuthenticationSession` with an ephemeral browser
+session. The same pinned account source accepts the desktop child identity for
+`/desktop/login`; it checks the child matches the selected Pass product. The Rust
+SDK owns fork creation, polling, authenticated payload decryption and setup. Only
+the child identity is parameterized; the original CLI keeps `cli-pass`. No fork
+URL/token is printed, stored in preferences or passed as an argument. A strict
+native URL allowlist accepts only the pinned production account destination.
+Cancellation and successful helper completion close the authentication window.
+
+An experimental direct SRP/password/TOTP path remains available. The desktop
+protocol's live attempt failed with HTTP 422 / API 8004, also observed with an
+obviously synthetic identity; the exact server-side cause is unresolved. We do
+not classify this as a wrong password or CLI entitlement issue. The account-fork
+implementation has synthetic contract coverage and still needs live validation.
+Neither branch has established full security-key/SSO/challenge parity.
+
+The desktop helper restricts its command surface to the native UI contracts.
+CLI automation, agents, PATs, process injection, bulk secret export and permanent
+deletion are rejected before opening a client in desktop mode. The original CLI
+mode retains its original commands and eligibility policy.
 
 ## Mail and Drive
 

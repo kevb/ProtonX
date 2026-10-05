@@ -50,8 +50,8 @@ From this directory:
 
 ```sh
 cd helper
-cargo build --offline --locked --release -p pass-cli
-cargo test --offline --locked -p pass-cli
+cargo build --offline --locked --release -p pass-cli --features protonx-desktop
+cargo test --offline --locked -p pass-cli --features protonx-desktop
 cd ../protonx
 mkdir -p upstream/pass-cli/target/release
 cp ../helper/target/release/pass-cli upstream/pass-cli/target/release/pass-cli

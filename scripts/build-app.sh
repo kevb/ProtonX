@@ -2,6 +2,10 @@
 set -euo pipefail
 source "$(dirname "$0")/env.sh"
 cd "$PROTONX_ROOT"
+if pgrep -x ProtonX >/dev/null; then
+  echo 'Quit ProtonX before rebuilding its app bundle.' >&2
+  exit 1
+fi
 if [[ "${1:-}" != "--skip-helper" ]]; then scripts/build-helper.sh; fi
 [[ -f upstream/pass-cli/target/release/pass-cli ]] || { echo 'Build the helper first.' >&2; exit 1; }
 "$PROTONX_SWIFT" build --build-system native -c release

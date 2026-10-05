@@ -9,3 +9,4 @@ upstream/
 .env
 
 *.log
+__pycache__/

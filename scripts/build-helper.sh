@@ -8,7 +8,8 @@ if git -C upstream/pass-cli apply --reverse --check "$PROTONX_ROOT/patches/pass-
 else
   python3 scripts/patch-helper.py
 fi
+python3 scripts/verify-desktop-contract.py
 cp Resources/PassHelper.lock upstream/pass-cli/Cargo.lock
 command -v cargo >/dev/null || { echo 'Install the stable Rust toolchain from https://rustup.rs, then run this again.' >&2; exit 1; }
 cd upstream/pass-cli
-cargo build --locked --release -p pass-cli
+cargo build --locked --release -p pass-cli --features protonx-desktop

@@ -93,3 +93,28 @@ private final class RecordingRunner: HelperRunning, @unchecked Sendable {
     #expect(identity.fields.first { $0.label == "Passport Number" }?.concealed == true)
     #expect(identity.fields.first { $0.label == "Recovery: Code" }?.value == "DEMO-ONLY")
 }
+
+@Test func limitedTOTPRanksOnlyConfiguredLoginsByCreationTime() {
+    let first = PassItem(itemID: "first", shareID: "s", title: "Z", kind: "login", hasTOTP: true, createdAt: "2026-01-01T00:00:00")
+    let second = PassItem(itemID: "second", shareID: "s", title: "A", kind: "login", hasTOTP: true, createdAt: "2026-01-02T00:00:00")
+    let plain = PassItem(itemID: "plain", shareID: "s", title: "Plain", kind: "login", hasTOTP: false)
+    let policy = PassCapabilities(totpLimit: 1)
+    #expect(policy.allowsTOTP(itemID: first.id, items: [second, plain, first]))
+    #expect(!policy.allowsTOTP(itemID: second.id, items: [second, plain, first]))
+    #expect(!policy.allowsTOTP(itemID: plain.id, items: [second, plain, first]))
+}
+@Test func TOTPZeroAndUnlimitedHaveDistinctPolicies() {
+    #expect(!PassCapabilities(totpLimit: 0).allowsTOTP(itemID: "s:i", items: []))
+    #expect(PassCapabilities(totpLimit: nil).allowsTOTP(itemID: "s:i", items: []))
+}
+@Test func incompleteTOTPMetadataFailsClosedForLimitedPlans() {
+    let legacy = PassItem(itemID: "i", shareID: "s", title: "Legacy", kind: "login")
+    let missingTime = PassItem(itemID: "i", shareID: "s", title: "No date", kind: "login", hasTOTP: true)
+    #expect(!PassCapabilities(totpLimit: 3).allowsTOTP(itemID: legacy.id, items: [legacy]))
+    #expect(!PassCapabilities(totpLimit: 3).allowsTOTP(itemID: missingTime.id, items: [missingTime]))
+}
+@Test func missingOrInvalidCapabilityLimitNeverMeansUnlimited() throws {
+    #expect(throws: Error.self) { try JSONDecoder().decode(PassCapabilities.self, from: Data("{}".utf8)) }
+    #expect(throws: Error.self) { try JSONDecoder().decode(PassCapabilities.self, from: Data("{\"totp_limit\":-1}".utf8)) }
+    #expect(try JSONDecoder().decode(PassCapabilities.self, from: Data("{\"totp_limit\":null}".utf8)).totpLimit == nil)
+}

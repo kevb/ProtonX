@@ -64,6 +64,7 @@ public final class NativeProcess: HelperRunning, @unchecked Sendable {
                 catch { Self.stop(process); throw error }
             }
             let errors = Task.detached {
+                var diagnostic: HelperDiagnostic?
                 var buffer = Data()
                 while let chunk = try await Self.readAvailable(stderr.fileHandleForReading, count: 4096), !chunk.isEmpty {
                     buffer.append(chunk)
@@ -71,6 +72,10 @@ public final class NativeProcess: HelperRunning, @unchecked Sendable {
                     while let newline = buffer.firstIndex(of: 10) {
                         let line = buffer.prefix(upTo: newline)
                         buffer.removeSubrange(...newline)
+                        if line.starts(with: Data("PROTONX_ERROR:".utf8)) {
+                            diagnostic = try JSONDecoder().decode(HelperDiagnostic.self, from: line.dropFirst(14))
+                            continue
+                        }
                         guard line.starts(with: Data("PROTONX:".utf8)) else { continue }
                         guard let challenge else { Self.stop(process); throw ProtonXError.invalidResponse }
                         try Task.checkCancellation()
@@ -82,7 +87,9 @@ public final class NativeProcess: HelperRunning, @unchecked Sendable {
                         } catch { Self.stop(process); throw error }
                     }
                 }
-                // Upstream stderr may include account identifiers or secrets. It is deliberately discarded.
+                // Only a closed failure enum and bounded numeric codes are returned.
+                // All other upstream stderr is discarded, including raw server messages.
+                return diagnostic
             }
             if let input = command.input {
                 // Templates are bounded by the editor; write in a worker so the UI never blocks on a full pipe.
@@ -95,7 +102,8 @@ public final class NativeProcess: HelperRunning, @unchecked Sendable {
             // cancel that prompt too; otherwise its continuation outlives the deadline.
             errors.cancel()
             let result: Data
-            do { result = try await output.value; try await errors.value }
+            let diagnostic: HelperDiagnostic?
+            do { result = try await output.value; diagnostic = try await errors.value }
             catch {
                 Self.stop(process)
                 try Task.checkCancellation()
@@ -103,7 +111,10 @@ public final class NativeProcess: HelperRunning, @unchecked Sendable {
                 throw error
             }
             try Task.checkCancellation()
-            guard process.terminationStatus == 0 else { throw ProtonXError.helperFailed(process.terminationStatus) }
+            guard process.terminationStatus == 0 else {
+                if let diagnostic { throw ProtonXError.helperDiagnostic(diagnostic) }
+                throw ProtonXError.helperFailed(process.terminationStatus)
+            }
             return result
         } onCancel: { Self.stop(process) }
     }

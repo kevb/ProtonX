@@ -1,20 +1,39 @@
 # Validation record
 
-Date: 2026-10-05. Apple Silicon Mac, macOS 26.6.2, Xcode 27 / Swift 6.4,
-Rust 1.99.0. All test content is synthetic. No Proton account was accessed.
+Dates: 2026-10-05–06. Apple Silicon Mac, macOS 26.6.2, Xcode 27 / Swift 6.4,
+Rust 1.99.0. Automated test content is synthetic. A live sign-in was separately
+attempted with the account owner's authorization; no vault contents were accessed.
 
 ## Completed
 
 - Native Swift app compiles in debug and release; release app bundle is locally
   ad-hoc signed and verifies with strict code-signature verification.
-- 26 Swift unit/contract/transport tests pass. One optional Bridge integration
+- 34 Swift unit/contract/transport tests pass. One optional Bridge integration
   test is explicitly disabled without the local fixture configuration.
 - Synthetic TLS IMAP/SMTP integration: verified certificate/hostname, mailbox
   list, UID search, header list, full message read, SMTP submission and received
   payload verification; incorrect credentials and an untrusted certificate are
   rejected. The fixture passes in both direct TLS and STARTTLS modes.
-- 109 public upstream/patched Pass CLI tests pass, including four added native
-  JSON reply tests (whitespace/newlines, EOF cancellation, wrong JSON type, bound).
+- Native live sign-in reached successful Proton authentication, followed by the
+  upstream CLI eligibility rejection. The app now distinguishes that outcome
+  without exposing credentials or raw server responses. A later direct desktop
+  sign-in was rejected with HTTP 422 / API 8004. The exact cause is unresolved;
+  the same response was reproduced using an obviously synthetic identity. The
+  opt-in validation tool confirmed removal of its temporary test password from
+  local Keychain. No real vault contents were accessed or modified. Desktop
+  account-fork sign-in and full vault interoperability remain unvalidated.
+- 114 public upstream/patched Pass CLI tests pass in each mode, including four native
+  JSON reply tests (whitespace/newlines, EOF cancellation, wrong JSON type, bound),
+  two desktop/CLI product-policy tests, two command-surface tests and a
+  metadata-only TOTP summary test. Default and desktop builds both run them.
+- 248 public Rust SDK unit/integration tests pass. Two intentional fixture-dump
+  helpers are ignored upstream. A fork URL test checks the desktop/CLI child
+  identity and that the encryption key stays in the URL fragment.
+- Native authentication IPC carries a synthetic fork URL only through private
+  challenges. URL-policy tests reject other hosts, credentials, HTTP, unexpected
+  ports, redirect parameters and missing payloads. The signed app started the
+  handoff without entering credentials; Cancel returned to welcome and terminated
+  its helper. A successfully authenticated account handoff was not exercised.
 - Native UI inspected with synthetic data: welcome, search, concealed item
   details, create sheet, password generation, item insertion, ⌘L lock clearing
   content, ⌘2 opening a separate Mail window, synthetic inbox, and shared settings.
@@ -33,13 +52,15 @@ coverage; system-level interaction is not fully automated.
 
 ## Not established
 
-- Real Proton login, remote vault CRUD/sync, TOTP/second/extra-password challenges,
+- Successful desktop account-fork login and vault setup, remote vault CRUD/sync,
+  TOTP/second/extra-password challenges,
   session expiry/revocation and recovery. Upstream implementation is reused but
   does not eliminate integration risk.
 - Real Proton Bridge account interoperability, remote delivery, thread semantics,
   arbitrary MIME/charset encodings and large/complex mailbox behavior.
-- Touch ID/Mac-password prompts with a persisted real account; Keychain storage
-  with a user's Proton credentials. Automated tests don't touch account Keychain data.
+- Touch ID/Mac-password prompts with a persisted authenticated desktop session.
+  Synthetic automated tests don't touch account Keychain data; the separate,
+  authorized live attempt used a temporary credential in local Keychain.
 - Automated sleep/screen-lock and user-switch tests; code listens for system
   notifications, while synthetic UI lock was manually verified.
 - Intel runtime, minimum-macOS-14 runtime, controlled memory/energy comparison,

@@ -153,6 +153,8 @@ struct WelcomeView: View {
             } else {
                 Button(store.phase == .locked ? "Unlock Pass" : "Sign In to Proton") { store.phase == .locked ? store.unlock() : store.login() }
                     .buttonStyle(.borderedProminent).controlSize(.large).keyboardShortcut(.defaultAction)
+                if store.phase == .locked && !store.isDemo { Button("Sign In Again") { store.login() } }
+                if store.phase == .welcome { Button("Try direct password sign-in (experimental)") { store.login(interactive: true) }.font(.caption) }
                 if store.phase == .welcome { Button("Explore with demo data") { store.enterDemo() }.accessibilityIdentifier("enterDemo") }
             }
             Text("Independent open source client · GPL-3.0-or-later\nNot affiliated with Proton AG").font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
@@ -186,7 +188,8 @@ struct ItemDetailView: View {
                     }
                 }
                 if detail.hasTOTP {
-                    Button { store.copyTOTP() } label: { Label("Copy verification code", systemImage: "clock.badge.checkmark") }.disabled(store.busy)
+                    Button { store.copyTOTP() } label: { Label("Copy verification code", systemImage: "clock.badge.checkmark") }.disabled(store.busy || !store.canCopyTOTP)
+                    if !store.canCopyTOTP { Text("Verification code access is limited for this account.").font(.caption).foregroundStyle(.secondary) }
                 }
                 if !detail.urls.isEmpty {
                     VStack(alignment: .leading, spacing: 10) {

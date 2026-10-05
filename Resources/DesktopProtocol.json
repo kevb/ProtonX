@@ -1,0 +1,8 @@
+{
+  "source": "WebClients",
+  "revision": "0b1d912065235b251adc545c1d91cb615bfab73b",
+  "clientID": "macos-pass",
+  "version": "1.42.0",
+  "clientType": 5,
+  "deviceForkPath": "/desktop/login"
+}

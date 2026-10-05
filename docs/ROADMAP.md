@@ -2,7 +2,10 @@
 
 ## Before a daily-use Pass release
 
-- Disposable-account end-to-end SRP login, TOTP, two-password and extra-password tests.
+- Validate the new desktop protocol backend on non-CLI-eligible accounts,
+  preserving the original CLI product policy and server product limits.
+- Disposable-account desktop-fork interoperability and cancellation/recovery tests.
+- Resolve direct SRP rejection (HTTP 422/API 8004); TOTP/two/extra-password tests.
 - Session invalidation, revoked key, expired account and network recovery tests.
 - Native Password AutoFill and passkey/security-key support with system extensions.
 - Attachments, sharing, identities/cards/Wi-Fi creation/editing, vault management.

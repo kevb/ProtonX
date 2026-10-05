@@ -1,3 +1,124 @@
+diff --git a/pass-cli/Cargo.toml b/pass-cli/Cargo.toml
+index c1ac6ab..77605aa 100644
+--- a/pass-cli/Cargo.toml
++++ b/pass-cli/Cargo.toml
+@@ -76,3 +76,6 @@ tempfile.workspace = true
+ default = []
+ internal = ["tempfile"]
+ no-login-restriction = []
++
++# Native ProtonX product protocol. This does not alter the default CLI policy.
++protonx-desktop = []
+diff --git a/pass-cli/src/auth/terminal_event_handler.rs b/pass-cli/src/auth/terminal_event_handler.rs
+index 351ad0e..eb35728 100644
+--- a/pass-cli/src/auth/terminal_event_handler.rs
++++ b/pass-cli/src/auth/terminal_event_handler.rs
+@@ -24,7 +24,22 @@ pub struct TerminalEventHandler;
+ 
+ #[async_trait::async_trait]
+ impl AuthEventHandler for TerminalEventHandler {
++    fn web_login_child_client_id(&self) -> &str {
++        if crate::protonx::policy().requires_cli_eligibility { "cli-pass" } else { "macos-pass" }
++    }
+     async fn on_web_login_url_generated(&self, url: &str) -> Result<()> {
++        if std::env::var("PROTONX_NATIVE").as_deref() == Ok("1") {
++            // Fork URLs contain a one-use code and decryption key. Only send
++            // them through the private native challenge pipe, never stdout.
++            use std::io::Write;
++            let mut stderr = std::io::stderr().lock();
++            writeln!(stderr, "PROTONX:{}", serde_json::json!({"prompt": "Complete Proton sign-in", "secure": false, "url": url}))?;
++            stderr.flush()?;
++            drop(stderr);
++            let reply = crate::utils::read_native_reply(&mut std::io::stdin().lock())?;
++            anyhow::ensure!(reply == "started", "Native web authentication cancelled");
++            return Ok(());
++        }
+         println!("\nPlease open the following URL in your browser to complete authentication:");
+         println!("\n{}\n", url);
+         println!("Waiting for authentication to complete...");
+@@ -57,6 +72,9 @@ impl AuthEventHandler for TerminalEventHandler {
+     }
+ 
+     async fn on_error(&self, message: &str) -> Result<()> {
++        if message == "Your account cannot login interactively. Use web login instead" {
++            crate::utils::report_native_error("interactiveUnsupported", None, None);
++        }
+         eprintln!("{}", message);
+         eprintln!("Make sure the password you entered is the right one.");
+         Ok(())
+diff --git a/pass-cli/src/client.rs b/pass-cli/src/client.rs
+index f6909c3..2575108 100644
+--- a/pass-cli/src/client.rs
++++ b/pass-cli/src/client.rs
+@@ -34,7 +34,6 @@ use std::path::PathBuf;
+ use std::sync::Arc;
+ use zeroize::Zeroizing;
+ 
+-const APP_NAME: &str = "cli-pass";
+ 
+ const PASSWORD_ENV_VAR: &str = "PROTON_PASS_PASSWORD";
+ const PASSWORD_FILE_ENV_VAR: &str = "PROTON_PASS_PASSWORD_FILE";
+@@ -126,7 +125,7 @@ pub fn get_username() -> anyhow::Result<String> {
+ }
+ 
+ fn default_app_header() -> String {
+-    format!("{}@{}", APP_NAME, env!("CARGO_PKG_VERSION"))
++    crate::protonx::policy().api_header.to_string()
+ }
+ 
+ pub fn get_app_header() -> String {
+@@ -166,8 +165,8 @@ pub async fn get_client(
+         debug_config: debug_config_from_env(),
+         app_header: get_app_header(),
+         post_login_config: pass::auth::PostLoginConfig::default(),
+-        product_name: "Pass".to_string(),
+-        product_version: env!("CARGO_PKG_VERSION").to_string(),
++        product_name: crate::protonx::policy().product_name.to_string(),
++        product_version: crate::protonx::policy().product_version.to_string(),
+         locale: Some(detect_locale()),
+     };
+ 
+diff --git a/pass-cli/src/commands/item/list.rs b/pass-cli/src/commands/item/list.rs
+index e058ce4..1bec18a 100644
+--- a/pass-cli/src/commands/item/list.rs
++++ b/pass-cli/src/commands/item/list.rs
+@@ -73,6 +73,7 @@ struct ItemSummary {
+     folder_id: Option<FolderId>,
+     title: String,
+     item_type: ItemType,
++    has_totp: bool,
+ }
+ 
+ impl From<&Item> for ItemSummary {
+@@ -88,6 +89,7 @@ impl From<&Item> for ItemSummary {
+             folder_id: item.folder_id.clone(),
+             title: item.content.title.clone(),
+             item_type: ItemType::from(&item.content.content),
++            has_totp: matches!(&item.content.content, ItemContent::Login(login) if !login.totp_uri.is_empty()),
+         }
+     }
+ }
+@@ -422,6 +424,20 @@ mod tests {
+         assert!(matches!(summary.item_type, ItemType::Login));
+     }
+ 
++    #[test]
++    fn totp_summary_exposes_presence_without_uri_or_credentials() {
++        let item = make_item(ItemContent::Login(LoginItem {
++            email: "SYNTHETIC-email".to_string(), username: "SYNTHETIC-username".to_string(),
++            password: "SYNTHETIC-password".to_string(), urls: vec![],
++            totp_uri: "otpauth://totp/SYNTHETIC-secret".to_string(), passkeys: vec![], autofill_urls: vec![],
++        }));
++        let summary = ItemSummary::from(&item);
++        let json = serde_json::to_string(&summary).unwrap();
++        assert!(summary.has_totp);
++        assert!(!json.contains("SYNTHETIC"));
++        assert!(!json.contains("totp_uri"));
++    }
++
+     #[test]
+     fn summary_has_no_secrets_field() {
+         // ItemSummary must NOT contain a `content` field (which would hold secrets).
 diff --git a/pass-cli/src/commands/item/update.rs b/pass-cli/src/commands/item/update.rs
 index f4d1d5a..49e2b2b 100644
 --- a/pass-cli/src/commands/item/update.rs
@@ -15,6 +136,26 @@ index f4d1d5a..49e2b2b 100644
      let parsed_fields = parse_fields(fields)?;
  
      if parsed_fields.is_empty() {
+diff --git a/pass-cli/src/commands/login.rs b/pass-cli/src/commands/login.rs
+index 8bfe858..f57085f 100644
+--- a/pass-cli/src/commands/login.rs
++++ b/pass-cli/src/commands/login.rs
+@@ -47,10 +47,12 @@ pub(crate) async fn after_login(
+     key: FirstTimeSetupKey,
+     store: Arc<RwLock<PassSessionStore>>,
+ ) -> Result<()> {
+-    let login_allowed = is_login_allowed(client)
++    // This check belongs to the CLI product. The native desktop helper uses
++    // the desktop API protocol and retains all server-enforced Pass limits.
++    if crate::protonx::policy().requires_cli_eligibility && !is_login_allowed(client)
+         .await
+-        .context("Error checking login permissions")?;
+-    if !login_allowed {
++        .context("Error checking login permissions")? {
++        crate::utils::report_native_error("eligibility", None, None);
+         eprintln!("Your account is not yet allowed to use our CLI");
+         client.logout().await?;
+         crate::commands::logout::force_logout().await?;
 diff --git a/pass-cli/src/features/keyring.rs b/pass-cli/src/features/keyring.rs
 index 2fed7a9..5673a84 100644
 --- a/pass-cli/src/features/keyring.rs
@@ -29,10 +170,62 @@ index 2fed7a9..5673a84 100644
  const XOR_KEY_LENGTH: usize = 32;
  
 diff --git a/pass-cli/src/main.rs b/pass-cli/src/main.rs
-index 5530278..31572ad 100644
+index 5530278..3122e77 100644
 --- a/pass-cli/src/main.rs
 +++ b/pass-cli/src/main.rs
-@@ -260,7 +260,7 @@ async fn run() -> Result<()> {
+@@ -40,6 +40,7 @@ mod env_config;
+ mod features;
+ mod helpers;
+ mod logs;
++mod protonx;
+ mod storage;
+ mod telemetry;
+ mod utils;
+@@ -167,6 +168,9 @@ enum Commands {
+         #[command(subcommand)]
+         command: commands::share::ShareCommands,
+     },
++    #[cfg(feature = "protonx-desktop")]
++    #[command(name = "native-capabilities", hide = true)]
++    NativeCapabilities,
+     #[command(about = "User operations")]
+     User {
+         #[command(subcommand)]
+@@ -230,12 +234,22 @@ impl Commands {
+ async fn main() -> Result<()> {
+     if let Err(e) = run().await {
+         if e.is_session_invalidated() {
++            utils::report_native_error("sessionInvalidated", None, None);
+             eprintln!(
+                 "Your session has been invalidated and you have been logged out automatically."
+             );
+             eprintln!("Please log in again with: pass login");
+             std::process::exit(1);
+         }
++        if let Some(error) = e.chain().find_map(|source| source.downcast_ref::<muon::Error>()) {
++            let failure = match error.kind() {
++                muon::ErrorKind::Tls => "tls",
++                muon::ErrorKind::Resolve | muon::ErrorKind::Dial | muon::ErrorKind::Connect | muon::ErrorKind::Send => "network",
++                muon::ErrorKind::Auth => "authentication",
++                _ => "operation",
++            };
++            utils::report_native_error(failure, error.http_code().map(|code| code.as_u16()), error.proton_error_code());
++        }
+         return Err(e);
+     }
+ 
+@@ -245,6 +259,10 @@ async fn main() -> Result<()> {
+ async fn run() -> Result<()> {
+     logs::setup_logs();
+     let cli = Cli::parse();
++    if !crate::protonx::policy().requires_cli_eligibility && !cli.command.is_native_desktop_supported() {
++        crate::utils::report_native_error("operation", None, None);
++        anyhow::bail!("This command is not exposed by the native desktop helper");
++    }
+ 
+     if cli.command.is_force_logout() {
+         return commands::logout::force_logout().await;
+@@ -260,7 +278,7 @@ async fn run() -> Result<()> {
  
      // Check for updates in the background (non-blocking, weekly check)
      // This runs for all commands except update itself to avoid recursion
@@ -41,8 +234,138 @@ index 5530278..31572ad 100644
          cli.command,
          Commands::Update { .. } | Commands::Completions { .. }
      ) {
+@@ -375,6 +393,13 @@ async fn run() -> Result<()> {
+         .await;
+ 
+     match cli.command {
++        #[cfg(feature = "protonx-desktop")]
++        Commands::NativeCapabilities => {
++            if protonx::policy().requires_cli_eligibility { return Err(anyhow!("Native desktop transport required")); }
++            let plan = client.get_user_access().await?.plan;
++            println!("{}", serde_json::json!({"totp_limit": plan.totp_limit}));
++            Ok(())
++        }
+         Commands::Logout { .. } => commands::logout::run(client).await,
+         Commands::Info { output } => commands::info::run(client, base_dir, output, store).await,
+         Commands::Inject {
+@@ -407,3 +432,54 @@ async fn run() -> Result<()> {
+         _ => Ok(()),
+     }
+ }
++
++// A desktop protocol identity does not expose the CLI product's automation,
++// agents, export, PAT, permanent deletion or process-injection surface.
++impl Commands {
++    fn is_native_desktop_supported(&self) -> bool {
++        use commands::item::{ItemCommands, create::CreateCommands};
++        match self {
++            Self::Login { username: None, pat: None, .. } | Self::Logout { .. } => true,
++            Self::Vault { command: commands::vault::VaultCommands::List { .. } } => true,
++            Self::Item { command } => match command {
++                ItemCommands::List { show_secrets: false, .. }
++                | ItemCommands::View { .. } | ItemCommands::Trash { .. }
++                | ItemCommands::Untrash { .. } => true,
++                ItemCommands::Create { create_command: CreateCommands::Login { .. } | CreateCommands::Note { .. } } => true,
++                ItemCommands::Update { fields, .. } => fields == &["@stdin"],
++                _ => false,
++            },
++            #[cfg(feature = "protonx-desktop")]
++            Self::NativeCapabilities => true,
++            _ => false,
++        }
++    }
++}
++
++#[cfg(test)]
++mod native_command_tests {
++    use super::*;
++    #[test]
++    fn desktop_rejects_cli_automation_and_bulk_secret_output() {
++        for args in [
++            vec!["pass-cli", "run", "--", "env"],
++            vec!["pass-cli", "item", "list", "--output", "json", "--show-secrets"],
++            vec!["pass-cli", "item", "delete", "--share-id", "synthetic", "--item-id", "synthetic"],
++            vec!["pass-cli", "login", "--pat", "synthetic"],
++            vec!["pass-cli", "item", "update", "--field", "password=synthetic"],
++        ] {
++            assert!(!Cli::try_parse_from(args).unwrap().command.is_native_desktop_supported());
++        }
++    }
++    #[test]
++    fn desktop_accepts_native_ui_contracts() {
++        for args in [
++            vec!["pass-cli", "login"], vec!["pass-cli", "login", "--interactive"],
++            vec!["pass-cli", "vault", "list", "--output", "json"],
++            vec!["pass-cli", "item", "list", "--share-id", "synthetic", "--output", "json"],
++            vec!["pass-cli", "item", "update", "--share-id", "synthetic", "--item-id", "synthetic", "--field", "@stdin"],
++        ] {
++            assert!(Cli::try_parse_from(args).unwrap().command.is_native_desktop_supported());
++        }
++    }
++}
+diff --git a/pass-cli/src/protonx.rs b/pass-cli/src/protonx.rs
+new file mode 100644
+index 0000000..fedd861
+--- /dev/null
++++ b/pass-cli/src/protonx.rs
+@@ -0,0 +1,55 @@
++// Copyright (c) 2026 ProtonX contributors. GPL-3.0-or-later.
++// The desktop protocol header is pinned to the reviewed WebClients revision.
++// It is an API compatibility identifier; the User-Agent identifies ProtonX.
++
++#[derive(Debug, PartialEq, Eq)]
++pub struct ProductPolicy {
++    pub api_header: &'static str,
++    pub product_name: &'static str,
++    pub product_version: &'static str,
++    pub requires_cli_eligibility: bool,
++}
++
++pub fn policy() -> ProductPolicy {
++    select_policy(cfg!(feature = "protonx-desktop"), std::env::var("PROTONX_NATIVE").as_deref() == Ok("1"))
++}
++
++fn select_policy(desktop_build: bool, native_transport: bool) -> ProductPolicy {
++    if desktop_build && native_transport {
++        ProductPolicy {
++            api_header: "macos-pass@1.42.0",
++            product_name: "ProtonX",
++            product_version: "0.1.0",
++            requires_cli_eligibility: false,
++        }
++    } else {
++        ProductPolicy {
++            api_header: concat!("cli-pass@", env!("CARGO_PKG_VERSION")),
++            product_name: "Pass",
++            product_version: env!("CARGO_PKG_VERSION"),
++            requires_cli_eligibility: true,
++        }
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn cli_identity_always_retains_cli_eligibility() {
++        for (desktop_build, native_transport) in [(false, false), (false, true), (true, false)] {
++            let policy = select_policy(desktop_build, native_transport);
++            assert!(policy.api_header.starts_with("cli-pass@"));
++            assert!(policy.requires_cli_eligibility);
++        }
++    }
++
++    #[test]
++    fn explicit_native_desktop_build_uses_desktop_policy() {
++        let policy = select_policy(true, true);
++        assert_eq!(policy.api_header, "macos-pass@1.42.0");
++        assert_eq!(policy.product_name, "ProtonX");
++        assert!(!policy.requires_cli_eligibility);
++    }
++}
 diff --git a/pass-cli/src/utils.rs b/pass-cli/src/utils.rs
-index 474bb3a..c2c867a 100644
+index 474bb3a..7894760 100644
 --- a/pass-cli/src/utils.rs
 +++ b/pass-cli/src/utils.rs
 @@ -28,6 +28,13 @@ const PROTON_PASS_SESSION_DIR_ENV: &str = "PROTON_PASS_SESSION_DIR";
@@ -59,13 +382,13 @@ index 474bb3a..c2c867a 100644
      if secure {
          let input = rpassword::prompt_password(prompt).context("Error prompting for password")?;
          Ok(input.replace("\n", "").trim().to_string())
-@@ -167,3 +174,38 @@ pub fn format_timestamp_with_time(timestamp: Timestamp) -> String {
+@@ -167,3 +174,48 @@ pub fn format_timestamp_with_time(timestamp: Timestamp) -> String {
          zoned.second()
      )
  }
 +
 +// Kept separate so the native protocol is tested without account/network/Keychain access.
-+fn read_native_reply(reader: &mut impl std::io::BufRead) -> anyhow::Result<String> {
++pub(crate) fn read_native_reply(reader: &mut impl std::io::BufRead) -> anyhow::Result<String> {
 +    let mut line = zeroize::Zeroizing::new(String::new());
 +    if std::io::BufRead::read_line(&mut std::io::Read::take(reader, 65_537), &mut line)? == 0 {
 +        anyhow::bail!("Native authentication cancelled");
@@ -96,5 +419,116 @@ index 474bb3a..c2c867a 100644
 +    fn oversized_reply_is_rejected() {
 +        let value = serde_json::to_string(&"x".repeat(65_537)).unwrap() + "\n";
 +        assert!(read_native_reply(&mut Cursor::new(value)).is_err());
++    }
++}
++
++// Native IPC carries only a fixed failure category and numeric protocol codes.
++// Never pass raw error strings or credential data to this function.
++pub fn report_native_error(failure: &'static str, http_status: Option<u16>, api_code: Option<i64>) {
++    if std::env::var("PROTONX_NATIVE").as_deref() == Ok("1") {
++        let record = serde_json::json!({"failure": failure, "httpStatus": http_status, "apiCode": api_code});
++        eprintln!("PROTONX_ERROR:{record}");
++        let _ = std::io::stderr().flush();
++    }
++}
+diff --git a/pass/src/auth/callbacks.rs b/pass/src/auth/callbacks.rs
+index 72c33c5..316d156 100644
+--- a/pass/src/auth/callbacks.rs
++++ b/pass/src/auth/callbacks.rs
+@@ -21,6 +21,8 @@ use anyhow::Result;
+ 
+ #[async_trait::async_trait]
+ pub trait AuthEventHandler: Send + Sync {
++    // The existing device-fork flow can target a native desktop product too.
++    fn web_login_child_client_id(&self) -> &str { "cli-pass" }
+     async fn on_web_login_url_generated(&self, url: &str) -> Result<()>;
+     async fn on_poll_progress(&self, attempt: u32, max_attempts: u32) -> Result<()>;
+     async fn on_auth_success(&self, message: &str) -> Result<()>;
+diff --git a/pass/src/auth/interactive_login.rs b/pass/src/auth/interactive_login.rs
+index be73653..e543363 100644
+--- a/pass/src/auth/interactive_login.rs
++++ b/pass/src/auth/interactive_login.rs
+@@ -94,8 +94,25 @@ pub async fn perform_interactive_login<C: PassClientContext>(
+         }
+ 
+         LoginFlow::Failed { reason, .. } => {
+-            let msg = format!("Authentication failed: {reason}");
+-            event_handler.on_error(&msg).await?;
++            if std::env::var("PROTONX_NATIVE").as_deref() == Ok("1") {
++                // Preserve a useful failure stage without returning the raw server
++                // reason, which can contain user identifiers or private details.
++                let failure = std::error::Error::source(&reason)
++                    .and_then(|source| source.downcast_ref::<muon::Error>())
++                    .map(|error| match error.kind() {
++                        muon::ErrorKind::Tls => "tls",
++                        muon::ErrorKind::Resolve | muon::ErrorKind::Dial | muon::ErrorKind::Connect | muon::ErrorKind::Send => "network",
++                        _ => "authentication",
++                    }).unwrap_or("authentication");
++                let error: muon::Error = reason.into();
++                let record = serde_json::json!({"failure": failure, "httpStatus": error.http_code().map(|code| code.as_u16()), "apiCode": error.proton_error_code()});
++                use std::io::Write;
++                eprintln!("PROTONX_ERROR:{record}");
++                let _ = std::io::stderr().flush();
++            } else {
++                let msg = format!("Authentication failed: {reason}");
++                event_handler.on_error(&msg).await?;
++            }
+             bail!("Authentication failed");
+         }
+     };
+diff --git a/pass/src/auth/web_login.rs b/pass/src/auth/web_login.rs
+index 389475a..f399e07 100644
+--- a/pass/src/auth/web_login.rs
++++ b/pass/src/auth/web_login.rs
+@@ -42,7 +42,6 @@ const POLL_INTERVAL_SECONDS: u64 = 10;
+ const MAX_POLL_ATTEMPTS: u32 = 60; // 60 times every 10 seconds -> 10 minutes total
+ const MAX_CONSECUTIVE_FAILURES: u32 = 3;
+ const FAILURE_RETRY_INTERVAL_SECONDS: u64 = 5;
+-const CHILD_CLIENT_ID: &str = "cli-pass";
+ 
+ #[derive(Debug, serde::Deserialize)]
+ struct SessionForkResponse {
+@@ -248,11 +247,12 @@ fn build_web_login_url(
+     env: &Environment,
+     user_code: &str,
+     encryption_key: &[u8],
++    child_client_id: &str,
+ ) -> Result<String> {
+     let account_url = get_account_url_for_env(env)?;
+ 
+     let encoded_key = base64::engine::general_purpose::STANDARD.encode(encryption_key);
+-    let payload = format!("0:{}:{}:{}", user_code, encoded_key, CHILD_CLIENT_ID);
++    let payload = format!("0:{}:{}:{}", user_code, encoded_key, child_client_id);
+ 
+     let encoded_payload = urlencoding::encode(&payload);
+ 
+@@ -284,7 +284,7 @@ pub async fn perform_web_login<C: PassClientContext, T: Sleep>(
+     info!("User Code: {}", fork_response.user_code);
+ 
+     let encryption_key = crate::domain::crypto::generate_encryption_key();
+-    let url = build_web_login_url(&env, &fork_response.user_code, &encryption_key)
++    let url = build_web_login_url(&env, &fork_response.user_code, &encryption_key, event_handler.web_login_child_client_id())
+         .context("Error building web login URL")?;
+ 
+     // Notify event handler of URL generation
+@@ -325,3 +325,20 @@ pub async fn perform_web_login<C: PassClientContext, T: Sleep>(
+         session_payload,
+     })
+ }
++
++#[cfg(test)]
++mod protonx_tests {
++    use super::*;
++    #[test]
++    fn desktop_fork_targets_desktop_product_and_keeps_key_in_fragment() {
++        let env = Environment::from(muon::env::Prod::default());
++        let key = [42u8; 32];
++        for child in ["cli-pass", "macos-pass"] {
++            let url = build_web_login_url(&env, "SYNTHETIC-CODE", &key, child).unwrap();
++            let (public_url, fragment) = url.split_once('#').unwrap();
++            assert_eq!(public_url, "https://account.proton.me/desktop/login?app=pass");
++            let payload = urlencoding::decode(fragment.strip_prefix("payload=").unwrap()).unwrap();
++            assert_eq!(payload, format!("0:SYNTHETIC-CODE:{}:{child}", base64::engine::general_purpose::STANDARD.encode(key)));
++        }
 +    }
 +}

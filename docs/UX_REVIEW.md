@@ -7,7 +7,8 @@ not a usability study or an account-based walkthrough of official installed apps
 | --- | --- | --- |
 | Menu-bar slots | Separate product identities can duplicate persistent controls in a narrow menu bar | One optional suite item with direct product actions; users can remove it |
 | Product separation | Mail and a password vault have different tasks and lock lifetimes | Separate native windows and sessions; shared app commands, preferences and lock action |
-| Login | Desktop web/browser handoffs interrupt the app's context | Native Pass username/password/verification fields driven by Proton's client; Mail still authenticates through Bridge |
+| Login | Desktop web/browser handoffs interrupt the app's context | Proton's desktop account handoff in macOS authentication services; direct native fields remain experimental after a server rejection; Mail uses Bridge |
+| Sign-in failures | A generic failure cannot distinguish credentials, networking and product eligibility | Fixed failure categories and numeric HTTP/API codes; no raw server messages or account identifiers |
 | Keychain | Session ownership and local encryption must be deliberate | Dedicated Pass Keychain namespace and encrypted profile; separate Mail credentials; no account password in preferences |
 | Clipboard | Copies may persist or sync; a timer must not erase the user's next unrelated copy | Concealed/transient pasteboard markers and a 30-second change-count lease; lock clears owned copy only |
 | Windows | Electron windows can miss expected native sizing, toolbars and keyboard behavior | SwiftUI split views, standard resizing/toolbar/search, Window menu and product shortcuts |

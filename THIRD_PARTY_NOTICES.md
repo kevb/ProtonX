@@ -10,10 +10,13 @@ branding is redistributed.
 Copyright (c) 2026 Proton AG. GPL-3.0-or-later.
 Source: https://github.com/protonpass/pass-cli
 Revision: see `upstream.lock.json`. Changes: `patches/pass-cli.patch`.
-The helper retains the original encryption, sync, account eligibility checks,
+The helper retains the original encryption, sync, server product checks,
 and macOS Keychain implementation. The patch adds private native credential
-prompts, stdin field updates, a separate Keychain namespace, and suppresses
-upstream update checks in native mode. Dependency resolutions are pinned in
+prompts, stdin field updates, a separate Keychain namespace, safe failure
+categories/numeric codes, an explicit desktop protocol policy, a parameterized
+desktop account-fork target, a restricted desktop command surface, and suppresses
+upstream update checks in native mode. The original CLI policy retains CLI
+eligibility; the native desktop build follows the desktop product protocol. Dependency resolutions are pinned in
 `Resources/PassHelper.lock`. The helper also includes Proton Pass Common,
 Proton crypto/account libraries, Muon, and other Rust dependencies. Their
 original licenses and notices must accompany any binary distribution.

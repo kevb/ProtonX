@@ -3,7 +3,8 @@ import Foundation
 public struct AuthChallenge: Codable, Equatable, Sendable {
     public let prompt: String
     public let secure: Bool
-    public init(prompt: String, secure: Bool) { self.prompt = prompt; self.secure = secure }
+    public let url: String?
+    public init(prompt: String, secure: Bool, url: String? = nil) { self.prompt = prompt; self.secure = secure; self.url = url }
     public var title: String {
         if prompt.localizedCaseInsensitiveContains("TOTP") { return "Verification code" }
         if prompt.contains("second password") { return "Mailbox password" }
@@ -49,10 +50,13 @@ public final class PassService: Sendable {
             return data
         } catch { await gate.release(); throw error }
     }
-    public func login(challenge: @escaping ChallengeHandler) async throws {
-        _ = try await execute(HelperCommand(["login", "--interactive"]), challenge: challenge)
+    public func login(interactive: Bool = true, challenge: @escaping ChallengeHandler) async throws {
+        _ = try await execute(HelperCommand(interactive ? ["login", "--interactive"] : ["login"]), challenge: challenge)
     }
     public func logout() async throws { _ = try await execute(HelperCommand(["logout"])) }
+    public func capabilities() async throws -> PassCapabilities {
+        try JSONDecoder().decode(PassCapabilities.self, from: await execute(HelperCommand(["native-capabilities"])))
+    }
     public func vaults() async throws -> [Vault] {
         struct List: Decodable { let vaults: [Vault] }
         return try JSONDecoder().decode(List.self, from: await execute(HelperCommand(["vault", "list", "--output", "json"]))).vaults

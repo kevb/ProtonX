@@ -14,15 +14,44 @@ public struct PassItem: Codable, Identifiable, Hashable, Sendable {
     public let shareID: String
     public let title: String
     public let kind: String
+    public let hasTOTP: Bool?
+    public let createdAt: String?
     public var id: String { shareID + ":" + itemID }
-    enum CodingKeys: String, CodingKey { case itemID = "id"; case shareID = "share_id"; case title; case kind = "item_type" }
-    public init(itemID: String, shareID: String, title: String, kind: String) {
+    enum CodingKeys: String, CodingKey { case itemID = "id"; case shareID = "share_id"; case title; case kind = "item_type"; case hasTOTP = "has_totp"; case createdAt = "create_time" }
+    public init(itemID: String, shareID: String, title: String, kind: String, hasTOTP: Bool? = nil, createdAt: String? = nil) {
+        self.hasTOTP = hasTOTP; self.createdAt = createdAt
         self.itemID = itemID; self.shareID = shareID; self.title = title; self.kind = kind
     }
     public var symbol: String {
         switch kind { case "login": "key.fill"; case "note": "note.text"; case "alias": "at";
         case "credit_card": "creditcard"; case "identity": "person.text.rectangle";
         case "ssh_key": "terminal"; case "wifi": "wifi"; default: "doc.text" }
+    }
+}
+
+/// The desktop ranks limited TOTP access by creation time across active logins.
+/// A missing capability record or incomplete metadata must not imply unlimited access.
+public struct PassCapabilities: Decodable, Sendable {
+    public let totpLimit: Int?
+    enum CodingKeys: String, CodingKey { case totpLimit = "totp_limit" }
+    public init(totpLimit: Int?) { self.totpLimit = totpLimit }
+    public init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        guard values.contains(.totpLimit) else { throw ProtonXError.invalidResponse }
+        totpLimit = try values.decodeIfPresent(Int.self, forKey: .totpLimit)
+        guard totpLimit == nil || (0...65535).contains(totpLimit!) else { throw ProtonXError.invalidResponse }
+    }
+    public func allowsTOTP(itemID: String, items: [PassItem]) -> Bool {
+        guard let limit = totpLimit else { return true }
+        guard limit > 0 else { return false }
+        let logins = items.filter { $0.kind == "login" }
+        guard logins.allSatisfy({ $0.hasTOTP != nil }) else { return false }
+        let ranked = logins.enumerated().filter { $0.element.hasTOTP == true }
+        guard ranked.allSatisfy({ $0.element.createdAt?.isEmpty == false }) else { return false }
+        return ranked.sorted {
+            if $0.element.createdAt == $1.element.createdAt { return $0.offset < $1.offset }
+            return $0.element.createdAt! < $1.element.createdAt!
+        }.prefix(limit).contains { $0.element.id == itemID }
     }
 }
 
@@ -107,9 +136,34 @@ public struct LoginDraft: Codable, Sendable {
     }
 }
 
+public enum HelperFailure: String, Codable, Sendable {
+    case eligibility, authentication, network, tls, sessionInvalidated, interactiveUnsupported, operation
+}
+public struct HelperDiagnostic: Codable, Equatable, Sendable {
+    public let failure: HelperFailure
+    public let httpStatus: Int?
+    public let apiCode: Int?
+    public var message: String {
+        let explanation: String
+        switch failure {
+        case .eligibility: explanation = "Proton authenticated this account, but it is not eligible for Proton Pass CLI access. ProtonX currently uses that client."
+        case .authentication: explanation = "Proton could not complete authentication. Check your sign-in details and any required verification method."
+        case .network: explanation = "The Proton client could not connect to Proton. Check your connection and try again."
+        case .tls: explanation = "The Proton client could not verify its secure connection. Certificate verification remains enabled."
+        case .sessionInvalidated: explanation = "Proton invalidated this session. Sign in again."
+        case .interactiveUnsupported: explanation = "This account requires a sign-in method that ProtonX’s native login does not yet support."
+        case .operation: explanation = "The Proton client could not complete this operation."
+        }
+        var codes: [String] = []
+        if let httpStatus, (100...599).contains(httpStatus) { codes.append("HTTP \(httpStatus)") }
+        if let apiCode, (0...Int(Int32.max)).contains(apiCode) { codes.append("API \(apiCode)") }
+        return explanation + (codes.isEmpty ? "" : " (" + codes.joined(separator: ", ") + ")")
+    }
+}
+
 public enum ProtonXError: Error, LocalizedError, Equatable, Sendable {
     case helperMissing, invalidResponse, cancelled, timeout, outputTooLarge
-    case helperFailed(Int32), invalidInput(String)
+    case helperFailed(Int32), helperDiagnostic(HelperDiagnostic), invalidInput(String)
     public var errorDescription: String? {
         switch self {
         case .helperMissing: "The Proton Pass helper is missing. Build the app with scripts/build-app.sh."
@@ -117,13 +171,23 @@ public enum ProtonXError: Error, LocalizedError, Equatable, Sendable {
         case .cancelled: "The operation was cancelled."
         case .timeout: "The Proton client did not respond in time. Try again."
         case .outputTooLarge: "The Proton client response exceeded the size limit."
-        case .helperFailed: "The Proton client could not complete this operation. Check your connection, credentials, and CLI plan eligibility. Your existing data has not been replaced."
+        case .helperFailed: "The Proton client could not complete this operation. Check your connection and sign-in status. Your existing data has not been replaced."
+        case .helperDiagnostic(let diagnostic): diagnostic.message
         case .invalidInput(let text): text
         }
     }
 }
 
 public enum URLPolicy {
+    /// This URL carries a single-use fork secret. Never log or expose it in an error.
+    public static func authenticationURL(_ value: String) -> URL? {
+        guard value.utf8.count < 8192, let components = URLComponents(string: value),
+              components.scheme == "https", components.host == "account.proton.me",
+              components.port == nil, components.user == nil, components.password == nil,
+              components.path == "/desktop/login", components.queryItems == [URLQueryItem(name: "app", value: "pass")],
+              let fragment = components.fragment, fragment.hasPrefix("payload="), fragment.count > 8 else { return nil }
+        return components.url
+    }
     public static func webURL(_ value: String) -> URL? {
         guard let url = URL(string: value), let scheme = url.scheme?.lowercased(), ["https", "http"].contains(scheme),
               url.host?.isEmpty == false, url.user == nil, url.password == nil else { return nil }

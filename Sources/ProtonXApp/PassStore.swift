@@ -24,12 +24,19 @@ final class PassStore: ObservableObject {
     private var selectionEpoch = SessionEpoch()
     private var operation: Task<Void, Never>?
     private var selectionTask: Task<Void, Never>?
+    private var capabilities: PassCapabilities?
     private var demoDetails: [String: ItemDetail] = [:]
     let service: PassService
     let sessionDirectory: URL
     private var authContext: LAContext?
+    private let webAuthentication = NativeWebAuthentication()
     var filteredItems: [PassItem] { ItemSearch.filter(items, query: query, vaultID: selectedVault, kind: kind) }
     var currentItem: PassItem? { items.first { $0.id == selectedItem } }
+    var canCopyTOTP: Bool {
+        if isDemo { return true }
+        guard !showingTrash, let selectedItem, let capabilities else { return false }
+        return capabilities.allowsTOTP(itemID: selectedItem, items: items)
+    }
     var hasSession: Bool { FileManager.default.fileExists(atPath: sessionDirectory.appendingPathComponent(".session/session.json").path) }
 
     init() {
@@ -40,17 +47,24 @@ final class PassStore: ObservableObject {
         service = PassService(runner: NativeProcess(executable: helper, directory: sessionDirectory))
         phase = hasSession ? .locked : .welcome
     }
-    func login() {
+    func login(interactive: Bool = false) {
         guard !busy else { return }
         isDemo = false
         perform { [self] in
-            try await service.login { [weak self] prompt in
+            defer { webAuthentication.cancel() }
+            try await service.login(interactive: interactive) { [weak self] prompt in
                 guard let self else { throw ProtonXError.cancelled }
+                if let url = prompt.url { return try await self.beginWebAuthentication(url) }
                 return try await self.requestCredential(prompt)
             }
             phase = .open
             try await loadSnapshot()
         }
+    }
+    private func beginWebAuthentication(_ value: String) throws -> String {
+        guard let url = URLPolicy.authenticationURL(value) else { throw ProtonXError.invalidResponse }
+        try webAuthentication.start(url: url) { [weak self] in self?.cancelLogin() }
+        return "started"
     }
     private func requestCredential(_ prompt: AuthChallenge) async throws -> String {
         let id = UUID()
@@ -88,11 +102,12 @@ final class PassStore: ObservableObject {
     func lock() {
         epoch.invalidate(); selectionEpoch.invalidate()
         authContext?.invalidate(); authContext = nil
+        webAuthentication.cancel()
         operation?.cancel(); selectionTask?.cancel(); service.cancel()
         let continuation = credentialContinuation; credentialContinuation = nil; credentialRequestID = nil; challenge = nil
         continuation?.resume(throwing: ProtonXError.cancelled)
         ClipboardController.shared.clearOwned()
-        vaults = []; items = []; detail = nil; demoDetails = [:]
+        vaults = []; items = []; detail = nil; demoDetails = [:]; capabilities = nil
         selectedItem = nil; selectedVault = nil; query = ""; busy = false; error = nil
         phase = hasSession || isDemo ? .locked : .welcome
     }
@@ -100,12 +115,13 @@ final class PassStore: ObservableObject {
     private func loadSnapshot() async throws {
         guard !isDemo else { return }
         let captured = epoch.value
+        let nextCapabilities = try await service.capabilities()
         let nextVaults = try await service.vaults()
         var nextItems: [PassItem] = []
         for vault in nextVaults { try Task.checkCancellation(); nextItems += try await service.items(in: vault, trashed: showingTrash) }
         try Task.checkCancellation()
         guard epoch.accepts(captured), phase == .open else { return }
-        vaults = nextVaults; items = nextItems
+        capabilities = nextCapabilities; vaults = nextVaults; items = nextItems
         if let selectedItem, !items.contains(where: { $0.id == selectedItem }) { self.selectedItem = nil; detail = nil }
         if let selectedVault, !vaults.contains(where: { $0.id == selectedVault }) { self.selectedVault = nil }
     }
@@ -165,6 +181,7 @@ final class PassStore: ObservableObject {
         }
     }
     func copyTOTP() {
+        guard canCopyTOTP else { error = "Verification code access is limited for this account."; return }
         guard let item = currentItem else { return }
         perform { [self] in
             let code = isDemo ? "123456" : try await service.totp(item)
