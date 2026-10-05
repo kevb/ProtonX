@@ -8,6 +8,12 @@ attempted with the account owner's authorization; no vault contents were accesse
 
 - Native Swift app compiles in debug and release; release app bundle is locally
   ad-hoc signed and verifies with strict code-signature verification.
+- Independent GitHub CI on macOS 15 Intel passed Swift contracts, both synthetic
+  Bridge TLS modes and the release app build (run 37376926535).
+- Local corresponding-source archive matches every tracked input of the patched
+  helper. Its desktop-feature release build passes with `--offline --locked` and
+  a fresh Cargo home containing no registry cache. Git workspace-root licenses
+  are included separately; package-level license gaps are recorded before release.
 - 34 Swift unit/contract/transport tests pass. One optional Bridge integration
   test is explicitly disabled without the local fixture configuration.
 - Synthetic TLS IMAP/SMTP integration: verified certificate/hostname, mailbox
@@ -63,7 +69,7 @@ coverage; system-level interaction is not fully automated.
   authorized live attempt used a temporary credential in local Keychain.
 - Automated sleep/screen-lock and user-switch tests; code listens for system
   notifications, while synthetic UI lock was manually verified.
-- Intel runtime, minimum-macOS-14 runtime, controlled memory/energy comparison,
+- Intel GUI interaction, minimum-macOS-14 runtime, controlled memory/energy comparison,
   independent security audit, Developer ID signing/notarization.
 - Full official-client feature parity: autofill/passkeys/attachments/sharing,
   account switching/offline Pass UI, direct Mail auth, and Drive.
