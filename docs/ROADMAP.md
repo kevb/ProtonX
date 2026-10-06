@@ -4,6 +4,34 @@ See the [2026-10-06 official-client gap analysis](GAP_ANALYSIS.md) for the
 ordered Pass-first work plan and acceptance gates. Sign-in and a verified
 end-to-end workflow come before additional products.
 
+## Next priorities (2026-10-06)
+
+1. **Finish the secure-storage foundation already in progress.** The opt-in Mail
+   candidate encrypts its databases and supports saved-first loading, but the
+   normal app does not enable it. Complete whole-profile migration/recovery,
+   protect decrypted attachment/MIME files, preserve pending drafts/sends and
+   prevent older builds reopening a migrated profile. Measure startup integrity
+   checks before promising faster opening. See [the storage review](LOCAL_STORAGE.md).
+2. **Make Pass dependable across launches and network failures.** Validate session
+   recovery, edits/conflicts/Trash restoration and interoperability with another
+   client. Then add an encrypted, policy-aware read-only item cache through Proton's
+   existing storage layer, with useful freshness and recovery states.
+3. **Turn native AutoFill feasibility into a usable Pass feature.** Establish the
+   signed extension and locked credential-broker boundary, verify website matching
+   and user consent, then test Safari/system integration. Passkeys remain a separate
+   follow-on; a compiling extension probe is not working AutoFill.
+4. **Complete Mail's everyday workflow.** Validate actual send/reply delivery and
+   enabled Gmail sending identities; add read/unread, archive/trash, threading and
+   attachments. Preserve drafts and distinguish confirmed delivery from uncertain
+   send outcomes.
+5. **Polish suite navigation and installation.** Add a visible product switcher,
+   establish reliable installed-app updates and signing/Keychain continuity, then
+   provide **ProtonX Mail** and **ProtonX Pass** Spotlight launchers. Keep independent
+   product windows/sessions and the optional single shared menu-bar item.
+
+Repository presentation is backlogged below. Drive remains exploratory; prioritise
+Pass and the shared macOS experience before expanding the suite.
+
 ## Completed native foundations
 
 - Atomic metadata/Trash snapshot, permission-aware actions and last-success state.
@@ -12,7 +40,10 @@ end-to-end workflow come before additional products.
 - Revision conflict protection, draft retention and acknowledged-save handling.
 - Compile-only AutoFill feasibility contracts and offline storage review.
 
-These have synthetic/source validation; remote writes and recovery are still gates.
+These have synthetic/source validation. The user has also reported successful
+live Pass login creation, sync and deletion, and native Mail sign-in/read access.
+That does not establish broader edit/recovery interoperability, Mail delivery or
+release readiness.
 
 ## Before a daily-use Pass release
 
@@ -32,13 +63,14 @@ These have synthetic/source validation; remote writes and recovery are still gat
 - **Required onboarding: native Proton sign-in → decrypted inbox → session
   restoration.** No manual server settings in the normal experience. See
   [the direct Mail core decision and acceptance gates](MAIL_NATIVE_SIGN_IN.md).
-- Native Mail core build, private IPC, native authentication states, reader and
-  separate session restore are implemented with synthetic tests. Prove real
-  sign-in/decryption/restart on a designated account and review release licensing.
-- Native credential/challenge UI with separate Mail session/Keychain storage;
-  synthetic contracts followed by designated disposable-account validation.
-- Verified account interoperability and richer MIME parsing.
-- Paging, threading, read/unread controls, archive/trash, reply and attachments.
+- Native Mail core, private IPC, native authentication UI, separate session storage,
+  paged reader, composer/reply, sending-identity selection and draft handling are
+  implemented. The user has reported live sign-in and reading; verify restart,
+  challenge/recovery flows and release licensing separately.
+- Verify send/reply delivery, including enabled Gmail sending identities, on a
+  designated test account. Do not infer successful delivery from composer UI.
+- Threading, read/unread controls, archive/trash, attachments and richer MIME handling.
+- Test interrupted sends, ambiguous delivery and draft recovery across upgrades.
 - Retain Bridge as an optional prototype/compatibility path. Its lifecycle work
   is secondary to proving direct native Mail onboarding.
 
@@ -55,12 +87,40 @@ These have synthetic/source validation; remote writes and recovery are still gat
 
 ## Local storage and faster opening
 
-- Distinguish initial loading/failure from genuinely empty vaults and folders.
-- Resolve the Mail core's plaintext database/body persistence before expanding
-  cached browsing or calling it secure. See [the storage/startup review](LOCAL_STORAGE.md).
-- Show saved Mail metadata after local unlock, then refresh in the background,
-  with accurate freshness and failure state and stable selection.
+- Initial loading/failure and genuinely empty states are now distinct; existing
+  content remains visible during refresh.
+- Finish the opt-in encrypted Mail candidate before enabling it in normal builds:
+  whole-profile migration/recovery, attachment/MIME file protection, old-build
+  exclusion and SDK pending-send safety remain gates. See
+  [the storage/startup review](LOCAL_STORAGE.md).
+- Validate the candidate's saved-first loading through restart/offline recovery and
+  measured cold/warm workloads. Accurate freshness, failure retention and stable
+  selection have synthetic contracts; no measured startup speedup is established.
 - Persist Pass item revisions through Proton's existing encryption layer, subject
   to product/organisation offline policy; start with read-only access.
 - Measure time to first list and selected detail on matching synthetic cold/warm
   workloads. Storage migration, wrong keys, corruption and lock races are gates.
+
+## Repository presentation (backlog)
+
+Build a polished public showcase after the core screens and navigation settle.
+Use fictional synthetic content rather than redacting real account screenshots.
+
+Existing building blocks: an original app icon, adaptive Pass design colours,
+isolated synthetic Pass/Mail preview windows, login/note editors, Mail reader and
+composer/reply scenes, and a forced-light preview build.
+
+- Enrich the synthetic demo set with consistent fictional vaults, items, mail
+  conversations and timestamps. Use reserved example domains and clearly dummy
+  credentials; previews must never read installed account data or deliver mail.
+- Provide repeatable scenes for Pass browsing/login/note editing, Mail inbox/reader/
+  reply, and suite navigation/settings. Show supported behavior; label candidate
+  or planned features explicitly.
+- Add deterministic light and dark capture configurations, fixed window sizes,
+  consistent selection and a capture guide. Check small GitHub display sizes,
+  readability and accessibility; exclude desktop clutter and notifications.
+- Prepare a compact README gallery with captions/alt text, a hero image and a
+  matching GitHub social preview. Keep source assets and regeneration instructions
+  in the repository, with the app revision recorded for each capture set.
+- Retain independent ProtonX branding, asset attribution and license notices.
+  Publish the showcase only when it accurately represents the available build.
