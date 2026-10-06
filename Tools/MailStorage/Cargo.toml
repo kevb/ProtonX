@@ -20,7 +20,7 @@ default = ["encryption"]
 encryption = ["dep:rusqlite", "dep:zeroize", "dep:tempfile", "dep:serde", "dep:serde_json", "dep:sha2"]
 
 [dev-dependencies]
-mail-common = { workspace = true, features = ["test-utils"] }
+mail-common = { workspace = true, features = ["test-utils", "protonx-encrypted"] }
 mail-stash = { workspace = true, features = ["protonx-encrypted"] }
 mail-crypto-inbox = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

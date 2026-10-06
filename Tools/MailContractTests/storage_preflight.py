@@ -18,7 +18,7 @@ request = json.dumps({"schema": 1, "id": 1, "command": {"method": "restore"}}) +
 
 def refused(root, expected):
     response = subprocess.run([executable], input=request.encode(), capture_output=True,
-                              env={"PROTONX_MAIL_DIR": str(root)}, timeout=10)
+                              env={"PROTONX_MAIL_DIR": str(root)}, timeout=45)
     assert response.returncode == 0, "Candidate did not exit cleanly"
     # Closed failure only; never display helper stdout/stderr.
     reply = json.loads(response.stdout)
@@ -64,6 +64,20 @@ with tempfile.TemporaryDirectory(prefix="ProtonX-synthetic-storage-") as directo
         refused(root, "storage_version_unsupported")
         assert database.read_bytes() == before
         database.unlink()
+    if not legacy:
+        cache = root / "cache/attachments/1"
+        cache.mkdir(parents=True)
+        attachment = cache / "synthetic-private-name.txt"
+        attachment.write_bytes(b"SYNTHETIC-LEGACY-ATTACHMENT")
+        refused(root, "storage_upgrade_required")
+        assert attachment.read_bytes() == b"SYNTHETIC-LEGACY-ATTACHMENT"
+        attachment.unlink()
+        attachment.symlink_to(target)
+        refused(root, "storage_unavailable")
+        attachment.unlink()
+        os.link(target, attachment)
+        refused(root, "storage_unavailable")
+        attachment.unlink()
     (root / ".storage-format").write_bytes(b"unknown-format")
     refused(root, "storage_unavailable")
-print(f"{8 if legacy else 7} synthetic helper preflight refusals passed; profiles retained")
+print(f"{8 if legacy else 10} synthetic helper preflight refusals passed; profiles retained")

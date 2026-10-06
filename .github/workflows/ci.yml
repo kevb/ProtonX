@@ -24,6 +24,10 @@ jobs:
         run: scripts/test-credential-provider.sh
       - name: Native app build
         run: swift build -c release
+      - name: Native Spotlight launchers and atomic installation contracts
+        run: |
+          scripts/build-launchers.sh
+          python3 Tools/ProductLauncher/test_install.py
   helper:
     runs-on: macos-15
     steps:

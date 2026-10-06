@@ -4,6 +4,9 @@ import ProtonXCore
 @main
 struct ProtonXApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
+    @FocusedValue(\.protonXProduct) private var focusedProduct
+    @FocusedValue(\.protonXCanCreate) private var focusedCanCreate
+    @FocusedValue(\.protonXCanRefresh) private var focusedCanRefresh
     @StateObject private var pass = PassStore()
     var body: some Scene {
         Window("ProtonX Pass", id: "pass") {
@@ -13,15 +16,22 @@ struct ProtonXApp: App {
             CommandGroup(replacing: .appInfo) { Button("About ProtonX…") { NSApp.orderFrontStandardAboutPanel(options: [
                 .applicationName: "ProtonX", .applicationVersion: "0.1.0", .credits: NSAttributedString(string: "Independent native clients for Proton.\nGPL-3.0-or-later. No warranty.\nCopyright © 2026 ProtonX contributors.\nIncludes Proton Pass and Mail © Proton AG.\nMail helper: AGPL-3.0-only.\nSource and license: github.com/kevb/ProtonX\nNot affiliated with Proton AG.")]) } }
             CommandGroup(replacing: .newItem) {
-                Button("New Pass Item") { NotificationCenter.default.post(name: .protonXNewItem, object: nil) }.keyboardShortcut("n").disabled(!pass.canCreate)
+                Button(focusedProduct == .mail ? "New Message" : "New Pass Item") {
+                    NotificationCenter.default.post(name: focusedProduct == .mail ? .protonXNewMessage : .protonXNewItem, object: nil)
+                }.keyboardShortcut("n").disabled(focusedCanCreate != true)
             }
             CommandMenu("Products") {
                 Button("Open Pass") { SystemIntegration.shared.openPass?() }.keyboardShortcut("1")
                 Button("Open Mail") { SystemIntegration.shared.openMail?() }.keyboardShortcut("2")
                 Divider()
                 Button("Lock ProtonX") { SystemIntegration.shared.lockSuite?() }.keyboardShortcut("l")
-                Button("Search Pass") { SystemIntegration.shared.openPass?(); NotificationCenter.default.post(name: .protonXFocusSearch, object: nil) }.keyboardShortcut("f")
-                Button("Refresh Pass") { pass.refresh() }.keyboardShortcut("r").disabled(pass.phase != .open || pass.busy || pass.isDemo)
+                Button(focusedProduct == .mail ? "Search Mail" : "Search Pass") {
+                    if focusedProduct == .mail { NotificationCenter.default.post(name: .protonXFocusMailSearch, object: nil) }
+                    else { SystemIntegration.shared.openPass?(); NotificationCenter.default.post(name: .protonXFocusSearch, object: nil) }
+                }.keyboardShortcut("f")
+                Button(focusedProduct == .mail ? "Refresh Mail" : "Refresh Pass") {
+                    if focusedProduct == .mail { NotificationCenter.default.post(name: .protonXRefreshMail, object: nil) } else { pass.refresh() }
+                }.keyboardShortcut("r").disabled(focusedCanRefresh != true)
             }
             CommandGroup(replacing: .help) {
                 Link("ProtonX Documentation", destination: URL(string: "https://github.com/kevb/ProtonX#readme")!)

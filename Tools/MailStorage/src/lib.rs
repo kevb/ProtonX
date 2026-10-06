@@ -7,3 +7,8 @@ mod encryption;
 pub use encryption::*;
 #[cfg(feature = "encryption")]
 pub mod migration;
+
+#[cfg(feature = "encryption")]
+mod blob;
+#[cfg(feature = "encryption")]
+pub use blob::*;

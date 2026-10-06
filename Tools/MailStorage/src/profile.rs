@@ -179,3 +179,28 @@ impl ProfileGuard {
         Ok(())
     }
 }
+
+/// SDK attachment/embedded-MIME files, including legacy names. Inspect before
+/// Keychain access so an old plaintext cache cannot silently enter encrypted mode.
+pub fn attachment_files(root: &Path) -> Result<Vec<PathBuf>, StorageError> {
+    fn visit(path: &Path, output: &mut Vec<PathBuf>, depth: usize) -> Result<(), StorageError> {
+        if depth > 8 || output.len() >= 4096 { return Err(StorageError::InvalidProfile); }
+        let metadata = match fs::symlink_metadata(path) {
+            Ok(value) => value,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(_) => return Err(StorageError::Unavailable),
+        };
+        if metadata.file_type().is_symlink() { return Err(StorageError::InvalidProfile); }
+        if metadata.is_dir() {
+            for entry in fs::read_dir(path).map_err(|_| StorageError::Unavailable)? {
+                visit(&entry.map_err(|_| StorageError::Unavailable)?.path(), output, depth + 1)?;
+            }
+        } else if !metadata.is_file() || metadata.nlink() != 1 { return Err(StorageError::InvalidProfile); }
+        else { output.push(path.to_owned()); }
+        Ok(())
+    }
+    let mut output = vec![];
+    visit(&root.join("cache/attachments"), &mut output, 0)?;
+    output.sort();
+    Ok(output)
+}

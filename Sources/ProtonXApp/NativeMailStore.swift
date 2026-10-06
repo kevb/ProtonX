@@ -24,6 +24,13 @@ final class NativeMailStore: ObservableObject {
     @Published private(set) var draft: NativeMailDraft?
     @Published private(set) var composeStatus: String?
     @Published private(set) var notice: String?
+    @Published private(set) var messageActions: [NativeMailAction] = []
+    @Published private(set) var mustRefreshBeforeActions = false
+    @Published private(set) var undoToken: UInt64?
+    private var undoExpiry: Date?
+    private var undoExpiration: Task<Void, Never>?
+    private var demoLocations: [UInt64: UInt64] = [:]
+    private var demoUndo: (messages: [NativeMailMessage], locations: [UInt64: UInt64])?
     private var sendPolling: Task<Void, Never>?
     let previewOnly: Bool
     private let runner: any NativeMailRunning
@@ -115,7 +122,7 @@ final class NativeMailStore: ObservableObject {
         showingSavedContent = cacheFirstActive && result.fresh != true
         cacheRefreshFailed = result.refreshFailed == true
         if cacheRefreshFailed { error = "Could not refresh. Showing saved Mail content; retry when connected." }
-        if cacheFirstActive ? result.fresh == true : !loading { lastSynced = Date() }
+        if cacheFirstActive ? result.fresh == true : !loading { lastSynced = Date(); mustRefreshBeforeActions = false }
         reconcileSelection()
         // Read saved rows first, then refresh once. Later polls read status only.
         // Lock and folder changes invalidate any scheduled work.
@@ -136,22 +143,22 @@ final class NativeMailStore: ObservableObject {
     }
     func changeFolder() {
         guard selectedFolder != loadedFolder else { return }
-        body = nil; sanitizedHTML = nil; selectedItem = nil; selectionEpoch.invalidate(); selection?.cancel()
+        body = nil; sanitizedHTML = nil; messageActions = []; selectedItem = nil; selectionEpoch.invalidate(); selection?.cancel()
         messages = []
-        if demo { messages = selectedFolder == 1 ? demoMessages : []; loadedFolder = selectedFolder; return }
+        if demo { messages = demoMessages.filter { demoLocations[$0.id] == selectedFolder }; loadedFolder = selectedFolder; return }
         if cacheFirstActive {
             perform { [self] captured in try await load(captured: captured, mode: "local") }
         } else { refresh() }
     }
     func reconcileSelection() {
         if let selectedItem, !visibleMessages.contains(where: { $0.id == selectedItem }) {
-            self.selectedItem = nil; body = nil; sanitizedHTML = nil; selectionEpoch.invalidate(); selection?.cancel()
+            self.selectedItem = nil; body = nil; sanitizedHTML = nil; messageActions = []; selectionEpoch.invalidate(); selection?.cancel()
         }
     }
     func select() {
-        body = nil; sanitizedHTML = nil; error = nil; selectionEpoch.invalidate(); selection?.cancel()
+        body = nil; sanitizedHTML = nil; messageActions = []; error = nil; selectionEpoch.invalidate(); selection?.cancel()
         guard let item = selectedMessage?.id else { return }
-        if demo { body = demoBodies[item]; sanitizedHTML = demoHTML[item]; return }
+        if demo { body = demoBodies[item]; sanitizedHTML = demoHTML[item]; setDemoActions(); return }
         guard let folder = selectedFolder, phase == .open else { return }
         let captured = epoch.value, selectedGeneration = selectionEpoch.value
         selection = Task { [self] in
@@ -160,7 +167,7 @@ final class NativeMailStore: ObservableObject {
                 try check(captured)
                 guard selectionEpoch.accepts(selectedGeneration), selectedItem == item, selectedFolder == folder else { return }
                 guard result.id == item, let next = result.body else { throw ProtonXError.invalidResponse }
-                body = next; sanitizedHTML = result.sanitizedHTML
+                body = next; sanitizedHTML = result.sanitizedHTML; messageActions = result.actions ?? []
             } catch {
                 if !Task.isCancelled && epoch.accepts(captured) && selectionEpoch.accepts(selectedGeneration) {
                     if (error as? NativeMailFailure) == .sessionExpired { expireSession() }
@@ -169,6 +176,67 @@ final class NativeMailStore: ObservableObject {
             }
         }
     }
+    var canUndoAction: Bool { undoToken != nil && (undoExpiry ?? .distantPast) > Date() && !busy && !mustRefreshBeforeActions && draft == nil }
+    func canPerform(_ action: NativeMailAction) -> Bool {
+        phase == .open && !busy && !mustRefreshBeforeActions && draft == nil && selectedMessage != nil && messageActions.contains(action)
+    }
+    func actOnMessage(_ action: NativeMailAction) {
+        guard canPerform(action), let item = selectedItem, let folder = selectedFolder else { return }
+        clearActionUndo()
+        if demo {
+            let previous = (messages: demoMessages, locations: demoLocations)
+            if action == .read || action == .unread {
+                demoMessages = demoMessages.map { message in
+                    guard message.id == item else { return message }
+                    return NativeMailMessage(id: message.id, subject: message.subject, sender: message.sender, senderName: message.senderName, recipient: message.recipient, date: message.date, unread: action == .unread, attachments: message.attachments, isDraft: message.isDraft ?? false, canReply: message.canReply ?? true, isScheduled: message.isScheduled ?? false)
+                }
+            } else { demoLocations[item] = action == .trash ? 4 : (action == .archive ? 3 : 1) }
+            messages = demoMessages.filter { demoLocations[$0.id] == selectedFolder }
+            reconcileSelection(); setDemoActions()
+            if action != .read && action != .unread { demoUndo = previous; setActionUndo(1) }
+            notice = action.title + " · demo"
+            return
+        }
+        perform { [self] captured in
+            // Any interrupted dispatch may already have entered the durable SDK queue.
+            mustRefreshBeforeActions = true
+            let result = try await runner.request(NativeMailCommand("message_action", folder: folder, item: item, action: action))
+            try check(captured)
+            guard result.queued == true, result.id == item else { throw ProtonXError.invalidResponse }
+            mustRefreshBeforeActions = false
+            if let token = result.undoToken { setActionUndo(token) }
+            notice = action.title + " queued for sync"
+            try await load(captured: captured)
+            if selectedItem == item && selectedFolder == folder { select() }
+        }
+    }
+    func undoMessageAction() {
+        guard canUndoAction, let token = undoToken else { return }
+        if demo, let previous = demoUndo {
+            demoMessages = previous.messages; demoLocations = previous.locations
+            messages = demoMessages.filter { demoLocations[$0.id] == selectedFolder }
+            clearActionUndo(); setDemoActions(); notice = "Change undone · demo"; return
+        }
+        clearActionUndo()
+        perform { [self] captured in
+            mustRefreshBeforeActions = true
+            let result = try await runner.request(NativeMailCommand("undo_action", token: token))
+            try check(captured)
+            guard result.queued == true else { throw ProtonXError.invalidResponse }
+            mustRefreshBeforeActions = false; notice = "Undo queued for sync"
+            try await load(captured: captured)
+        }
+    }
+    private func setActionUndo(_ token: UInt64) {
+        undoToken = token; undoExpiry = Date().addingTimeInterval(30)
+        let captured = epoch.value
+        undoExpiration = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(30))
+            guard let self, !Task.isCancelled, self.epoch.accepts(captured), self.undoToken == token else { return }
+            self.clearActionUndo()
+        }
+    }
+    private func clearActionUndo() { undoExpiration?.cancel(); undoExpiration = nil; undoToken = nil; undoExpiry = nil; demoUndo = nil }
     func compose(_ mode: String = "new") {
         guard phase == .open, !busy, draft == nil else { return }
         guard mode == "new" || selectedMessage != nil else { return }
@@ -315,7 +383,7 @@ final class NativeMailStore: ObservableObject {
     func lock() {
         epoch.invalidate(); selectionEpoch.invalidate(); operation?.cancel(); selection?.cancel(); polling?.cancel(); sendPolling?.cancel(); auth?.invalidate(); auth = nil; runner.cancelAll()
         folders = []; messages = []; body = nil; sanitizedHTML = nil; selectedItem = nil; selectedFolder = nil; query = ""; email = ""; error = nil
-        draft = nil; composeStatus = nil; notice = nil
+        draft = nil; composeStatus = nil; notice = nil; messageActions = []; mustRefreshBeforeActions = false; clearActionUndo()
         loading = false; lastSynced = nil; busy = false; demoBodies = [:]; demoHTML = [:]; demoMessages = []; loadedFolder = nil
         cacheFirstActive = false; showingSavedContent = false; cacheRefreshFailed = false
         phase = hasSession ? .locked : .welcome
@@ -323,16 +391,23 @@ final class NativeMailStore: ObservableObject {
     func cancelSignIn() { lock() }
     func enterDemo() {
         lock(); demo = true; phase = .open; email = "alex@example.com"
-        folders = [NativeMailFolder(id: 1, name: "Inbox", count: 2), NativeMailFolder(id: 2, name: "Sent")]; selectedFolder = 1; loadedFolder = 1
+        folders = [NativeMailFolder(id: 1, name: "Inbox", count: 2), NativeMailFolder(id: 2, name: "Sent"), NativeMailFolder(id: 3, name: "Archive"), NativeMailFolder(id: 4, name: "Trash")]; selectedFolder = 1; loadedFolder = 1
         messages = [NativeMailMessage(id: 11, subject: "Welcome to your native inbox", sender: "hello@example.com", senderName: "ProtonX", recipient: "alex@example.com", date: 1791288000, unread: true), NativeMailMessage(id: 12, subject: "Coffee this weekend?", sender: "sam@example.com", senderName: "Sam", recipient: "alex.demo@gmail.com", date: 1791201600)]
-        demoMessages = messages
+        demoMessages = messages; demoLocations = Dictionary(uniqueKeysWithValues: messages.map { ($0.id, 1) })
         demoBodies = [11: "A native Mail window, with one shared menu-bar icon and Mac keyboard shortcuts.\n\nThis inbox is synthetic. No account has been accessed.\n\nThe direct Mail client uses Proton’s existing authentication and encryption core.", 12: "Hi Alex,\n\nCoffee on Saturday?\n\nSam"]
         demoHTML = [11: """
         <style>.demo-card { max-width:600px; margin:0 auto; padding:24px; background:#f6f5f9; border-radius:16px } .demo-card h1 {font-size:26px; line-height:1.25} .demo-card td,.demo-card th {padding:10px; text-align:left; border-bottom:1px solid #ddd} </style>
         <div class="demo-card"><h1>Welcome to your native inbox</h1><p>Hello <strong>Alex</strong>,</p><p>This newsletter is synthetic. No account has been accessed.</p><table style="width:100%"><tr><th>Product</th><th>Window</th></tr><tr><td>Mail</td><td>⌘2</td></tr><tr><td>Pass</td><td>⌘1</td></tr></table><h2>A comfortable place to read</h2><ul><li>Headings, lists and tables keep their structure.</li><li>The message stays light in dark appearance.</li></ul><p><a href="https://example.com/help">A synthetic help link</a></p><blockquote>Earlier reply: thanks for the update.</blockquote></div>
         """]
         demoBodies[11] = "Welcome to your native inbox\n\nHello Alex,\n\nThis newsletter is synthetic. No account has been accessed.\n\nProduct / Window\nMail / ⌘2\nPass / ⌘1\n\nA comfortable place to read\n• Headings, lists and tables keep their structure.\n• The message stays light in dark appearance.\n\nA synthetic help link: https://example.com/help\n\nEarlier reply: thanks for the update."
-        selectedItem = 11; body = demoBodies[11]; sanitizedHTML = demoHTML[11]
+        selectedItem = 11; body = demoBodies[11]; sanitizedHTML = demoHTML[11]; setDemoActions()
+    }
+    private func setDemoActions() {
+        guard let message = selectedMessage else { messageActions = []; return }
+        messageActions = [message.unread ? .read : .unread]
+        if selectedFolder != 3 { messageActions.append(.archive) }
+        if selectedFolder != 4 { messageActions.append(.trash) }
+        if selectedFolder != 1 { messageActions.append(.inbox) }
     }
     private func expireSession() {
         hasSession = false; defaults.set(false, forKey: "nativeMailConnected")

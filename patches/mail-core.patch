@@ -230,3 +230,171 @@
  }
  
  fn handle_read_exec(connection: &Connection, operation: OperationExec) {
+--- a/project/mail/rust/mail/mail-common/Cargo.toml
++++ b/project/mail/rust/mail/mail-common/Cargo.toml
+@@ -7,6 +7,7 @@
+ 
+ [features]
+ default = ["sql", "events-v6"]
++protonx-encrypted = ["dep:protonx-mail-storage", "mail-stash/protonx-encrypted"]
+ gtk = []
+ test-utils = [
+   "dep:wiremock",
+@@ -32,6 +33,7 @@
+ foundation_search_index_timing = []
+ 
+ [dependencies]
++protonx-mail-storage = { path = "../../../../../protonx-mail-storage", optional = true }
+ anyhow = { workspace = true }
+ async-trait = { workspace = true }
+ mail-log-service = { workspace = true }
+--- a/project/mail/rust/mail/mail-common/src/lib.rs
++++ b/project/mail/rust/mail/mail-common/src/lib.rs
+@@ -1,3 +1,5 @@
+ #![allow(clippy::result_large_err)] // TODO(ET-5588): address growing Error size
+ 
++// ProtonX cache adapter preserves upstream behavior unless explicitly keyed.
++mod cache_storage;
+ pub mod actions;
+--- /dev/null
++++ b/project/mail/rust/mail/mail-common/src/cache_storage.rs
+@@ -0,0 +1,24 @@
++// Copyright (c) 2026 ProtonX contributors. SPDX-License-Identifier: AGPL-3.0-only
++// SDK-owned cache only; never decrypt to a temporary/export file.
++use std::{io, path::Path};
++pub async fn read(path: impl AsRef<Path>) -> io::Result<Vec<u8>> {
++    #[cfg(feature = "protonx-encrypted")]
++    if protonx_mail_storage::cache_encryption_enabled() {
++        let path = path.as_ref().to_owned();
++        return tokio::task::spawn_blocking(move || protonx_mail_storage::read_cached_file(&path)).await.map_err(|_| io::Error::from(io::ErrorKind::Other))?;
++    }
++    tokio::fs::read(path).await
++}
++pub async fn write(path: &Path, data: Vec<u8>) -> io::Result<()> {
++    #[cfg(feature = "protonx-encrypted")]
++    if protonx_mail_storage::cache_encryption_enabled() {
++        let path = path.to_owned();
++        return tokio::task::spawn_blocking(move || protonx_mail_storage::write_cached_file(&path, &data)).await.map_err(|_| io::Error::from(io::ErrorKind::Other))?;
++    }
++    mail_core_common::os::safe_write_async(path, data).await
++}
++pub fn filename(original: &str) -> String {
++    #[cfg(feature = "protonx-encrypted")]
++    if protonx_mail_storage::cache_encryption_enabled() { return "content.pxb".into(); }
++    mail_core_common::os::sanitize_filename(original)
++}
+--- a/project/mail/rust/mail/mail-common/src/models/attachment_cache.rs
++++ b/project/mail/rust/mail/mail-common/src/models/attachment_cache.rs
+@@ -8,7 +8,6 @@
+ use mail_core_api::services::proton::LabelId;
+ use mail_core_common::datatypes::SystemLabel;
+ use mail_core_common::models::ModelExtension as _;
+-use mail_core_common::os::{safe_write_async, sanitize_filename};
+ use mail_core_common::{DeleteFilesSafeError, Origin};
+ use mail_crypto_inbox::attachment::DecryptableAttachment as _;
+ use mail_crypto_inbox::proton_crypto::crypto::{PGPProvider, PGPProviderSync, VerificationResult};
+@@ -116,7 +115,7 @@
+         if let Some(path) =
+             Self::path_from_cache_and_update_metadata_atomic(self.id(), tether).await?
+         {
+-            return Ok(fs::read(path).await?);
++            return Ok(crate::cache_storage::read(path).await?);
+         };
+ 
+         let data = self.fetch_data(ctx, tether).await?;
+@@ -128,7 +127,7 @@
+             .write_tx(async |tx| {
+                 if let Some(path) = Self::path_from_cache_and_update_metadata(self.id(), tx).await?
+                 {
+-                    return Ok(fs::read(path).await?);
++                    return Ok(crate::cache_storage::read(path).await?);
+                 };
+ 
+                 if let Err(e) =
+@@ -277,7 +276,7 @@
+         let (path, path_string) = Self::attachment_cache_file_path(ctx, id, name).await?;
+ 
+         let data_len = data.len();
+-        safe_write_async(&path, data).await?;
++        crate::cache_storage::write(&path, data).await?;
+         ctx.mail_context()
+             .quarantine_xattr_setter()
+             .set_quarantine_xattr(&path)?;
+@@ -306,14 +305,12 @@
+         attachment_path: &Path,
+         bond: &WriteTx<'_>,
+     ) -> MailContextResult<PathBuf> {
+-        let metadata = tokio::fs::metadata(attachment_path).await?;
+-        let data_size = metadata.len();
++        let data = crate::cache_storage::read(attachment_path).await?;
++        let data_size = data.len();
+ 
+         let (path, path_string) = Self::attachment_cache_file_path(ctx, id, name).await?;
+ 
+-        tokio::fs::copy(attachment_path, &path)
+-            .await
+-            .inspect_err(|e| error!("Failed to copy attachment: {e:?}"))?;
++        crate::cache_storage::write(&path, data).await?;
+ 
+         bond.execute(
+             indoc! {
+@@ -339,7 +336,7 @@
+         let mut path = ctx.mail_context().attachments_cache_path();
+         path.push(format!("{attachment_id}"));
+         tokio::fs::create_dir_all(&path).await?;
+-        path.push(sanitize_filename(filename));
++        path.push(crate::cache_storage::filename(filename));
+ 
+         let path_string = path
+             .clone()
+--- a/project/mail/rust/mail/mail-common/src/mailbox/decrypted_message.rs
++++ b/project/mail/rust/mail/mail-common/src/mailbox/decrypted_message.rs
+@@ -596,7 +596,7 @@
+ 
+             drop(tether);
+ 
+-            let ics = fs::read(&ics.data_path).await.map_err(|err| {
++            let ics = crate::cache_storage::read(&ics.data_path).await.map_err(|err| {
+                 warn!(?err, "Couldn't read the RSVP attachment");
+                 err
+             })?;
+--- a/project/mail/rust/mail/mail-common/src/mailbox/attachments.rs
++++ b/project/mail/rust/mail/mail-common/src/mailbox/attachments.rs
+@@ -14,6 +14,7 @@
+     //         * Cache crypted data
+     //         * Decrypt
+     //         * Add an alternative to this field like `pub content: Vec<u8>`
++    // ProtonX encrypted mode: internal container path, never a plaintext export.
+     pub data_path: PathBuf,
+     // /// The result of the signature verification.
+     // pub verification_result: VerificationResult,
+--- a/project/mail/rust/mail/mail-uniffi/src/mail/datatypes.rs
++++ b/project/mail/rust/mail/mail-uniffi/src/mail/datatypes.rs
+@@ -5,7 +5,7 @@
+ mod privacy;
+ pub mod privacy_lock;
+ mod snooze;
+-mod system_folder;
++pub mod system_folder;
+ mod system_label;
+ 
+ use crate::core::datatypes::{AvatarInformation, Id, UnixTimestamp};
+@@ -1333,7 +1333,7 @@
+ #[uniffi_export]
+ impl Undo {
+     #[tracing::instrument(skip_all)]
+-    async fn undo(&self, ctx: Arc<MailUserSession>) -> Result<(), ActionError> {
++    pub async fn undo(&self, ctx: Arc<MailUserSession>) -> Result<(), ActionError> {
+         let Some(output) = self.0.lock().take() else {
+             warn!("already undone");
+             return Ok(());
+--- a/project/mail/rust/mail/mail-common/src/mailbox/decrypted_message.rs
++++ b/project/mail/rust/mail/mail-common/src/mailbox/decrypted_message.rs
+@@ -42,7 +42,6 @@
+ use std::collections::{BTreeSet, HashMap, HashSet};
+ use std::str::FromStr;
+ use std::sync::Arc;
+-use tokio::fs;
+ use tokio::task::JoinHandle;
+ use tracing::{Instrument as _, debug, trace, warn};
+ 

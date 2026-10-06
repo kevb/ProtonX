@@ -317,3 +317,72 @@ private let linkedDraft = NativeMailDraft(token: 3, sender: "alex.demo@gmail.com
     try? await Task.sleep(for: .milliseconds(160))
     #expect(store.body == nil); #expect(store.sanitizedHTML == nil)
 }
+
+@Test @MainActor func mailActionsUseOneSelectedMessageAndSDKUndoToken() async {
+    let runner = SyntheticMailRunner([
+        .init(method: "restore", result: .init(phase: .connected)), .init(method: "snapshot", result: mailSnapshot),
+        .init(method: "message", result: .init(id: 11, body: "SYNTHETIC", actions: [.archive])),
+        .init(method: "message_action", result: .init(id: 11, queued: true, undoToken: 42)),
+        .init(method: "snapshot", result: .init(folders: mailSnapshot.folders, folder: 1, messages: [], loading: false)),
+        .init(method: "undo_action", result: .init(queued: true)), .init(method: "snapshot", result: mailSnapshot)
+    ])
+    let store = mailStore(runner, saved: true)
+    store.unlock(); await waitForMail { !store.busy }
+    store.selectedItem = 11; store.select(); await waitForMail { store.body != nil }
+    #expect(!store.canPerform(.trash)); #expect(store.canPerform(.archive))
+    store.actOnMessage(.trash); #expect(runner.calls.count == 3)
+    store.actOnMessage(.archive); await waitForMail { !store.busy }
+    #expect(store.selectedItem == nil); #expect(store.messages.isEmpty); #expect(store.canUndoAction)
+    let command = runner.payloads.first { $0.method == "message_action" }
+    #expect(command?.item == 11); #expect(command?.folder == 1); #expect(command?.action == .archive)
+    store.undoMessageAction(); await waitForMail { !store.busy }
+    #expect(store.messages.count == 1); #expect(!store.canUndoAction)
+    #expect(runner.payloads.first { $0.method == "undo_action" }?.token == 42)
+    store.undoMessageAction(); #expect(runner.calls.count == 7)
+    store.lock()
+}
+
+@Test @MainActor func uncertainMailActionDoesNotRetryAndNeedsRefresh() async {
+    let runner = SyntheticMailRunner([
+        .init(method: "restore", result: .init(phase: .connected)), .init(method: "snapshot", result: mailSnapshot),
+        .init(method: "message", result: .init(id: 11, body: "SYNTHETIC", actions: [.trash])),
+        .init(method: "message_action", result: .init(), failure: .actionUncertain),
+        .init(method: "snapshot", result: mailSnapshot)
+    ])
+    let store = mailStore(runner, saved: true)
+    store.unlock(); await waitForMail { !store.busy }
+    store.selectedItem = 11; store.select(); await waitForMail { store.body != nil }
+    store.actOnMessage(.trash); await waitForMail { !store.busy }
+    #expect(store.mustRefreshBeforeActions); #expect(store.selectedItem == 11); #expect(store.body == "SYNTHETIC")
+    store.actOnMessage(.trash); #expect(runner.calls.filter { $0 == "message_action" }.count == 1)
+    store.refresh(); await waitForMail { !store.busy }
+    #expect(!store.mustRefreshBeforeActions); #expect(runner.calls.filter { $0 == "message_action" }.count == 1)
+    store.lock()
+}
+
+@Test @MainActor func lockRejectsLateMailActionAndDropsUndo() async {
+    let runner = SyntheticMailRunner([
+        .init(method: "restore", result: .init(phase: .connected)), .init(method: "snapshot", result: mailSnapshot),
+        .init(method: "message", result: .init(id: 11, body: "SYNTHETIC", actions: [.archive])),
+        .init(method: "message_action", result: .init(id: 11, queued: true, undoToken: 42), delay: .milliseconds(120))
+    ])
+    let store = mailStore(runner, saved: true)
+    store.unlock(); await waitForMail { !store.busy }
+    store.selectedItem = 11; store.select(); await waitForMail { store.body != nil }
+    store.actOnMessage(.archive); await waitForMail { runner.calls.count == 4 }
+    store.lock(); try? await Task.sleep(for: .milliseconds(180))
+    #expect(store.phase == .locked); #expect(store.undoToken == nil); #expect(store.messageActions.isEmpty)
+    #expect(store.messages.isEmpty); #expect(runner.calls.count == 4)
+}
+
+@Test @MainActor func previewMailTrashRestoreAndUndoNeverStartHelper() {
+    let runner = SyntheticMailRunner([])
+    let store = mailStore(runner, preview: true)
+    store.actOnMessage(.trash); #expect(store.messages.count == 1); #expect(store.canUndoAction)
+    store.undoMessageAction(); #expect(store.messages.count == 2)
+    store.selectedItem = 11; store.select(); store.actOnMessage(.trash)
+    store.selectedFolder = 4; store.changeFolder(); #expect(store.messages.count == 1)
+    store.selectedItem = 11; store.select(); store.actOnMessage(.inbox); #expect(store.messages.isEmpty)
+    store.selectedFolder = 1; store.changeFolder(); #expect(store.messages.count == 2)
+    #expect(runner.calls.isEmpty); store.lock()
+}

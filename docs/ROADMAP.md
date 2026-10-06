@@ -7,23 +7,26 @@ end-to-end workflow come before additional products.
 ## Next priorities (2026-10-06)
 
 1. **Finish the secure-storage foundation already in progress.** The opt-in Mail
-   candidate encrypts its databases and supports saved-first loading, but the
-   normal app does not enable it. Complete whole-profile cutover/recovery,
-   protect decrypted attachment/MIME files, preserve pending drafts/sends and
+   candidate encrypts databases and new attachment/MIME cache payloads and supports
+   saved-first loading. The normal app does not enable it. Complete existing-file
+   migration/rebasing, export/staging audit, whole-profile cutover/recovery, preserve pending drafts/sends and
    prevent older builds reopening a migrated profile. Measure startup integrity
    checks before promising faster opening. See [the storage review](LOCAL_STORAGE.md).
-2. **Make Pass dependable across launches and network failures.** Validate session
-   recovery, edits/conflicts/Trash restoration and interoperability with another
-   client. Then add an encrypted, policy-aware read-only item cache through Proton's
-   existing storage layer, with useful freshness and recovery states. See the
+2. **Finish Pass offline acceptance.** An encrypted, policy-aware read-only cache
+   is implemented through Proton's storage layer, with synthetic restart, network
+   failure, reconnect and locking coverage. The user has confirmed cross-client
+   edits/conflicts/Trash and online restart. Validate real disconnected restart,
+   update Keychain continuity and broader item types. See the
    [automation and acceptance plan](PASS_RELIABILITY.md).
 3. **Complete Mail's everyday workflow.** Validate actual send/reply delivery and
-   enabled Gmail sending identities; add read/unread, archive/trash, threading and
+   enabled Gmail sending identities. Read/unread, Archive/Trash/Inbox and SDK move
+   undo are implemented with synthetic/public upstream tests; add threading and
    attachments. Preserve drafts and distinguish confirmed delivery from uncertain
    send outcomes.
-4. **Polish suite navigation and installation.** Add a visible product switcher,
-   establish reliable installed-app updates and signing/Keychain continuity, then
-   provide **ProtonX Mail** and **ProtonX Pass** Spotlight launchers. Keep independent
+4. **Accept installed suite navigation.** A visible product switcher, window-aware
+   keyboard commands, verified atomic app installation and **ProtonX Mail** /
+   **ProtonX Pass** Spotlight launchers are implemented. Validate installed routing,
+   visual layout and update Keychain continuity. Keep independent
    product windows/sessions and the optional single shared menu-bar item.
 
 Safari website AutoFill remains covered by the standalone official extension.
@@ -42,7 +45,7 @@ Pass and the shared macOS experience before expanding the suite.
 - Compile-only AutoFill feasibility contracts and offline storage review.
 - Experimental Mail encrypted database candidate and resumable database-set staging,
   with original files retained and startup guards in both updated helpers. Profile
-  activation and attachment protection remain gates; see
+  activation, existing-cache migration and the full file API audit remain gates; see
   [the migration boundary](MAIL_STORAGE_MIGRATION.md).
 
 These have synthetic/source validation. The user has also reported successful
@@ -76,7 +79,9 @@ release readiness.
   challenge/recovery flows and release licensing separately.
 - Verify send/reply delivery, including enabled Gmail sending identities, on a
   designated test account. Do not infer successful delivery from composer UI.
-- Threading, read/unread controls, archive/trash, attachments and richer MIME handling.
+- Read/unread, Archive/Trash/Inbox and move undo are implemented through the pinned
+  SDK; threading, attachment UI and rich-text composition remain. Sanitized HTML
+  reading now preserves structure alongside a text fallback.
 - Test interrupted sends, ambiguous delivery and draft recovery across upgrades.
 - Retain Bridge as an optional prototype/compatibility path. Its lifecycle work
   is secondary to proving direct native Mail onboarding.
@@ -87,24 +92,26 @@ release readiness.
 - Decide separate process/sandbox packaging after proving the suite UX and IPC needs.
 - Measure total memory/CPU (including Bridge and transient helpers) before publishing
   any reduction percentages.
-- Add optional native Spotlight launchers named **ProtonX Mail** and **ProtonX Pass**
-  that open the corresponding window in the shared app. Defer installation until
-  builds can be reliably updated in Applications; document shared Quit/Dock/⌘Tab
-  behavior. Pair them with a visible in-window product switcher.
+- Native Spotlight launchers named **ProtonX Mail** and **ProtonX Pass**
+  open the corresponding window in the shared app, alongside a visible
+  product switcher and an opt-in verified Applications installer. Validate the
+  installed routing and stable signing/Keychain behavior; see
+  [the installation guide](DAILY_USE_UPDATE.md).
 
 ## Local storage and faster opening
 
 - Initial loading/failure and genuinely empty states are now distinct; existing
   content remains visible during refresh.
 - Finish the opt-in encrypted Mail candidate before enabling it in normal builds:
-  whole-profile migration/recovery, attachment/MIME file protection, old-build
+  whole-profile migration/recovery, existing attachment/MIME file migration, old-build
   exclusion and SDK pending-send safety remain gates. See
   [the storage/startup review](LOCAL_STORAGE.md).
 - Validate the candidate's saved-first loading through restart/offline recovery and
   measured cold/warm workloads. Accurate freshness, failure retention and stable
   selection have synthetic contracts; no measured startup speedup is established.
-- Persist Pass item revisions through Proton's existing encryption layer, subject
-  to product/organisation offline policy; start with read-only access.
+- Pass encrypted read-only revisions are now persisted through Proton's layer
+  with conservative entitlement/lease checks. Complete the disconnected-account
+  acceptance in [OFFLINE_DESIGN.md](OFFLINE_DESIGN.md).
 - Measure time to first list and selected detail on matching synthetic cold/warm
   workloads. Storage migration, wrong keys, corruption and lock races are gates.
 

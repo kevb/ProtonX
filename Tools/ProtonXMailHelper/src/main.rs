@@ -66,6 +66,8 @@ macro_rules! sdk_void {
     }};
 }
 
+mod inbox_actions;
+
 const MAX_INPUT: usize = 64 * 1024;
 const MAX_OUTPUT: usize = 8 * 1024 * 1024;
 const KEYCHAIN_SERVICE: &str = "org.kevb.ProtonX.Mail.Native";
@@ -124,6 +126,8 @@ enum Command {
     DiscardDraft {
         token: u64,
     },
+    MessageAction { folder: u64, item: u64, action: inbox_actions::Action },
+    UndoAction { token: u64 },
     SignOut,
 }
 #[derive(Clone, Copy, Default, Deserialize, PartialEq, Eq)]
@@ -444,6 +448,7 @@ struct Backend {
     folder: Option<u64>,
     composer: Option<Composer>,
     next_composer: u64,
+    action_state: inbox_actions::State,
 }
 impl Backend {
     fn new(directory: PathBuf) -> Result<Self, &'static str> {
@@ -495,6 +500,7 @@ impl Backend {
             folder: None,
             composer: None,
             next_composer: 0,
+            action_state: inbox_actions::State::default(),
         })
     }
     fn login_failure(&self, error: LoginError) -> &'static str {
@@ -665,10 +671,13 @@ impl Backend {
                     return Err("message_too_large");
                 }
                 let (body, sanitized_html) = reader::prepare(&raw, message.mime_type())?;
+                let actions = inbox_actions::available(mailbox.clone(), Id::from(item))?.names();
                 Ok(
-                    json!({"id":item,"body":body,"sanitizedHTML":sanitized_html,"attachments":message.attachments().len()}),
+                    json!({"id":item,"body":body,"sanitizedHTML":sanitized_html,"attachments":message.attachments().len(),"actions":actions}),
                 )
             }
+            Command::MessageAction { folder, item, action } => self.message_action(folder, item, action),
+            Command::UndoAction { token } => self.undo_action(token),
             Command::Compose { mode, folder, item } => self.compose(&mode, folder, item),
             Command::SaveDraft { token, content } => {
                 self.update_draft(token, content, false)?;
@@ -1098,6 +1107,7 @@ impl Backend {
         let fresh =
             mode != SnapshotMode::Local && state.fresh && !loading && state.failed.is_none();
         let refresh_failed = state.failed.is_some();
+        if fresh { self.action_state.uncertain = false; }
         drop(state); // Never hold a callback mutex across SDK I/O.
         let details = sdk_result!(
             mail_uniffi::mail::MailUserSessionAccountDetailsResult,

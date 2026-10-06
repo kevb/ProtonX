@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ProtonX contributors. SPDX-License-Identifier: AGPL-3.0-only
 // Opt-in candidate: legacy profiles are refused, never automatically rewritten.
 use protonx_mail_storage::{
-    ProfileGuard, StorageError, configure_database_key, database_files, validate_encrypted,
+    ProfileGuard, StorageError, configure_database_key, database_files, validate_encrypted, attachment_files, read_blob, FORMAT_FILE,
 };
 use security_framework::passwords::{get_generic_password, set_generic_password};
 use security_framework::random::SecRandom;
@@ -19,6 +19,13 @@ pub fn prepare(root: &Path) -> Result<ProfileGuard, &'static str> {
         _ => "storage_unavailable",
     })?;
     let databases = database_files(root).map_err(|_| "storage_unavailable")?;
+    let attachments = attachment_files(root).map_err(|_| "storage_unavailable")?;
+    // Earlier candidate versions wrote ordinary attachment files. Keep them
+    // untouched and refuse the unsupported cache layout before Keychain access.
+    if attachments.iter().any(|path| path.file_name().is_none_or(|name| name != "content.pxb")) {
+        return Err("storage_upgrade_required");
+    }
+    let fresh = databases.is_empty() && attachments.is_empty() && !root.join(FORMAT_FILE).exists();
     let key = match get_generic_password(SERVICE, ACCOUNT) {
         Ok(value) => {
             let value = Zeroizing::new(value);
@@ -28,7 +35,7 @@ pub fn prepare(root: &Path) -> Result<ProfileGuard, &'static str> {
                 .map_err(|_| "storage_unavailable")?;
             Zeroizing::new(bytes)
         }
-        Err(error) if error.code() == -25300 && databases.is_empty() => {
+        Err(error) if error.code() == -25300 && fresh => {
             let mut bytes = Zeroizing::new([0_u8; 32]);
             SecRandom::default()
                 .copy_bytes(bytes.as_mut_slice())
@@ -42,6 +49,9 @@ pub fn prepare(root: &Path) -> Result<ProfileGuard, &'static str> {
     };
     for path in &databases {
         validate_encrypted(path, &key).map_err(|_| "storage_unavailable")?;
+    }
+    for path in &attachments {
+        read_blob(path, &key).map_err(|_| "storage_unavailable")?;
     }
     configure_database_key(*key).map_err(|_| "storage_unavailable")?;
     Ok(guard)

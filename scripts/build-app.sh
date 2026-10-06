@@ -6,6 +6,7 @@ PROTONX_PREVIEW=false
 PROTONX_STAGE_UPDATE=false
 PROTONX_UPDATE_NAME="ProtonX Update"
 PROTONX_SKIP_HELPER=false
+PROTONX_INSTALL=false
 PROTONX_SWIFT_OPTIONS=()
 for PROTONX_OPTION in "$@"; do
   case "$PROTONX_OPTION" in
@@ -17,6 +18,7 @@ for PROTONX_OPTION in "$@"; do
       PROTONX_UPDATE_NAME="${PROTONX_OPTION#--stage-update=}"
       if [[ -z "$PROTONX_UPDATE_NAME" || "$PROTONX_UPDATE_NAME" == */* || "$PROTONX_UPDATE_NAME" == .* ]]; then echo 'Use a simple app name for the staged update.' >&2; exit 1; fi
       ;;
+    --install) PROTONX_INSTALL=true ;;
     --skip-helper) PROTONX_SKIP_HELPER=true ;;
     *) echo "Unknown build option." >&2; exit 1 ;;
   esac
@@ -24,6 +26,7 @@ done
 PROTONX_APP_NAME=ProtonX
 PROTONX_EXECUTABLE=ProtonX
 if $PROTONX_PREVIEW; then PROTONX_APP_NAME='ProtonX Preview'; PROTONX_EXECUTABLE=ProtonXPreview; fi
+if $PROTONX_PREVIEW && $PROTONX_INSTALL; then echo 'Preview builds cannot be installed as ProtonX.' >&2; exit 1; fi
 if $PROTONX_PREVIEW && $PROTONX_STAGE_UPDATE; then echo 'Choose preview or staged update.' >&2; exit 1; fi
 if $PROTONX_STAGE_UPDATE; then PROTONX_APP_NAME="$PROTONX_UPDATE_NAME"; fi
 PROTONX_FINAL="$PROTONX_ROOT/build/$PROTONX_APP_NAME.app"
@@ -52,6 +55,7 @@ cp upstream/pass-cli/target/release/pass-cli "$PROTONX_BUNDLE/Contents/Helpers/p
 cp .tools/mail-helper/protonx-mail "$PROTONX_BUNDLE/Contents/Helpers/protonx-mail"
 cp Resources/Info.plist "$PROTONX_BUNDLE/Contents/Info.plist"
 if $PROTONX_PREVIEW; then
+  /usr/libexec/PlistBuddy -c 'Delete :CFBundleURLTypes' "$PROTONX_BUNDLE/Contents/Info.plist"
   /usr/libexec/PlistBuddy -c 'Set :CFBundleIdentifier org.kevb.ProtonX.Preview' "$PROTONX_BUNDLE/Contents/Info.plist"
   /usr/libexec/PlistBuddy -c 'Set :CFBundleExecutable ProtonXPreview' "$PROTONX_BUNDLE/Contents/Info.plist"
   /usr/libexec/PlistBuddy -c 'Set :CFBundleName ProtonX Preview' "$PROTONX_BUNDLE/Contents/Info.plist"
@@ -79,3 +83,7 @@ if ! mv "$PROTONX_BUNDLE" "$PROTONX_FINAL"; then
   exit 1
 fi
 echo "$PROTONX_FINAL"
+if $PROTONX_INSTALL; then
+  scripts/build-launchers.sh
+  python3 scripts/install-app.py "$PROTONX_FINAL" --launchers "$PROTONX_ROOT/build/Launchers"
+fi

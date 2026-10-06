@@ -9,6 +9,8 @@ use zeroize::Zeroizing;
 
 static DATABASE_KEY: OnceLock<Zeroizing<[u8; 32]>> = OnceLock::new();
 
+pub(crate) fn database_key() -> Option<&'static [u8; 32]> { DATABASE_KEY.get().map(|key| &**key) }
+
 /// One isolated helper/profile per process. Configure before opening the SDK.
 /// The SDK feature is opt-in; public upstream tests retain unkeyed databases.
 pub fn configure_database_key(key: [u8; 32]) -> Result<(), StorageError> {

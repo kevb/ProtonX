@@ -13,7 +13,11 @@ struct PassWindow: View {
         Group {
             if store.phase == .open { workspace } else { WelcomeView() }
         }
+        .focusedSceneValue(\.protonXProduct, .pass)
+        .focusedSceneValue(\.protonXCanCreate, store.canCreate)
+        .focusedSceneValue(\.protonXCanRefresh, store.phase == .open && !store.busy && !store.isDemo)
         .frame(minWidth: 820, minHeight: 540)
+        .toolbar { ToolbarItem(placement: .navigation) { SuiteProductSwitcher(current: "pass") } }
         .preferredColorScheme(previewColorScheme)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if let error = store.error {
@@ -37,6 +41,10 @@ struct PassWindow: View {
             if phase != .open { showingCreate = false; showingEdit = false; confirmTrash = false }
         }
         .onReceive(NotificationCenter.default.publisher(for: .protonXNewItem)) { _ in if store.canCreate { showingCreate = true } }
+        .onOpenURL { url in
+            guard let route = ProductRoute(url: url) else { return }
+            openWindow(id: route.rawValue); NSApp.activate(ignoringOtherApps: true)
+        }
         .onAppear {
             SystemIntegration.shared.openPass = { openWindow(id: "pass"); NSApp.activate(ignoringOtherApps: true) }
             SystemIntegration.shared.openMail = { openWindow(id: "mail"); NSApp.activate(ignoringOtherApps: true) }

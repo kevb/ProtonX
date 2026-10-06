@@ -2,6 +2,7 @@ import SwiftUI
 import ProtonXCore
 
 struct MailWindow: View {
+    @Environment(\.openWindow) private var openWindow
     @StateObject private var store: NativeMailStore
     @State private var username = ""
     @State private var password = ""
@@ -18,15 +19,29 @@ struct MailWindow: View {
         }
         .background(MailTheme.collection)
         .preferredColorScheme(designAppearance)
+        .focusedSceneValue(\.protonXProduct, .mail)
+        .focusedSceneValue(\.protonXCanCreate, store.phase == .open && !store.busy && store.draft == nil)
+        .focusedSceneValue(\.protonXCanRefresh, store.phase == .open && !store.busy && !store.demo)
         .frame(minWidth: 860, minHeight: 580)
+        .toolbar { ToolbarItem(placement: .navigation) { SuiteProductSwitcher(current: "mail") } }
         .safeAreaInset(edge: .bottom) {
             if let error = store.error {
                 HStack(alignment: .top, spacing: 12) {
                     Image(systemName: "exclamationmark.circle")
                     Text(error).font(.callout).textSelection(.enabled)
                     Spacer()
+                    if store.mustRefreshBeforeActions { Button("Refresh Mail") { store.refresh() }.disabled(store.busy) }
                     Button("Dismiss") { store.error = nil }
                 }.padding(12).background(.orange.opacity(0.12))
+            }
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if store.undoToken != nil {
+                HStack {
+                    Text(store.notice ?? "Mail change queued").font(.callout)
+                    Spacer()
+                    Button("Undo move") { store.undoMessageAction() }.disabled(!store.canUndoAction).accessibilityIdentifier("undoMailMove")
+                }.padding(12).background(MailTheme.accent.opacity(0.12))
             }
         }
         .sheet(isPresented: Binding(get: { store.draft != nil }, set: { _ in })) {
@@ -36,7 +51,14 @@ struct MailWindow: View {
         .confirmationDialog("Sign out of ProtonX Mail?", isPresented: $confirmSignOut) {
             Button("Sign Out", role: .destructive) { clearCredentials(); store.signOut() }
         } message: { Text("End this app’s Mail session and remove its local account data. Your messages remain with Proton.") }
+        .onReceive(NotificationCenter.default.publisher(for: .protonXNewMessage)) { _ in store.compose() }
+        .onReceive(NotificationCenter.default.publisher(for: .protonXRefreshMail)) { _ in store.refresh() }
+        .onReceive(NotificationCenter.default.publisher(for: .protonXFocusMailSearch)) { _ in focus = "search" }
         .onReceive(NotificationCenter.default.publisher(for: .protonXLock)) { _ in clearCredentials(); store.lock(); bridge = false }
+        .onOpenURL { url in
+            guard let route = ProductRoute(url: url) else { return }
+            openWindow(id: route.rawValue); NSApp.activate(ignoringOtherApps: true)
+        }
         .onAppear { focus = "username" }
         .onDisappear { clearCredentials(); store.lock() }
         .onChange(of: store.phase) { _, phase in
@@ -118,8 +140,8 @@ struct MailWindow: View {
         .navigationTitle("ProtonX Mail")
         .toolbar {
             ToolbarItem { if store.busy { ProgressView().controlSize(.small) } }
-            ToolbarItem { Button { store.compose() } label: { Label("New message", systemImage: "square.and.pencil") }.disabled(store.busy || store.draft != nil).keyboardShortcut("n", modifiers: [.command]) }
-            ToolbarItem { Button { store.refresh() } label: { Label("Refresh Mail", systemImage: "arrow.clockwise") }.disabled(store.busy || store.demo).keyboardShortcut("r", modifiers: [.command, .shift]) }
+            ToolbarItem { Button { store.compose() } label: { Label("New message", systemImage: "square.and.pencil") }.disabled(store.busy || store.draft != nil) }
+            ToolbarItem { Button { store.refresh() } label: { Label("Refresh Mail", systemImage: "arrow.clockwise") }.disabled(store.busy || store.demo) }
         }
     }
     private var mailboxLayout: some View {
@@ -174,7 +196,7 @@ struct MailWindow: View {
                 HStack(spacing: 10) {
                     Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
                     TextField("Search loaded messages", text: $store.query).textFieldStyle(.plain).font(.system(size: 14))
-                        .accessibilityIdentifier("mailSearch")
+                        .focused($focus, equals: "search").accessibilityIdentifier("mailSearch")
                     if !store.query.isEmpty {
                         Button { store.query = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
                             .buttonStyle(.plain).accessibilityLabel("Clear mail search")
@@ -238,6 +260,31 @@ struct MailWindow: View {
                 .onChange(of: store.selectedItem) { _, _ in store.select() }
         } detail: { messageReader }
     }
+    private func mailAction(_ action: NativeMailAction) -> some View {
+        Button { store.actOnMessage(action) } label: { Image(systemName: action.symbol) }
+            .buttonStyle(MailActionStyle())
+            .help(action.title).accessibilityLabel(action.title)
+            .accessibilityIdentifier("mailAction." + action.rawValue)
+            .disabled(!store.canPerform(action))
+    }
+    private func organizationActions(_ message: NativeMailMessage) -> some View {
+        HStack(spacing: 8) {
+            mailAction(store.messageActions.contains(.read) ? .read : .unread).keyboardShortcut("u", modifiers: [.command, .shift])
+            mailAction(.archive).keyboardShortcut("e", modifiers: [.command])
+            if store.messageActions.contains(.inbox) { mailAction(.inbox) }
+            mailAction(.trash).keyboardShortcut(.delete, modifiers: [.command])
+        }.fixedSize()
+    }
+    private func replyActions(_ message: NativeMailMessage) -> some View {
+        HStack(spacing: 8) {
+            if message.isDraft == true && message.isScheduled != true {
+                Button("Edit draft", systemImage: "pencil") { store.compose("open") }.buttonStyle(MailActionStyle())
+            } else if message.canReply != false {
+                Button("Reply", systemImage: "arrowshape.turn.up.left") { store.compose("reply") }.buttonStyle(MailActionStyle())
+                Button("Reply all", systemImage: "arrowshape.turn.up.left.2") { store.compose("reply_all") }.buttonStyle(MailActionStyle())
+            }
+        }.fixedSize().disabled(store.busy || store.body == nil || store.draft != nil)
+    }
     @ViewBuilder private var messageReader: some View {
             if let message = store.selectedMessage {
                 ScrollView {
@@ -266,14 +313,10 @@ struct MailWindow: View {
                                     }
                                     if message.date > 0 { Text(Date(timeIntervalSince1970: Double(message.date)), format: .dateTime).font(.caption).foregroundStyle(.secondary).padding(.leading, 50) }
                                 }.font(.system(size: 13)).textSelection(.enabled)
-                                HStack(spacing: 8) {
-                                    if message.isDraft == true && message.isScheduled != true {
-                                        Button("Edit draft", systemImage: "pencil") { store.compose("open") }.buttonStyle(MailActionStyle())
-                                    } else if message.canReply != false {
-                                        Button("Reply", systemImage: "arrowshape.turn.up.left") { store.compose("reply") }.buttonStyle(MailActionStyle())
-                                        Button("Reply all", systemImage: "arrowshape.turn.up.left.2") { store.compose("reply_all") }.buttonStyle(MailActionStyle())
-                                    }
-                                }.disabled(store.busy || store.body == nil || store.draft != nil)
+                                ViewThatFits(in: .horizontal) {
+                                    HStack(spacing: 12) { organizationActions(message); Spacer(minLength: 8); replyActions(message) }
+                                    VStack(alignment: .leading, spacing: 12) { organizationActions(message); replyActions(message) }
+                                }
                             }.padding(22).frame(maxWidth: .infinity, alignment: .leading)
                             Divider()
                             if let body = store.body { MailMessageContent(text: body, sanitizedHTML: store.sanitizedHTML).id(message.id) }

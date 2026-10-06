@@ -160,3 +160,21 @@ These are paths in the pinned repositories recorded in `upstream.lock.json`:
   `mail_scroller.rs`, `mail_scroller/source/data_scroller_source.rs`.
 - ProtonX: `Tools/ProtonXMailHelper/src/main.rs` (`snapshot`),
   `Tools/MailContractTests/local_storage.rs`, both native stores and list views.
+
+## Candidate attachment cache progress (2026-10-06)
+
+New attachment/embedded MIME writes in the opt-in candidate now use SQLCipher
+containers through a pinned SDK adapter, with in-memory reads/copies and generic
+filenames. Synthetic genuine-SDK store/cache-hit/copy tests pass alongside
+wrong-key, corruption and plaintext-absence checks. Startup rejects legacy cache
+layouts/links before Keychain and verifies new containers before SDK startup;
+remaining cache data also prevents replacement key creation. Those checks add
+unmeasured startup work. Existing cache conversion/rebasing, export/staging/file
+API audit, whole-profile cutover and queued-send recovery remain gates. The normal
+app remains on its documented plaintext database/cache implementation. See
+[the migration boundary](MAIL_STORAGE_MIGRATION.md).
+
+Pass's read-only encrypted saved vault is now implemented and synthetic-tested;
+its older "future cache" discussion above is superseded by
+[OFFLINE_DESIGN.md](OFFLINE_DESIGN.md). Real disconnected restart and update
+Keychain continuity still need user acceptance.

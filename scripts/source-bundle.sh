@@ -139,8 +139,9 @@ The opt-in Mail storage candidate can be rebuilt in `mail-helper` with
 `cargo test --offline --locked -p protonx-mail-storage -p protonx-mail-helper
 --features protonx-mail-helper/secure-storage --profile mail-macos-debug`.
 Do not copy that candidate into an account app: legacy profiles are refused,
-whole-profile migration/attachment protection remain incomplete, and ordinary
-app builds deliberately package the default helper. Read `protonx/docs/LOCAL_STORAGE.md`.
+new attachment/MIME cache writes are protected but existing-file migration and
+the full file API audit remain incomplete. Ordinary app builds deliberately
+package the default helper. Read `protonx/docs/LOCAL_STORAGE.md`.
 
 The build produces `protonx/build/ProtonX.app` with local ad-hoc signatures by default.
 It does not notarize or install the app. Keep this source archive available

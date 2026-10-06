@@ -26,6 +26,8 @@ assert 'platform: "macos"' in helper and 'product: "mail"' in helper
 assert re.search(r'protocol::WEB_VERSION,\s*protocol::DESKTOP_VERSION', helper)
 assert 'mod protocol;' in helper
 assert 'mod reader;' in helper
+assert 'mod inbox_actions;' in helper
+assert (native / 'protonx-mail-helper/src/inbox_actions.rs').read_bytes() == (root / 'Tools/ProtonXMailHelper/src/inbox_actions.rs').read_bytes()
 assert (native / 'protonx-mail-helper/src/reader.rs').read_bytes() == (root / 'Tools/ProtonXMailHelper/src/reader.rs').read_bytes()
 constants = (native / 'protonx-mail-helper/src/protocol.rs').read_text()
 for key, name in [('webVersion', 'WEB_VERSION'), ('desktopVersion', 'DESKTOP_VERSION'), ('userAgent', 'USER_AGENT')]:

@@ -62,6 +62,29 @@ Removing a marker is not a supported recovery action. No production abort/cutove
 workflow is shipped; tests use disposable directories that are deleted only by
 the synthetic fixture owner after assertions.
 
+## Attachment cache adapter (2026-10-06)
+
+The opt-in candidate now writes newly cached attachment/embedded-MIME payloads
+into atomic SQLCipher blob containers. The SDK cache hit/copy paths and calendar
+invite parser decrypt them in memory. Generic filenames replace original names
+on disk, with names retained in encrypted metadata. There is no native attachment
+export endpoint; SDK file paths in this candidate refer to ciphertext containers.
+
+Synthetic tests exercise the real SDK store/read/copy path and validate wrong keys,
+corruption, empty/bounded data, replacement, permissions, links and plaintext
+absence. Temporary/published files have mode 0600; rollback journals stay in memory.
+The helper configures its key before SDK startup. Unkeyed upstream fixtures retain
+upstream behavior. The normal app does not enable this feature. Startup inventories this cache,
+refuses legacy names/links before Keychain access, and validates candidate payloads
+before SDK construction. A remaining cache or format marker prevents creation of
+a replacement storage key when databases are missing. Full cache validation adds
+work to startup; its cost has not been benchmarked.
+
+Existing files and absolute cache paths have not been migrated/rebased. Remaining
+file APIs, staging and sender-image paths need an activation audit. These new-write
+contracts do not establish whole-profile upgrade or queued-send recovery safety.
+SQLCipher uses its [documented database/key APIs](https://www.zetetic.net/sqlcipher/sqlcipher-api/).
+
 ## Activation gates that remain
 
 - Protect attachment/embedded-MIME file caches and account for their absolute

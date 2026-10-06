@@ -179,3 +179,21 @@ fn truncated_files_and_symlink_upgrade_are_refused_without_replacing_files() {
             .is_symlink()
     );
 }
+
+#[test]
+fn cache_inventory_sees_legacy_payloads_and_refuses_links() {
+    let root = tempfile::tempdir().unwrap();
+    let cache = root.path().join("cache/attachments/1");
+    std::fs::create_dir_all(&cache).unwrap();
+    let path = cache.join("synthetic-private-name.txt");
+    std::fs::write(&path, b"SYNTHETIC-CACHE").unwrap();
+    assert_eq!(protonx_mail_storage::attachment_files(root.path()).unwrap(), vec![path.clone()]);
+    let link = cache.join("linked.pxb");
+    std::os::unix::fs::symlink(&path, &link).unwrap();
+    assert!(protonx_mail_storage::attachment_files(root.path()).is_err());
+    std::fs::remove_file(&link).unwrap();
+    std::fs::hard_link(&path, &link).unwrap();
+    assert!(protonx_mail_storage::attachment_files(root.path()).is_err());
+    std::fs::remove_file(&link).unwrap();
+    assert_eq!(std::fs::read(&path).unwrap(), b"SYNTHETIC-CACHE");
+}

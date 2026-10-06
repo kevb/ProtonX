@@ -21,7 +21,7 @@ ProtonX is independent of Proton AG. GPL-3.0-or-later.
 | Product | Implemented | Current limits |
 | --- | --- | --- |
 | Pass | macOS authentication window and experimental native password prompts; atomic vault/Trash loading, title search and sorting; on-demand item details; password copy and reveal; TOTP copy/setup/edit; create/edit logins and notes with multiple websites and text/hidden custom fields; revision conflict protection; trash/restore; remote sign-out; encrypted saved-first loading and read-only offline browsing for personal paid accounts | no browser autofill, passkey operations, attachments, sharing UI or account switching; managed accounts stay online-only |
-| Mail | Direct native username/password, TOTP and second-password flow; separate Keychain-backed session restoration; folders, paged message list and selected-message decryption through Proton’s Mail SDK; safe text reader; native compose/reply/reply-all, From selection, draft saving and confirmed-send state | Sending and linked-Gmail delivery unverified; no human verification/FIDO-only login, threading, file upload/viewing, rich-text editing or push UI. Search covers loaded metadata, capped at 1,000 messages. Bridge compose remains an advanced prototype |
+| Mail | Direct native username/password, TOTP and second-password flow; separate Keychain-backed session restoration; folders, paged message list and selected-message decryption through Proton’s Mail SDK; sanitized HTML reader with text fallback; read/unread, archive, Trash/Inbox and move undo; native compose/reply/reply-all, From selection, draft saving and confirmed-send state | Sending and linked-Gmail delivery unverified; no human verification/FIDO-only login, threading, file upload/viewing, rich-text editing or push UI. Search covers loaded metadata, capped at 1,000 messages. Bridge compose remains an advanced prototype |
 | Drive | Architecture decision and planned integration boundary | No Drive client implemented |
 
 Native behavior: standard windows and toolbars, keyboard commands, light/dark
@@ -44,7 +44,7 @@ cd ProtonX
 open build/ProtonX.app
 ```
 
-Choose **Explore with demo data** to inspect Pass. Use **Products → Open Mail**
+Choose **Explore with demo data** to inspect Pass. Use the visible **ProtonX** product switcher or **Products → Open Mail**
 to sign in or explore the separate demo inbox. Build output defaults to ad-hoc
 signing; a configured identity gives stable signatures. See
 [local signing and its measured Keychain limits](docs/LOCAL_SIGNING.md). It is not notarized. No global dependencies are installed by the build scripts.
@@ -104,7 +104,7 @@ See [storage boundaries and the test walkthrough](docs/OFFLINE_DESIGN.md).
 
 ## Connect Mail
 
-Choose **Products → Open Mail** (⌘2) and enter your Proton username/password.
+Choose **Mail** in the **ProtonX** switcher (or ⌘2) and enter your Proton username/password.
 If required, enter an authenticator code or your second mailbox password in the
 native form. There are no ports, generated passwords or certificates in the
 normal onboarding. Native sign-in and reading have user-reported validation;
@@ -113,7 +113,9 @@ See [the native Mail integration and acceptance gates](docs/MAIL_NATIVE_SIGN_IN.
 
 Mail database encryption and faster saved-first loading are implemented as an
 opt-in developer candidate, disabled in ordinary app builds. It refuses existing
-plaintext profiles; migration and attachment protection are still required. See
+plaintext profiles. New candidate attachment/MIME cache writes are encrypted,
+but existing-profile/file migration, export/staging audit and send recovery are
+still required. See
 [local storage scope and tests](docs/LOCAL_STORAGE.md).
 
 Mail keeps its own encrypted session and Keychain entries. On restart, **Unlock
@@ -141,8 +143,8 @@ and remains subject to Bridge’s product limits. No automatic send retry is add
 ## Keyboard and menu bar
 
 - ⌘1 / ⌘2: open Pass / Mail.
-- In Mail: ⌘N compose, ⇧⌘R refresh, ⌘Return review sender/recipients before sending.
-- ⌘N: new Pass item. ⌘F: search Pass. ⌘R: refresh Pass.
+- ⌘N / ⌘F / ⌘R: new item/message, search and refresh in the front product window.
+- In Mail: ⇧⌘U read/unread, ⌘E archive, ⌘Delete Trash, ⌘Return review before sending.
 - ⌘L: lock both products. ⌘,: settings. ⌘Q: quit.
 - Optional ⌃⌥P: bring Pass forward; focus search.
 - Settings can remove the ProtonX menu-bar item entirely. The Dock and Window menu
@@ -185,3 +187,9 @@ separate from the app bundle. See [security](SECURITY.md).
 Use `./scripts/build-app.sh --skip-helper "--stage-update=ProtonX Mail Update"`
 to package a named update alongside an app that is currently running. Quit the
 current real ProtonX before launching another real bundle with the same identity.
+
+For stable Applications/Spotlight installation, add `--install` to the normal app
+build. It installs ProtonX and the **ProtonX Mail** / **ProtonX Pass** native
+launchers after signature validation, retaining previous builds. See the
+[workflow and installation guide](docs/DAILY_USE_UPDATE.md). Quit the installed app
+before updating; the installer refuses to replace running binaries.

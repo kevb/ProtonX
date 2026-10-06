@@ -29,7 +29,13 @@ include passwords, tokens, real message bodies or vault exports in public issues
   production upgrade/cutover is exposed. Both updated helpers lock the profile
   and refuse pending migrations before Keychain/SDK access. Normal builds also
   refuse encrypted profiles, avoiding SDK reset behavior. Historical older builds
-  do not honor these guards. Attachment file caches, whole-profile cutover and
+  do not honor these guards. The opt-in candidate now encrypts newly cached
+  attachment/embedded-MIME payloads in atomic SQLCipher blob containers and reads
+  them into memory, including SDK cache hits, cloning and calendar invite parsing.
+  The original filename stays in encrypted metadata; the cache filename is generic.
+  There is no native attachment export API. Internal SDK attachment paths in this
+  candidate point to ciphertext, not files another app can open directly. Existing
+  cache conversion, full file-path/export/staging audit, whole-profile cutover and
   actual draft/send recovery remain release gates. See docs/MAIL_STORAGE_MIGRATION.md.
   It never reuses Pass or Bridge credentials. `nativeMailConnected`
   is an untrusted Boolean hint; reopening requires local unlock and SDK restore.
@@ -165,3 +171,23 @@ ProtonX session can remain for UI testing. Synthetic records may remain in Trash
 the tool never purges them, sends mail, or changes account subscriptions/passwords.
 Do not run it against a primary vault. Passwords are not accepted through argv,
 environment variables, repository files or a chat message.
+
+## Mail inbox actions and launchers
+
+Mail changes target one selected, previously disclosed local message ID. The helper
+rechecks Proton's action capabilities and local destination IDs before queueing
+read/unread or a move to Archive, Trash or Inbox. Permanent and bulk deletion are
+absent. Queue acknowledgement is not proof of completed server sync. Ambiguous
+results block another app action until refresh; no app-level retry or replay is
+added. Proton's durable action queue may still finish after lock/restore. Move undo
+uses the SDK's original one-use undo object, with a 30-second native lifetime. Lock
+clears capabilities and undo state; generation checks reject late replies.
+
+Product URLs accept only `protonx://mail` and `protonx://pass` without credentials,
+paths, query data or fragments. Launchers have no helper, account store or Keychain
+access. They open the adjacent installed ProtonX bundle and refuse to route to an
+older development copy that is still running. The local installer verifies bundle
+identities/signatures, refuses running installed binaries, swaps directories
+atomically and retains previous bundles. It does not change Keychain ACLs, session
+keys or account profiles; stable local signing does not guarantee prompt-free
+Keychain access or notarization.

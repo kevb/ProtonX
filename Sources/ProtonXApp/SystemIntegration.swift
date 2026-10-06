@@ -3,6 +3,9 @@ import AppKit
 import Carbon
 
 extension Notification.Name {
+    static let protonXNewMessage = Notification.Name("ProtonX.newMessage")
+    static let protonXRefreshMail = Notification.Name("ProtonX.refreshMail")
+    static let protonXFocusMailSearch = Notification.Name("ProtonX.focusMailSearch")
     static let protonXNewItem = Notification.Name("ProtonX.newItem")
     static let protonXFocusSearch = Notification.Name("ProtonX.focusSearch")
     static let protonXLock = Notification.Name("ProtonX.lock")
