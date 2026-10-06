@@ -15,19 +15,20 @@ end-to-end workflow come before additional products.
 2. **Make Pass dependable across launches and network failures.** Validate session
    recovery, edits/conflicts/Trash restoration and interoperability with another
    client. Then add an encrypted, policy-aware read-only item cache through Proton's
-   existing storage layer, with useful freshness and recovery states.
-3. **Turn native AutoFill feasibility into a usable Pass feature.** Establish the
-   signed extension and locked credential-broker boundary, verify website matching
-   and user consent, then test Safari/system integration. Passkeys remain a separate
-   follow-on; a compiling extension probe is not working AutoFill.
-4. **Complete Mail's everyday workflow.** Validate actual send/reply delivery and
+   existing storage layer, with useful freshness and recovery states. See the
+   [automation and acceptance plan](PASS_RELIABILITY.md).
+3. **Complete Mail's everyday workflow.** Validate actual send/reply delivery and
    enabled Gmail sending identities; add read/unread, archive/trash, threading and
    attachments. Preserve drafts and distinguish confirmed delivery from uncertain
    send outcomes.
-5. **Polish suite navigation and installation.** Add a visible product switcher,
+4. **Polish suite navigation and installation.** Add a visible product switcher,
    establish reliable installed-app updates and signing/Keychain continuity, then
    provide **ProtonX Mail** and **ProtonX Pass** Spotlight launchers. Keep independent
    product windows/sessions and the optional single shared menu-bar item.
+
+Safari website AutoFill remains covered by the standalone official extension.
+A ProtonX credential provider for system/native-app integration is optional later
+work, not a daily-use release gate; see [the integration decision](CREDENTIAL_PROVIDER.md).
 
 Repository presentation is backlogged below. Drive remains exploratory; prioritise
 Pass and the shared macOS experience before expanding the suite.
@@ -56,7 +57,9 @@ release readiness.
 - Disposable-account desktop-fork interoperability and cancellation/recovery tests.
 - Resolve direct SRP rejection (HTTP 422/API 8004); TOTP/two/extra-password tests.
 - Session invalidation, revoked key, expired account and network recovery tests.
-- Native Password AutoFill and passkey/security-key support with system extensions.
+- Cross-client sync with the official Safari extension, including preservation of
+  unsupported passkey and website-matching fields during native edits. ProtonX
+  system AutoFill and direct passkey/security-key use remain optional follow-ons.
 - Attachments, sharing, identities/cards/Wi-Fi creation/editing, vault management.
 - Offline browse with reviewed local locking and recovery behavior.
 - Large vault performance and schema fixture upgrade coverage.

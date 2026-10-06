@@ -27,16 +27,21 @@ belong in this document, screenshots, tests, or public issues.
 - [Offline storage review](OFFLINE_DESIGN.md) found that cached keys/settings do
   not constitute a persisted item vault. [AutoFill feasibility](CREDENTIAL_PROVIDER.md)
   now includes a checked native API probe and conservative origin tests; no
-  extension is installed and no credential disclosure is implemented.
+  ProtonX extension is installed and no credential disclosure is implemented.
+  Safari filling can use the separate official extension; its installed wrapper
+  was confirmed on this Mac. See the updated integration decision.
 - The visual pass adds adaptive lavender/indigo surfaces, grouped rounded detail
   cards and clearer Edit/Create actions. Native selection and keyboard controls
   remain. The user reported successfully creating, syncing and deleting a live
   test login; no private contents were inspected by the agent.
 
 The next acceptance gates remain designated disposable-account CRUD verified
-from another client, restart/recovery, large-vault measurements, signed extension
-registration and an authenticated credential broker. Primary-account screenshots
-were used only as layout references; their contents were not added to the project.
+from another client, restart/recovery and large-vault measurements. A ProtonX
+credential provider is optional future system/native-app work; use the standalone
+official extension for Safari. [The reliability plan](PASS_RELIABILITY.md) separates
+existing synthetic coverage from remaining automation and live checks.
+Primary-account screenshots were used only as layout references; their contents
+were not added to the project.
 
 ## What should happen today
 
@@ -68,11 +73,11 @@ were used only as layout references; their contents were not added to the projec
    metadata-snapshot helper now handles that work with one bootstrap.
    Show refreshing/error/last-success states. Establish session recovery before
    adding periodic background work. Benchmark matched synthetic account sizes.
-5. **Start a native AutoFill feasibility spike.** Use Apple's credential-provider
-   extension APIs, a metadata-only identity index and an explicit unlock flow.
-   Resolve extension signing, entitlements, sandbox and helper access before
-   implementation. A website credential match must precede disclosure. Reuse
-   Proton's existing passkey crypto when tackling passkeys later.
+5. **Verify interoperability with the standalone official Safari extension.**
+   Use a fictional login in a designated test account after both clients sign in.
+   Check create/edit/Trash/restore sync and independent local lock/sign-out behavior.
+   Keep the extension's wrapper installed. Defer the ProtonX credential-provider
+   spike to optional system/native-app work; the compile-only probe is retained.
 
 This is an ordered backlog, not a promise that every item fits in one day.
 Authentication and a verified basic workflow are the first acceptance gates.
@@ -88,8 +93,8 @@ Authentication and a verified basic workflow are the first acceptance gates.
 | Organisation | Vault management, moving items | Vault selection only; no create/rename/delete/move UI | Create/rename vaults and move items after permission-aware metadata |
 | Permissions | Shared vaults and role-specific access | Create/update/trash flags surfaced; UI + native SDK guards; server remains authoritative | Shared-role interoperability and item-share edge cases |
 | Offline | Paid desktop access to cached items | Persisted key/settings cache; item cache only process-local; last-loaded interruption state | Persist encrypted item revisions; read-only offline policy and recovery tests |
-| Autofill | Browser extensions, including Safari; paid desktop autotype | Copy/reveal, optional global quick access and compile-only credential-provider probe | Signed extension registration + broker; retain official extensions during transition |
-| Passkeys | Existing Proton passkey support across clients | Counts only; cannot create or use passkeys | Separate extension integration and origin-bound tests; no new crypto |
+| Autofill | Browser extensions, including Safari; paid desktop autotype | Copy/reveal, optional global quick access and compile-only credential-provider probe | Use the standalone official Safari extension; defer a ProtonX system/native-app provider |
+| Passkeys | Existing Proton passkey support across clients | Counts only; cannot create or use passkeys | Retain official extension for supported browser passkeys; direct native use is deferred; preserve unsupported fields |
 | Attachments | Attach/open/save/manage files on supported paid plans | Counts only | Deferred until encrypted file handling, quota and safe temporary-file lifecycle are designed |
 | History and recovery | Paid item history; Trash | Trash/restore; no history UI; no permanent deletion | Read-only item history and recovery before considering permanent deletion |
 | Sharing and aliases | Vault sharing, secure links, hide-my-email aliases | Alias display; no sharing or alias creation | Later: invitations, roles and expiry handling through existing Proton implementations |

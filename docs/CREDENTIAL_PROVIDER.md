@@ -1,10 +1,44 @@
 # Native AutoFill feasibility
 
-Decision date: 2026-10-06. Keep AutoFill outside the main app until its security
-and distribution boundaries are proven. `Experiments/CredentialProvider` is a
+Decision date: 2026-10-06. Defer a ProtonX credential provider; keep it outside
+the main app until its security and distribution boundaries are proven.
+`Experiments/CredentialProvider` is a
 compile-only macOS 14 API probe, not an installed extension. It cancels every
 request and never publishes identities or returns passwords. There is no account
 access, shared Keychain access, entitlement registration or credential IPC.
+
+## Safari decision: use the standalone official extension
+
+Proton describes its Safari extension as standalone in the
+[macOS/Safari launch announcement](https://proton.me/blog/proton-pass-all-devices).
+Its [setup guide](https://proton.me/support/pass-setup#Safari) installs **Proton Pass
+for Safari** from the App Store and signs in through the browser toolbar. The
+[current upstream build instructions](https://github.com/ProtonMail/WebClients/blob/main/applications/pass-extension/README.md)
+package it as a separate Mac Catalyst app with a Safari Web Extension, rather
+than the Electron desktop app. This is current upstream documentation, not a
+change to ProtonX's pinned dependencies.
+
+Read-only bundle inspection on the development Mac found both version 1.41.1:
+`me.proton.pass.catalyst` with the contained
+`me.proton.pass.catalyst.safari-extension`, and separately
+`me.proton.pass.electron`. The extension has its own background service worker
+and browser storage permissions. Installation was confirmed; Safari's enabled
+state, current account and live filling were not inspected.
+
+Keep the Safari wrapper installed. The intended combination is ProtonX for
+native vault browsing/editing and the official extension for Safari filling,
+autosave and supported browser passkeys. They sync through the same Proton
+account; ProtonX does not share session credentials, local unlock state or a
+Keychain group with the extension. A change appears after each client's sync;
+locking or signing out of ProtonX does not lock or sign out the extension.
+
+This removes an immediate requirement to implement another Safari extension.
+A ProtonX OS credential provider for native-app/system surfaces is a separate,
+optional future project; this check does not establish its platform coverage.
+Before claiming end-to-end interoperability, verify a fictional test login's
+create/edit/Trash/restore cycle through both clients in a designated test account.
+Do not change installed extension permissions or access real vault contents as
+part of synthetic validation. See [the reliability plan](PASS_RELIABILITY.md).
 
 ## What was verified
 
@@ -66,5 +100,6 @@ notarization, licensing and corresponding-source gates remain applicable.
 - Verify retrieval/return with a designated disposable Proton vault and another
   client. Treat passkeys as a subsequent project using Proton's existing crypto.
 
-The next useful work is the signed registration and broker prototype, not an
-AutoFill toggle that cannot yet deliver credentials safely.
+If system/native-app integration is prioritised later, start with signed
+registration and the broker prototype. Until then, retain the compile-only probe
+and focus on Pass reliability; do not expose a non-functional AutoFill toggle.
