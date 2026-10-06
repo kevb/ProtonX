@@ -1,5 +1,9 @@
 # Roadmap
 
+See the [2026-10-06 official-client gap analysis](GAP_ANALYSIS.md) for the
+ordered Pass-first work plan and acceptance gates. Sign-in and a verified
+end-to-end workflow come before additional products.
+
 ## Before a daily-use Pass release
 
 - Validate the new desktop protocol backend on non-CLI-eligible accounts,

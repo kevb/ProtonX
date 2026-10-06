@@ -477,9 +477,18 @@ index be73653..e543363 100644
          }
      };
 diff --git a/pass/src/auth/web_login.rs b/pass/src/auth/web_login.rs
-index 389475a..f399e07 100644
+index 389475a..2510026 100644
 --- a/pass/src/auth/web_login.rs
 +++ b/pass/src/auth/web_login.rs
+@@ -28,7 +28,7 @@ use anyhow::{Context as _, Result, anyhow, bail};
+ use base64::Engine;
+ use muon::SessionCredentials;
+ use muon::app::{AppName, AppVersion, SemVer};
+-use muon::auth::{Auth, Tokens};
++use muon::auth::{Auth, Tokens, WithCodeFlow};
+ use muon::common::sdk::Sdk;
+ use muon::env::{Env, Environment};
+ use muon::rt::Sleep;
 @@ -42,7 +42,6 @@ const POLL_INTERVAL_SECONDS: u64 = 10;
  const MAX_POLL_ATTEMPTS: u32 = 60; // 60 times every 10 seconds -> 10 minutes total
  const MAX_CONSECUTIVE_FAILURES: u32 = 3;
@@ -502,7 +511,17 @@ index 389475a..f399e07 100644
  
      let encoded_payload = urlencoding::encode(&payload);
  
-@@ -284,7 +284,7 @@ pub async fn perform_web_login<C: PassClientContext, T: Sleep>(
+@@ -271,6 +271,9 @@ pub async fn perform_web_login<C: PassClientContext, T: Sleep>(
+     sdk: &Sdk,
+     time: &T,
+ ) -> Result<WebLoginResult> {
++    if event_handler.web_login_child_client_id() == "macos-pass" {
++        return perform_desktop_web_login(session, store, event_handler, time).await;
++    }
+     let env = {
+         let store_guard = store.read();
+         store_guard.env.clone()
+@@ -284,7 +287,7 @@ pub async fn perform_web_login<C: PassClientContext, T: Sleep>(
      info!("User Code: {}", fork_response.user_code);
  
      let encryption_key = crate::domain::crypto::generate_encryption_key();
@@ -511,10 +530,53 @@ index 389475a..f399e07 100644
          .context("Error building web login URL")?;
  
      // Notify event handler of URL generation
-@@ -325,3 +325,20 @@ pub async fn perform_web_login<C: PassClientContext, T: Sleep>(
+@@ -325,3 +328,80 @@ pub async fn perform_web_login<C: PassClientContext, T: Sleep>(
          session_payload,
      })
  }
++
++// Muon's public fork flow explicitly skips anonymous-session creation. The
++// desktop backend accepts the fork endpoints but rejects that preliminary
++// anonymous session. Keep the original CLI flow and eligibility policy intact.
++async fn perform_desktop_web_login<C: PassClientContext, T: Sleep>(
++    session: &Session<C>,
++    store: Arc<RwLock<PassSessionStore>>,
++    event_handler: Arc<dyn AuthEventHandler>,
++    time: &T,
++) -> Result<WebLoginResult> {
++    let env = { store.read().env.clone() };
++    let encryption_key = crate::domain::crypto::generate_encryption_key();
++    let mut flow = session.auth().from_fork().with_code().await;
++    if let WithCodeFlow::Poll(ref pending) = flow {
++        let url = build_web_login_url(&env, pending.code(), &encryption_key, "macos-pass")?;
++        event_handler.on_web_login_url_generated(&url).await?;
++    }
++    for attempt in 0..=MAX_POLL_ATTEMPTS {
++        match flow {
++            WithCodeFlow::Ok(authenticated, payload) => {
++                let credentials = authenticated.remove_auth().await
++                    .ok_or_else(|| anyhow!("Missing fork credentials"))?;
++                let payload = Zeroizing::new(payload.ok_or_else(|| anyhow!("Missing fork payload"))?);
++                let session_payload = decrypt_payload(&encryption_key,
++                    &base64::engine::general_purpose::STANDARD.encode(&*payload))?;
++                return Ok(WebLoginResult { credentials, session_payload });
++            }
++            WithCodeFlow::Failed { reason, .. } => {
++                let error: muon::Error = reason.into();
++                return Err(error.into());
++            }
++            WithCodeFlow::Poll(pending) => {
++                if attempt == MAX_POLL_ATTEMPTS { break; }
++                event_handler.on_poll_progress(attempt + 1, MAX_POLL_ATTEMPTS).await?;
++                flow = pending.poll().await;
++                if matches!(flow, WithCodeFlow::Poll(_)) {
++                    time.sleep(core::time::Duration::from_secs(POLL_INTERVAL_SECONDS)).await;
++                }
++            }
++        }
++    }
++    Err(anyhow!("Desktop authentication timed out"))
++}
 +
 +#[cfg(test)]
 +mod protonx_tests {
@@ -530,5 +592,22 @@ index 389475a..f399e07 100644
 +            let payload = urlencoding::decode(fragment.strip_prefix("payload=").unwrap()).unwrap();
 +            assert_eq!(payload, format!("0:SYNTHETIC-CODE:{}:{child}", base64::engine::general_purpose::STANDARD.encode(key)));
 +        }
++    }
++
++    #[test]
++    fn desktop_fork_payload_roundtrip_and_tamper_rejection() {
++        let key = [42u8; 32];
++        let nonce_bytes = [24u8; 16];
++        type Cipher = AesGcm<Aes256, U16>;
++        let cipher = Cipher::new(&Key::<Cipher>::try_from(key.as_slice()).unwrap());
++        let encrypted = cipher.encrypt(&Nonce::<U16>::try_from(nonce_bytes.as_slice()).unwrap(),
++            br#"{"keyPassword":"synthetic-passphrase"}"#.as_slice()).unwrap();
++        let mut payload = nonce_bytes.to_vec();
++        payload.extend(encrypted);
++        let encoded = base64::engine::general_purpose::STANDARD.encode(&payload);
++        assert_eq!(decrypt_payload(&key, &encoded).unwrap().key_password, "synthetic-passphrase");
++        *payload.last_mut().unwrap() ^= 1;
++        assert!(decrypt_payload(&key, &base64::engine::general_purpose::STANDARD.encode(payload)).is_err());
++        assert!(decrypt_payload(&key, "c2hvcnQ=").is_err());
 +    }
 +}

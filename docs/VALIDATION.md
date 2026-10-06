@@ -56,6 +56,27 @@ so short challenge records are handled immediately without blocking the Swift
 cooperative executor. Clipboard ownership and stale-result policies have unit
 coverage; system-level interaction is not fully automated.
 
+## Morning follow-up, 2026-10-06
+
+- The original desktop handoff returned HTTP 422/API 8004 before the account
+  window could open. Credential-free requests with the pinned desktop identity
+  confirmed that `POST /auth/v4/sessions` returns those codes, while fork creation
+  at both `/auth/sessions/forks` and `/auth/v4/sessions/forks` succeeds. No response
+  bodies, fork codes, selectors, tokens or account data were logged.
+- Desktop handoff now uses Muon's existing public `from_fork().with_code()` flow,
+  which skips anonymous-session creation on fork requests. CLI login and its
+  eligibility policy retain the original implementation. The existing Proton
+  payload decryption implementation is reused; malformed/tampered payloads are
+  rejected, and fork credentials are removed before validating the payload.
+- Local verification passed: 34 Swift tests (plus the optional Bridge test
+  skipped), 114 helper tests in each product mode, and 249 SDK unit/integration
+  tests, with two intentional fixture-dump helpers ignored. The release helper
+  and native app bundle rebuild passed. The corrected account handoff progressed
+  past the previous immediate rejection. A successfully completed sign-in and
+  remote synthetic-item workflow still need user validation.
+- The feature comparison and next acceptance gates are recorded in
+  [GAP_ANALYSIS.md](GAP_ANALYSIS.md).
+
 ## Not established
 
 - Successful desktop account-fork login and vault setup, remote vault CRUD/sync,
