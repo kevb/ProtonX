@@ -14,7 +14,7 @@ Existing tests are evidence of local contracts, not full Proton interoperability
 | Edits/conflicts | Revision required/forwarded; native stale-revision guards; scripted conflict/unconfirmed edit blocks another write until refresh; user reports successful bidirectional desktop edits and a passed conflict test | Broader unsupported-field round trips and independent-client event reconciliation |
 | Trash restoration | Synthetic lifecycle and command-path restore/denial, lost acknowledgement, failed post-write refresh; user reports live Trash/restore passed | Larger workloads and cross-client Trash reconciliation under interrupted refresh |
 | Restart/session recovery | Synthetic saved-session/local-unlock and expiry tests; user reports live quit/restart passed | Keychain continuity across rebuilds/upgrades and real server expiry/revocation interoperability |
-| Encrypted offline browse | [Storage review](OFFLINE_DESIGN.md) exists; a durable item cache is not implemented | Add read-only persistence through Proton's existing encryption/storage layer; test wrong/missing keys, corruption, rotations, account isolation, policy expiry and lock races |
+| Encrypted offline browse | SQLCipher generation storage plus encrypted-session restore, wrong/missing keys, corruption, rotation, account/session binding, policy lease, saved-first/reconnect/lock races are synthetic-tested | Real-account disconnected restart and Keychain update continuity; larger-vault performance and managed-policy support |
 
 Some process fixtures execute a real disposable child process; preview lifecycle
 tests use an in-memory model and deliberately forbid account access. Neither
@@ -54,7 +54,7 @@ contents stay out of public tests, screenshots and logs.
 3. Trash and restore only that record; verify active/Trash membership after sync.
 4. Restart ProtonX, perform local unlock when prompted, and verify the same
    record and session. Test cancellation without changing unrelated data.
-5. Once encrypted offline storage is implemented, prove a fresh process can
+5. For the saved-vault update, prove a fresh process can
    browse the permitted saved record while its test transport is unavailable,
    with clear freshness state and writes disabled; reconnect and reconcile.
 
@@ -69,4 +69,4 @@ remain refused. See [the Safari integration decision](CREDENTIAL_PROVIDER.md).
 The user subsequently reported the bidirectional edit/sync, conflict, Trash/restore
 and quit/restart acceptance steps passed. This is live user-observed evidence for
 the fictional login, not automated real-account testing or coverage of all item
-types. Encrypted offline browsing remains unimplemented.
+types. Encrypted offline browsing now has synthetic storage/app coverage; its disconnected real-account acceptance is still pending.

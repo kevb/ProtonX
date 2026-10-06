@@ -1,3 +1,98 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index b2c4e0c..5ec4a8b 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -1114,16 +1114,6 @@ dependencies = [
+  "crossbeam-utils",
+ ]
+ 
+-[[package]]
+-name = "console_error_panic_hook"
+-version = "0.1.7"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "a06aeb73f470f66dcdbf7223caeebb85984942f22f1adb2a088cf9668146bbbc"
+-dependencies = [
+- "cfg-if",
+- "wasm-bindgen",
+-]
+-
+ [[package]]
+ name = "const-oid"
+ version = "0.9.6"
+@@ -4342,47 +4332,6 @@ dependencies = [
+  "tokio",
+ ]
+ 
+-[[package]]
+-name = "pass-mobile-sdk"
+-version = "2.4.2"
+-dependencies = [
+- "anyhow",
+- "async-trait",
+- "pass",
+- "serde",
+- "serde_json",
+- "tracing",
+- "tracing-subscriber",
+- "uniffi",
+-]
+-
+-[[package]]
+-name = "pass-uniffi-bindgen"
+-version = "2.4.2"
+-dependencies = [
+- "uniffi",
+-]
+-
+-[[package]]
+-name = "pass-web-sdk"
+-version = "2.4.2"
+-dependencies = [
+- "anyhow",
+- "async-trait",
+- "console_error_panic_hook",
+- "js-sys",
+- "pass",
+- "send_wrapper",
+- "serde",
+- "serde-wasm-bindgen",
+- "time",
+- "tracing",
+- "tracing-subscriber",
+- "tsify",
+- "wasm-bindgen",
+- "wasm-bindgen-futures",
+-]
+-
+ [[package]]
+ name = "passkey"
+ version = "0.5.0"
+@@ -5997,15 +5946,6 @@ dependencies = [
+  "serde_core",
+ ]
+ 
+-[[package]]
+-name = "send_wrapper"
+-version = "0.6.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "cd0b0ec5f1c1ca621c432a25813d8d60c88abe6d3e08a3eb9cf37d97a0fe3d73"
+-dependencies = [
+- "futures-core",
+-]
+-
+ [[package]]
+ name = "serde"
+ version = "1.0.229"
+@@ -7243,9 +7183,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "76407f5f396a2c949a069eff4a9fca9ce462410eb872bffef4c2b7b89804a77a"
+ dependencies = [
+  "anyhow",
+- "camino",
+  "cargo_metadata",
+- "clap",
+  "uniffi_bindgen",
+  "uniffi_core",
+  "uniffi_macros",
 diff --git a/pass-cli/Cargo.toml b/pass-cli/Cargo.toml
 index c1ac6ab..ef3cf74 100644
 --- a/pass-cli/Cargo.toml
@@ -179,20 +274,22 @@ index 2fed7a9..5673a84 100644
  const XOR_KEY_LENGTH: usize = 32;
  
 diff --git a/pass-cli/src/main.rs b/pass-cli/src/main.rs
-index 5530278..e084eba 100644
+index 5530278..4b352da 100644
 --- a/pass-cli/src/main.rs
 +++ b/pass-cli/src/main.rs
-@@ -40,6 +40,9 @@ mod env_config;
+@@ -40,6 +40,11 @@ mod env_config;
  mod features;
  mod helpers;
  mod logs;
 +#[cfg(feature = "protonx-desktop")]
 +mod native_ui;
++#[cfg(feature = "protonx-desktop")]
++mod native_cache;
 +mod protonx;
  mod storage;
  mod telemetry;
  mod utils;
-@@ -167,6 +170,34 @@ enum Commands {
+@@ -167,6 +172,44 @@ enum Commands {
          #[command(subcommand)]
          command: commands::share::ShareCommands,
      },
@@ -202,6 +299,16 @@ index 5530278..e084eba 100644
 +    #[cfg(feature = "protonx-desktop")]
 +    #[command(name = "native-snapshot", hide = true)]
 +    NativeSnapshot,
++    #[cfg(feature = "protonx-desktop")]
++    #[command(name = "native-cache-snapshot", hide = true)]
++    NativeCacheSnapshot,
++    #[cfg(feature = "protonx-desktop")]
++    #[command(name = "native-cache-detail", hide = true)]
++    NativeCacheDetail {
++        #[arg(long)] generation: String,
++        #[arg(long)] share_id: String,
++        #[arg(long)] item_id: String,
++    },
 +    #[cfg(feature = "protonx-desktop")]
 +    #[command(name = "native-create", hide = true)]
 +    NativeCreate {
@@ -227,13 +334,17 @@ index 5530278..e084eba 100644
      #[command(about = "User operations")]
      User {
          #[command(subcommand)]
-@@ -229,13 +260,37 @@ impl Commands {
+@@ -229,13 +272,41 @@ impl Commands {
  #[tokio::main]
  async fn main() -> Result<()> {
      if let Err(e) = run().await {
 +        #[cfg(feature = "protonx-desktop")]
 +        if e.downcast_ref::<pass::NativeRevisionConflict>().is_some() {
 +            utils::report_native_error("conflict", None, None);
++        }
++        #[cfg(feature = "protonx-desktop")]
++        if e.downcast_ref::<native_cache::CacheUnavailable>().is_some() {
++            utils::report_native_error("cacheUnavailable", None, None);
 +        }
          if e.is_session_invalidated() {
 +            utils::report_native_error("sessionInvalidated", None, None);
@@ -265,7 +376,7 @@ index 5530278..e084eba 100644
          return Err(e);
      }
  
-@@ -245,6 +300,12 @@ async fn main() -> Result<()> {
+@@ -245,6 +316,12 @@ async fn main() -> Result<()> {
  async fn run() -> Result<()> {
      logs::setup_logs();
      let cli = Cli::parse();
@@ -278,7 +389,7 @@ index 5530278..e084eba 100644
  
      if cli.command.is_force_logout() {
          return commands::logout::force_logout().await;
-@@ -260,10 +321,12 @@ async fn run() -> Result<()> {
+@@ -260,10 +337,12 @@ async fn run() -> Result<()> {
  
      // Check for updates in the background (non-blocking, weekly check)
      // This runs for all commands except update itself to avoid recursion
@@ -295,12 +406,48 @@ index 5530278..e084eba 100644
          let _ = commands::update::check_for_updates_background(&base_dir).await;
      }
  
-@@ -375,6 +438,27 @@ async fn run() -> Result<()> {
+@@ -275,6 +354,35 @@ async fn run() -> Result<()> {
+     let (client, store) = client::get_client(base_dir.clone(), client_features.clone())
+         .await
+         .context("Error getting client")?;
++    #[cfg(feature = "protonx-desktop")]
++    if !crate::protonx::policy().requires_cli_eligibility {
++        use commands::item::ItemCommands;
++        // Deliberately before SDK construction, event bootstrap and telemetry.
++        // These local-only commands must never issue an API request.
++        match &cli.command {
++            Commands::NativeCacheSnapshot | Commands::NativeCacheDetail { .. } => {
++                let (user, session) = native_cache::session_binding(&store)?;
++                let now = jiff::Timestamp::now().as_second();
++                let db = &client_features.database_manager;
++                let value = match &cli.command {
++                    Commands::NativeCacheSnapshot => native_cache::snapshot(db, user, session, now).await?
++                        .unwrap_or(serde_json::Value::Null),
++                    Commands::NativeCacheDetail { generation, share_id, item_id } =>
++                        native_cache::detail(db, user, session, now, generation.clone(), share_id.clone(), item_id.clone()).await?,
++                    _ => unreachable!(),
++                };
++                println!("{}", serde_json::to_string(&value)?);
++                return Ok(());
++            }
++            Commands::Login { .. } | Commands::NativeCreate { .. } | Commands::NativeEdit { .. } |
++            Commands::Item { command: ItemCommands::Create { .. } | ItemCommands::Update { .. } |
++                ItemCommands::Trash { .. } | ItemCommands::Untrash { .. } } => {
++                // An uncertain write must never leave a reusable pre-write cache.
++                native_cache::clear(&client_features.database_manager).await?;
++            }
++            _ => {}
++        }
++    }
+     match &cli.command {
+         Commands::Login {
+             username,
+@@ -375,6 +483,27 @@ async fn run() -> Result<()> {
          .await;
  
      match cli.command {
 +        #[cfg(feature = "protonx-desktop")]
-+        Commands::NativeSnapshot => native_ui::snapshot(client).await,
++        Commands::NativeSnapshot => native_ui::snapshot(client, native_cache::session_binding(&store)?).await,
 +        #[cfg(feature = "protonx-desktop")]
 +        Commands::NativeTotp { share_id, item_id } => {
 +            native_ui::totp(client, share_id, item_id).await
@@ -323,7 +470,7 @@ index 5530278..e084eba 100644
          Commands::Logout { .. } => commands::logout::run(client).await,
          Commands::Info { output } => commands::info::run(client, base_dir, output, store).await,
          Commands::Inject {
-@@ -407,3 +491,170 @@ async fn run() -> Result<()> {
+@@ -407,3 +536,174 @@ async fn run() -> Result<()> {
          _ => Ok(()),
      }
  }
@@ -364,6 +511,8 @@ index 5530278..e084eba 100644
 +            #[cfg(feature = "protonx-desktop")]
 +            Self::NativeCapabilities
 +            | Self::NativeSnapshot
++            | Self::NativeCacheSnapshot
++            | Self::NativeCacheDetail { .. }
 +            | Self::NativeCreate { .. }
 +            | Self::NativeEdit { .. }
 +            | Self::NativeTotp { .. } => true,
@@ -424,6 +573,8 @@ index 5530278..e084eba 100644
 +    fn native_snapshot_and_editor_commands_are_desktop_only() {
 +        for args in [
 +            vec!["pass-cli", "native-snapshot"],
++            vec!["pass-cli", "native-cache-snapshot"],
++            vec!["pass-cli", "native-cache-detail", "--generation", "synthetic", "--share-id", "synthetic", "--item-id", "synthetic"],
 +            vec![
 +                "pass-cli",
 +                "native-totp",
@@ -494,15 +645,637 @@ index 5530278..e084eba 100644
 +        }
 +    }
 +}
+diff --git a/pass-cli/src/native_cache.rs b/pass-cli/src/native_cache.rs
+new file mode 100644
+index 0000000..e13147f
+--- /dev/null
++++ b/pass-cli/src/native_cache.rs
+@@ -0,0 +1,616 @@
++// Copyright (c) 2026 ProtonX contributors. GPL-3.0-or-later.
++// Local-only, read-only cache API. This module has no network client or write queue.
++use anyhow::{Context, Result, ensure};
++use pass::{NativeOfflineItem, PlanType};
++use pass_db::{
++    DatabaseManager,
++    rusqlite::{OptionalExtension, params},
++};
++use serde::{Deserialize, Serialize};
++use serde_json::Value;
++
++pub fn session_binding(
++    store: &std::sync::Arc<parking_lot::RwLock<pass::auth::PassSessionStore>>,
++) -> Result<(String, String)> {
++    use sha2::{Digest, Sha256};
++    let store = store.read();
++    ensure!(!store.needs_extra_password(), CacheUnavailable);
++    let auth = store.auth.lock();
++    let auth = auth.as_ref().ok_or(CacheUnavailable)?;
++    let user = auth.user_id().ok_or(CacheUnavailable)?.to_owned();
++    let uid = auth.uid().ok_or(CacheUnavailable)?;
++    ensure!(auth.has_scope("pass"), CacheUnavailable);
++    Ok((user, hex::encode(Sha256::digest(uid.as_bytes()))))
++}
++
++pub const CACHE_TTL: i64 = 24 * 60 * 60;
++const MAX_HEADER_BYTES: usize = 8 * 1024 * 1024;
++const MAX_ITEM_BYTES: usize = 2 * 1024 * 1024;
++const MAX_CACHE_BYTES: usize = 128 * 1024 * 1024;
++const MAX_ITEMS: usize = 20_000;
++
++#[derive(Clone, Serialize, Deserialize)]
++#[serde(deny_unknown_fields)]
++pub struct Header {
++    pub schema: u32,
++    pub user_id: String,
++    pub session_id: String,
++    pub plan: PlanType,
++    pub saved_at: i64,
++    pub expires_at: i64,
++    pub generation: String,
++    pub snapshot: Value,
++}
++
++/// Unknown/managed policies are denied. End/trial dates further bound our lease.
++/// A local lease cannot discover server revocation until reconnecting.
++pub fn expiry(plan: &pass::PassPlan, now: i64) -> Option<i64> {
++    if plan.plan_type != PlanType::Plus {
++        return None;
++    }
++    let mut end = now.checked_add(CACHE_TTL)?;
++    for bound in [plan.subscription_end, plan.trial_end]
++        .into_iter()
++        .flatten()
++    {
++        if bound > 0 {
++            end = end.min(i64::try_from(bound).ok()?);
++        }
++    }
++    (end > now).then_some(end)
++}
++
++impl Header {
++    fn valid(&self, user: &str, session: &str, now: i64) -> bool {
++        self.schema == 1
++            && self.user_id == user
++            && self.session_id == session
++            && self.plan == PlanType::Plus
++            && uuid::Uuid::parse_str(&self.generation).is_ok()
++            && self.saved_at > 0
++            && now >= self.saved_at
++            && now < self.expires_at
++            && self.expires_at > self.saved_at
++            && self.expires_at - self.saved_at <= CACHE_TTL
++    }
++}
++
++#[derive(Debug)]
++pub struct CacheUnavailable;
++impl std::fmt::Display for CacheUnavailable {
++    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
++        f.write_str("Saved vault is unavailable; refresh online")
++    }
++}
++impl std::error::Error for CacheUnavailable {}
++
++async fn connection(db: &DatabaseManager) -> Result<pass_db::DbConnection> {
++    let conn = db.get_connection().await?;
++    conn.interact_blocking(|conn| {
++        conn.busy_timeout(std::time::Duration::from_secs(5))?;
++        conn.execute_batch(
++            "CREATE TABLE IF NOT EXISTS protonx_cache_header (
++            singleton INTEGER PRIMARY KEY CHECK(singleton = 1), payload BLOB NOT NULL);
++            CREATE TABLE IF NOT EXISTS protonx_cache_items (
++            share_id TEXT NOT NULL, item_id TEXT NOT NULL, payload BLOB NOT NULL,
++            PRIMARY KEY (share_id, item_id));",
++        )
++    })?;
++    Ok(conn)
++}
++
++pub async fn clear(db: &DatabaseManager) -> Result<()> {
++    let conn = connection(db).await?;
++    conn.interact_blocking(|conn| -> Result<()> {
++        let tx = conn.unchecked_transaction()?;
++        tx.execute("DELETE FROM protonx_cache_header", [])?;
++        tx.execute("DELETE FROM protonx_cache_items", [])?;
++        tx.commit()?;
++        Ok(())
++    })
++}
++
++/// One atomic generation, so interrupted refresh cannot publish a partial vault.
++pub async fn replace(
++    db: &DatabaseManager,
++    header: Header,
++    records: Vec<NativeOfflineItem>,
++) -> Result<()> {
++    ensure!(
++        header.valid(&header.user_id, &header.session_id, header.saved_at),
++        "Invalid cache lease"
++    );
++    ensure!(records.len() <= MAX_ITEMS, "Saved vault is too large");
++    let header = serde_json::to_vec(&header)?;
++    ensure!(
++        header.len() <= MAX_HEADER_BYTES,
++        "Saved metadata is too large"
++    );
++    let mut size = header.len();
++    let mut rows = Vec::with_capacity(records.len());
++    for record in records {
++        let data = zeroize::Zeroizing::new(serde_json::to_vec(&record)?);
++        ensure!(data.len() <= MAX_ITEM_BYTES, "Saved item is too large");
++        size += data.len();
++        ensure!(size <= MAX_CACHE_BYTES, "Saved vault is too large");
++        rows.push((record.share_id.to_string(), record.id.to_string(), data));
++    }
++    let conn = connection(db).await?;
++    conn.interact_blocking(move |conn| -> Result<()> {
++        let tx = conn.unchecked_transaction()?;
++        tx.execute("DELETE FROM protonx_cache_items", [])?;
++        tx.execute("DELETE FROM protonx_cache_header", [])?;
++        tx.execute(
++            "INSERT INTO protonx_cache_header VALUES (1, ?1)",
++            params![header],
++        )?;
++        for (share, item, data) in rows {
++            tx.execute(
++                "INSERT INTO protonx_cache_items VALUES (?1, ?2, ?3)",
++                params![share, item, data.as_slice()],
++            )?;
++        }
++        tx.commit()?;
++        Ok(())
++    })
++}
++
++fn read_header(
++    conn: &pass_db::rusqlite::Connection,
++    user: &str,
++    session: &str,
++    now: i64,
++) -> Result<Option<Header>> {
++    let raw: Option<Vec<u8>> = conn
++        .query_row(
++            "SELECT payload FROM protonx_cache_header WHERE singleton=1 AND length(payload)<=?1",
++            params![MAX_HEADER_BYTES as i64],
++            |row| row.get(0),
++        )
++        .optional()?;
++    let Some(raw) = raw else {
++        return Ok(None);
++    };
++    let header: Header = serde_json::from_slice(&raw).context("Invalid saved metadata")?;
++    Ok(header.valid(user, session, now).then_some(header))
++}
++
++pub async fn snapshot(
++    db: &DatabaseManager,
++    user: String,
++    session: String,
++    now: i64,
++) -> Result<Option<Value>> {
++    let conn = connection(db).await?;
++    conn.interact_blocking(move |conn| -> Result<Option<Value>> {
++        Ok(read_header(conn, &user, &session, now)?.map(|header| {
++            serde_json::json!({
++                "snapshot": header.snapshot, "saved_at": header.saved_at,
++                "expires_at": header.expires_at, "generation": header.generation
++            })
++        }))
++    })
++}
++
++/// Check header, generation and selected row within one SQL read transaction.
++/// The entire vault's item content is never deserialized into the UI.
++pub async fn detail(
++    db: &DatabaseManager,
++    user: String,
++    session: String,
++    now: i64,
++    generation: String,
++    share: String,
++    item: String,
++) -> Result<Value> {
++    let conn = connection(db).await?;
++    conn.interact_blocking(move |conn| -> Result<Value> {
++        let tx = conn.unchecked_transaction()?;
++        let header = read_header(&tx, &user, &session, now)?.ok_or(CacheUnavailable)?;
++        ensure!(header.generation == generation, CacheUnavailable);
++        let raw: Vec<u8> = tx.query_row("SELECT payload FROM protonx_cache_items WHERE share_id=?1 AND item_id=?2 AND length(payload)<=?3",
++            params![share, item, MAX_ITEM_BYTES as i64], |row| row.get(0)).optional()?.ok_or(CacheUnavailable)?;
++        let record: NativeOfflineItem = serde_json::from_slice(&raw).context("Invalid saved item")?;
++        ensure!(record.share_id.value() == share && record.id.value() == item, CacheUnavailable);
++        let opened = record.open()?;
++        let files_unavailable = opened.flags.contains(&pass::domain::ItemFlag::ItemHasFiles);
++        Ok(serde_json::json!({"item": opened, "attachments": [], "revision": record.revision,
++            "offline_attachments_unavailable": files_unavailable}))
++    })
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use pass::domain::{
++        ItemContent, ItemData, ItemFlag, ItemId, ItemState, LocalKey, LoginItem, ShareId, VaultId,
++        crypto,
++    };
++    const NOW: i64 = 1_800_000_000;
++    fn plan(kind: PlanType) -> pass::PassPlan {
++        pass::PassPlan {
++            plan_type: kind,
++            internal_name: "synthetic".into(),
++            display_name: "Synthetic".into(),
++            manage_subscription: false,
++            subscription_end: None,
++            subscription_renewal: true,
++            subscription_coupon: None,
++            subscription_offer: None,
++            hide_upgrade: false,
++            trial_end: None,
++            vault_limit: None,
++            alias_limit: None,
++            totp_limit: None,
++            manage_alias: true,
++            storage_allowed: true,
++            storage_max_file_size: 0,
++            storage_used: 0,
++            storage_quota: 0,
++            cli_allowed: Some(false),
++        }
++    }
++    fn header() -> Header {
++        Header {
++            schema: 1,
++            user_id: "synthetic-user".into(),
++            session_id: "synthetic-session".into(),
++            plan: PlanType::Plus,
++            saved_at: NOW,
++            expires_at: NOW + CACHE_TTL,
++            generation: uuid::Uuid::new_v4().to_string(),
++            snapshot: serde_json::json!({
++                "vaults": [{"name":"Synthetic", "vault_id":"vault", "share_id":"share"}],
++                "items": [{"id":"item", "share_id":"share", "title":"Synthetic login", "item_type":"login"}],
++                "trashed_items": [], "capabilities":{"totp_limit":null,"custom_fields_allowed":true}}),
++        }
++    }
++    fn record() -> NativeOfflineItem {
++        let content = ItemData::new(
++            "Synthetic login".into(),
++            "A fictional private note".into(),
++            "uuid".into(),
++            ItemContent::Login(LoginItem {
++                email: "alex@example.com".into(),
++                username: "alex".into(),
++                password: "SYNTHETIC-ONLY-42!".into(),
++                urls: vec!["https://example.com".into()],
++                totp_uri: String::new(),
++                passkeys: vec![],
++                autofill_urls: vec![],
++            }),
++            vec![],
++        )
++        .unwrap();
++        let key = crypto::generate_encryption_key();
++        let encrypted = crypto::encrypt(
++            &content.serialize().unwrap(),
++            &key,
++            crypto::EncryptionTag::ItemContent,
++        )
++        .unwrap();
++        use base64::Engine;
++        NativeOfflineItem {
++            id: ItemId::new("item".into()),
++            share_id: ShareId::new("share".into()),
++            vault_id: VaultId::new("vault".into()),
++            revision: 7,
++            key_rotation: 2,
++            encrypted_content: base64::engine::general_purpose::STANDARD.encode(encrypted),
++            item_key: key,
++            state: ItemState::Active,
++            flags: vec![ItemFlag::ItemHasFiles],
++            create_time: "2026-10-06T12:00:00".parse().unwrap(),
++            modify_time: "2026-10-06T12:00:00".parse().unwrap(),
++            folder_id: None,
++            alias_email: None,
++        }
++    }
++    async fn db_at(path: &std::path::Path, key: &[u8]) -> DatabaseManager {
++        DatabaseManager::new(path.to_owned(), LocalKey::new(key.to_vec()))
++            .await
++            .unwrap()
++    }
++    async fn read(db: &DatabaseManager, time: i64) -> Option<Value> {
++        snapshot(
++            db,
++            "synthetic-user".into(),
++            "synthetic-session".into(),
++            time,
++        )
++        .await
++        .unwrap()
++    }
++    async fn selected(db: &DatabaseManager, h: &Header) -> Result<Value> {
++        detail(
++            db,
++            h.user_id.clone(),
++            h.session_id.clone(),
++            NOW,
++            h.generation.clone(),
++            "share".into(),
++            "item".into(),
++        )
++        .await
++    }
++
++    #[test]
++    fn paid_lease_honours_plan_trial_subscription_and_unknown_managed_policy() {
++        assert_eq!(expiry(&plan(PlanType::Plus), NOW), Some(NOW + CACHE_TTL));
++        for kind in [PlanType::Free, PlanType::Business] {
++            assert_eq!(expiry(&plan(kind), NOW), None);
++        }
++        let mut p = plan(PlanType::Plus);
++        p.trial_end = Some((NOW + 600) as u64);
++        p.subscription_end = Some((NOW + 300) as u64);
++        assert_eq!(expiry(&p, NOW), Some(NOW + 300));
++        p.trial_end = Some(NOW as u64);
++        assert_eq!(expiry(&p, NOW), None);
++        assert_eq!(expiry(&plan(PlanType::Plus), i64::MAX), None);
++    }
++
++    #[tokio::test(flavor = "multi_thread")]
++    async fn sqlcipher_reopen_reads_one_encrypted_revision_without_plaintext_files() {
++        let root = tempfile::tempdir().unwrap();
++        let key = crypto::generate_encryption_key();
++        let db = db_at(root.path(), &key).await;
++        let h = header();
++        let saved = record();
++        let json = serde_json::to_vec(&saved).unwrap();
++        assert!(!json.windows(18).any(|s| s == b"SYNTHETIC-ONLY-42!"));
++        replace(&db, h.clone(), vec![saved]).await.unwrap();
++        drop(db);
++        for file in std::fs::read_dir(root.path()).unwrap() {
++            let data = std::fs::read(file.unwrap().path()).unwrap();
++            assert!(!data.starts_with(b"SQLite format 3"));
++            for plaintext in [
++                b"Synthetic login".as_slice(),
++                b"SYNTHETIC-ONLY-42!",
++                b"A fictional private note",
++            ] {
++                assert!(!data.windows(plaintext.len()).any(|s| s == plaintext));
++            }
++        }
++        let restarted = db_at(root.path(), &key).await;
++        let snapshot = read(&restarted, NOW).await.unwrap();
++        assert_eq!(snapshot["generation"], h.generation);
++        assert!(!snapshot.to_string().contains("SYNTHETIC-ONLY"));
++        let detail = selected(&restarted, &h).await.unwrap();
++        assert_eq!(detail["revision"], 7);
++        assert_eq!(
++            detail["item"]["content"]["content"]["Login"]["password"],
++            "SYNTHETIC-ONLY-42!"
++        );
++        assert_eq!(detail["offline_attachments_unavailable"], true);
++    }
++
++    #[tokio::test(flavor = "multi_thread")]
++    async fn cache_denies_other_account_session_expiry_clock_rollback_and_unknown_schema() {
++        let root = tempfile::tempdir().unwrap();
++        let db = db_at(root.path(), &crypto::generate_encryption_key()).await;
++        let h = header();
++        replace(&db, h.clone(), vec![record()]).await.unwrap();
++        for (user, session, time) in [
++            ("other", "synthetic-session", NOW),
++            ("synthetic-user", "other", NOW),
++            ("synthetic-user", "synthetic-session", NOW - 1),
++            ("synthetic-user", "synthetic-session", NOW + CACHE_TTL),
++        ] {
++            assert!(
++                snapshot(&db, user.into(), session.into(), time)
++                    .await
++                    .unwrap()
++                    .is_none()
++            );
++            assert!(
++                detail(
++                    &db,
++                    user.into(),
++                    session.into(),
++                    time,
++                    h.generation.clone(),
++                    "share".into(),
++                    "item".into()
++                )
++                .await
++                .is_err()
++            );
++        }
++        let mut changed = h.clone();
++        changed.schema = 99;
++        assert!(replace(&db, changed.clone(), vec![record()]).await.is_err());
++        let payload = serde_json::to_vec(&changed).unwrap();
++        connection(&db)
++            .await
++            .unwrap()
++            .interact_blocking(move |conn| {
++                conn.execute(
++                    "UPDATE protonx_cache_header SET payload=?1",
++                    params![payload],
++                )
++            })
++            .unwrap();
++        assert!(read(&db, NOW).await.is_none());
++    }
++
++    #[tokio::test(flavor = "multi_thread")]
++    async fn partial_replacement_rolls_back_and_uncertain_write_invalidation_removes_generation() {
++        let root = tempfile::tempdir().unwrap();
++        let db = db_at(root.path(), &crypto::generate_encryption_key()).await;
++        let h = header();
++        replace(&db, h.clone(), vec![record()]).await.unwrap();
++        assert!(
++            replace(&db, header(), vec![record(), record()])
++                .await
++                .is_err()
++        );
++        assert_eq!(read(&db, NOW).await.unwrap()["generation"], h.generation);
++        assert!(selected(&db, &h).await.is_ok());
++        clear(&db).await.unwrap();
++        assert!(read(&db, NOW).await.is_none());
++        assert!(selected(&db, &h).await.is_err());
++    }
++
++    #[tokio::test(flavor = "multi_thread")]
++    async fn stale_generation_wrong_item_key_and_corrupt_record_are_refused() {
++        let root = tempfile::tempdir().unwrap();
++        let db = db_at(root.path(), &crypto::generate_encryption_key()).await;
++        let h = header();
++        replace(&db, h.clone(), vec![record()]).await.unwrap();
++        let newer = header();
++        replace(&db, newer.clone(), vec![record()]).await.unwrap();
++        assert!(selected(&db, &h).await.is_err());
++        let mut wrong_key = record();
++        wrong_key.item_key = crypto::generate_encryption_key();
++        replace(&db, newer.clone(), vec![wrong_key]).await.unwrap();
++        assert!(selected(&db, &newer).await.is_err());
++        connection(&db)
++            .await
++            .unwrap()
++            .interact_blocking(|conn| {
++                conn.execute("UPDATE protonx_cache_items SET payload=x'00010203'", [])
++            })
++            .unwrap();
++        assert!(selected(&db, &newer).await.is_err());
++        clear(&db).await.unwrap();
++        assert!(read(&db, NOW).await.is_none());
++    }
++
++    #[tokio::test(flavor = "multi_thread")]
++    async fn encrypted_session_restore_binds_local_only_cache_and_requires_pass_scope() {
++        use muon::{
++            auth::{Auth, Tokens},
++            env::Environment,
++        };
++        use pass::auth::{PassSessionStore, TokioExecutor};
++        use std::sync::Arc;
++        let root = tempfile::tempdir().unwrap();
++        let provider = Arc::new(crate::features::FsLocalKeyProvider::new(
++            root.path().to_owned(),
++        ));
++        let storage = Arc::new(crate::storage::FileSystemSessionStorage::new(
++            root.path().join("session.json"),
++        ));
++        let store = PassSessionStore::new(
++            Environment::new_prod(),
++            storage.clone(),
++            provider.clone(),
++            Arc::new(TokioExecutor),
++        );
++        *store.auth.lock() = Some(Auth::internal(
++            "synthetic-user",
++            "synthetic-uid",
++            Tokens::access(
++                "SYNTHETIC-ACCESS-TOKEN",
++                "SYNTHETIC-REFRESH-TOKEN",
++                vec!["pass".to_string()],
++            ),
++        ));
++        store.serialize().await.unwrap();
++        drop(store);
++        let raw = std::fs::read(root.path().join("session.json")).unwrap();
++        assert!(
++            !raw.windows(b"SYNTHETIC-ACCESS-TOKEN".len())
++                .any(|s| s == b"SYNTHETIC-ACCESS-TOKEN")
++        );
++        let restored =
++            PassSessionStore::get_from_local(storage, provider.clone(), Arc::new(TokioExecutor))
++                .await
++                .map_err(|_| anyhow::anyhow!("Synthetic session restore failed"))
++                .unwrap()
++                .unwrap();
++        let store = Arc::new(parking_lot::RwLock::new(restored));
++        let (user, session) = session_binding(&store).unwrap();
++        let features = crate::features::CliClientFeatures::new_with_key_provider(
++            root.path().to_owned(),
++            provider,
++        )
++        .await
++        .unwrap();
++        let mut h = header();
++        h.user_id = user.clone();
++        h.session_id = session.clone();
++        replace(&features.database_manager, h.clone(), vec![record()])
++            .await
++            .unwrap();
++        assert!(
++            snapshot(
++                &features.database_manager,
++                user.clone(),
++                session.clone(),
++                NOW
++            )
++            .await
++            .unwrap()
++            .is_some()
++        );
++        assert!(selected(&features.database_manager, &h).await.is_ok());
++        // No transport or SDK network client is constructed in this test.
++        *store.read().auth.lock() = Some(Auth::internal(
++            user,
++            "synthetic-uid",
++            Tokens::access("SYNTHETIC", "SYNTHETIC", vec!["mail".to_string()]),
++        ));
++        assert!(session_binding(&store).is_err());
++        *store.read().auth.lock() = None;
++        assert!(session_binding(&store).is_err());
++    }
++
++    struct MissingKey;
++    #[async_trait::async_trait]
++    impl pass::domain::LocalKeyProvider for MissingKey {
++        async fn get_key(&self) -> Result<LocalKey> {
++            anyhow::bail!("Synthetic missing key")
++        }
++        async fn remove_key(&self) -> Result<()> {
++            anyhow::bail!("Synthetic key must not be removed")
++        }
++    }
++
++    #[tokio::test(flavor = "multi_thread")]
++    async fn missing_local_key_refuses_cache_without_resetting_database() {
++        let root = tempfile::tempdir().unwrap();
++        let key = crypto::generate_encryption_key();
++        let db = db_at(root.path(), &key).await;
++        let h = header();
++        replace(&db, h.clone(), vec![record()]).await.unwrap();
++        drop(db);
++        let path = root.path().join(pass_db::DATABASE_NAME);
++        let original = std::fs::read(&path).unwrap();
++        assert!(
++            crate::features::CliClientFeatures::new_with_key_provider(
++                root.path().to_owned(),
++                std::sync::Arc::new(MissingKey)
++            )
++            .await
++            .is_err()
++        );
++        assert_eq!(std::fs::read(&path).unwrap(), original);
++        assert!(selected(&db_at(root.path(), &key).await, &h).await.is_ok());
++    }
++
++    #[tokio::test(flavor = "multi_thread")]
++    async fn wrong_database_key_and_truncation_never_reset_the_existing_database() {
++        let root = tempfile::tempdir().unwrap();
++        let key = crypto::generate_encryption_key();
++        let db = db_at(root.path(), &key).await;
++        replace(&db, header(), vec![record()]).await.unwrap();
++        drop(db);
++        let path = root.path().join(pass_db::DATABASE_NAME);
++        let original = std::fs::read(&path).unwrap();
++        let wrong = DatabaseManager::new(
++            root.path().to_owned(),
++            LocalKey::new(crypto::generate_encryption_key()),
++        )
++        .await;
++        assert!(wrong.is_err());
++        assert_eq!(std::fs::read(&path).unwrap(), original);
++        std::fs::write(&path, &original[..40]).unwrap();
++        assert!(
++            DatabaseManager::new(root.path().to_owned(), LocalKey::new(key))
++                .await
++                .is_err()
++        );
++        assert_eq!(std::fs::read(path).unwrap(), original[..40]);
++    }
++}
 diff --git a/pass-cli/src/native_ui.rs b/pass-cli/src/native_ui.rs
 new file mode 100644
-index 0000000..0b849dc
+index 0000000..7721344
 --- /dev/null
 +++ b/pass-cli/src/native_ui.rs
-@@ -0,0 +1,497 @@
+@@ -0,0 +1,545 @@
 +// Copyright (c) 2026 ProtonX contributors. GPL-3.0-or-later.
 +// Native presentation/transport only: all cryptography and writes use Proton's SDK.
-+use crate::helpers::CliPassClient;
++use crate::helpers::{CliPassClient, PassClientExt};
 +use anyhow::{Result, anyhow, ensure};
 +use pass::PlanType;
 +use pass::domain::{
@@ -522,19 +1295,48 @@ index 0000000..0b849dc
 +    can_trash: bool,
 +}
 +
-+pub async fn snapshot(client: CliPassClient) -> Result<()> {
++/// Only a transport interruption may retain a previously valid saved generation.
++fn may_retain_cache(error: &anyhow::Error) -> bool {
++    error.chain().find_map(|source| source.downcast_ref::<muon::Error>()).is_some_and(|error|
++        matches!(error.kind(), muon::ErrorKind::Resolve | muon::ErrorKind::Dial |
++            muon::ErrorKind::Connect | muon::ErrorKind::Send))
++}
++
++pub async fn snapshot(client: CliPassClient, binding: (String, String)) -> Result<()> {
++    let features = client.get_cli_client_features()?;
++    let result = snapshot_inner(client, binding).await;
++    if let Err(error) = &result {
++        if !may_retain_cache(error) {
++            // Failure to invalidate is itself a failure; never silently reset keys.
++            crate::native_cache::clear(&features.database_manager).await?;
++        }
++    }
++    result
++}
++
++async fn snapshot_inner(client: CliPassClient, binding: (String, String)) -> Result<()> {
 +    ensure!(
 +        !crate::protonx::policy().requires_cli_eligibility,
 +        "Native transport required"
 +    );
 +    let plan = client.get_user_access().await?.plan;
++    let features = client.get_cli_client_features()?;
++    let now = jiff::Timestamp::now().as_second();
++    let cache_expiry = crate::native_cache::expiry(&plan, now);
++    if cache_expiry.is_none() { crate::native_cache::clear(&features.database_manager).await?; }
++    let mut saved_records = vec![];
 +    let mut vaults = vec![];
 +    let mut active = vec![];
 +    let mut trashed = vec![];
 +    for vault in client.list_vaults().await? {
 +        let share = client.get_share(&vault.share_id).await?;
 +        let admin = share.has_permission(PermissionFlag::Admin);
-+        for item in client.list_items(&vault.share_id).await? {
++        let entries = if cache_expiry.is_some() {
++            client.native_snapshot_items(&vault.share_id).await?.into_iter().map(|(item, record)| {
++                saved_records.push(record); item
++            }).collect()
++        } else { client.list_items(&vault.share_id).await? };
++        for item in entries {
 +            let summary = crate::commands::item::list::ItemSummary::from(&item);
 +            match item.state {
 +                ItemState::Active => active.push(summary),
@@ -552,11 +1354,19 @@ index 0000000..0b849dc
 +                    && share.has_permission(PermissionFlag::Delete)),
 +        });
 +    }
-+    println!(
-+        "{}",
-+        serde_json::json!({"vaults":vaults,"items":active,"trashed_items":trashed,
-+        "capabilities":{"totp_limit":plan.totp_limit,"custom_fields_allowed":plan.plan_type != PlanType::Free}})
-+    );
++    let mut result = serde_json::json!({"vaults":vaults,"items":active,"trashed_items":trashed,
++        "capabilities":{"totp_limit":plan.totp_limit,"custom_fields_allowed":plan.plan_type != PlanType::Free}});
++    let mut cache_status = "planUnavailable";
++    if let Some(expires_at) = cache_expiry {
++        let (user_id, session_id) = binding;
++        let header = crate::native_cache::Header { schema: 1, user_id, session_id, plan: plan.plan_type,
++            saved_at: now, expires_at, generation: uuid::Uuid::new_v4().to_string(), snapshot: result.clone() };
++        cache_status = if crate::native_cache::replace(&features.database_manager, header, saved_records).await.is_ok() {
++            "ready"
++        } else { "unavailable" };
++    }
++    result["cache_status"] = serde_json::json!(cache_status);
++    println!("{}", result);
 +    Ok(())
 +}
 +
@@ -856,6 +1666,17 @@ index 0000000..0b849dc
 +#[cfg(test)]
 +mod tests {
 +    use super::*;
++    #[test]
++    fn only_connection_errors_retain_saved_cache_even_with_context() {
++        for error in [muon::ErrorKind::resolve("synthetic"), muon::ErrorKind::dial("synthetic"),
++            muon::ErrorKind::connect("synthetic"), muon::ErrorKind::send("synthetic")] {
++            assert!(may_retain_cache(&anyhow::Error::from(error).context("wrapper")));
++        }
++        for error in [muon::ErrorKind::tls("synthetic"), muon::ErrorKind::auth("synthetic"),
++            muon::Error::other("synthetic")] { assert!(!may_retain_cache(&error.into())); }
++        assert!(!may_retain_cache(&anyhow!("Unknown schema or plan")));
++    }
++
 +    fn content() -> ItemData {
 +        let mut item = ItemData::new(
 +            "Synthetic".into(),
@@ -1657,17 +2478,237 @@ index c26909b..bbe8a0a 100644
      }
  
      async fn retrieve_attachments(
+diff --git a/pass/src/item/list.rs b/pass/src/item/list.rs
+index 9f348dd..78cf312 100644
+--- a/pass/src/item/list.rs
++++ b/pass/src/item/list.rs
+@@ -171,7 +171,7 @@ impl<C: PassClientContext> PassClient<C> {
+             .collect())
+     }
+ 
+-    async fn fetch_items(&self, share_id: &ShareId) -> Result<Vec<ItemRevision>> {
++    pub(crate) async fn fetch_items(&self, share_id: &ShareId) -> Result<Vec<ItemRevision>> {
+         let mut items = Vec::new();
+         let mut pagination = SincePagination::default();
+         loop {
 diff --git a/pass/src/item/mod.rs b/pass/src/item/mod.rs
-index 34f94c4..bc691c3 100644
+index 34f94c4..bcd2159 100644
 --- a/pass/src/item/mod.rs
 +++ b/pass/src/item/mod.rs
-@@ -34,3 +34,6 @@ mod revisions;
+@@ -29,8 +29,15 @@ mod members;
+ mod r#move;
+ mod move_to_folder;
+ mod open;
++#[cfg(feature = "protonx-native")]
++mod native_offline;
++#[cfg(feature = "protonx-native")]
++pub use native_offline::NativeOfflineItem;
+ #[allow(dead_code)]
+ mod revisions;
  mod share;
  mod trash;
  mod update;
 +
 +#[cfg(feature = "protonx-native")]
 +pub use update::NativeRevisionConflict;
+diff --git a/pass/src/item/native_offline.rs b/pass/src/item/native_offline.rs
+new file mode 100644
+index 0000000..9c2c8b5
+--- /dev/null
++++ b/pass/src/item/native_offline.rs
+@@ -0,0 +1,192 @@
++// Copyright (c) 2026 ProtonX contributors. GPL-3.0-or-later.
++// Persistent representation retains Proton's encrypted item content. Item keys
++// and metadata must only be stored inside the existing SQLCipher database.
++use crate::domain::{
++    FolderId, Item, ItemData, ItemFlag, ItemId, ItemState, ShareId, VaultId, crypto,
++};
++use crate::{PassClient, PassClientContext};
++use anyhow::{Context, Result, ensure};
++use serde::{Deserialize, Serialize};
++use std::collections::HashMap;
++
++#[derive(Clone, Serialize, Deserialize)]
++#[serde(deny_unknown_fields)]
++pub struct NativeOfflineItem {
++    pub id: ItemId,
++    pub share_id: ShareId,
++    pub vault_id: VaultId,
++    pub revision: u64,
++    pub key_rotation: u8,
++    pub encrypted_content: String,
++    pub item_key: Vec<u8>,
++    pub state: ItemState,
++    pub flags: Vec<ItemFlag>,
++    pub create_time: jiff::civil::DateTime,
++    pub modify_time: jiff::civil::DateTime,
++    pub folder_id: Option<FolderId>,
++    pub alias_email: Option<String>,
++}
++
++impl Drop for NativeOfflineItem {
++    fn drop(&mut self) {
++        use zeroize::Zeroize;
++        self.item_key.zeroize();
++    }
++}
++
++impl NativeOfflineItem {
++    /// Opens exactly one record without network access, using Proton's crypto
++    /// and protobuf parser. No attachment files/metadata are downloaded offline.
++    pub fn open(&self) -> Result<Item> {
++        ensure!(
++            self.item_key.len() == crypto::KEY_LENGTH,
++            "Invalid saved item key"
++        );
++        let encrypted = crate::utils::b64_decode(&self.encrypted_content)?;
++        let data = zeroize::Zeroizing::new(
++            crypto::decrypt(
++                &encrypted,
++                &self.item_key,
++                crypto::EncryptionTag::ItemContent,
++            )
++            .map_err(|_| anyhow::anyhow!("Could not decrypt saved item"))?,
++        );
++        let content = ItemData::deserialize(&data).context("Unsupported saved item")?;
++        Ok(Item {
++            id: self.id.clone(),
++            share_id: self.share_id.clone(),
++            vault_id: self.vault_id.clone(),
++            content,
++            state: self.state,
++            flags: self.flags.clone(),
++            create_time: self.create_time,
++            modify_time: self.modify_time,
++            folder_id: self.folder_id.clone(),
++            alias_email: self.alias_email.clone(),
++        })
++    }
++}
++
++impl<C: PassClientContext> PassClient<C> {
++    /// Single network fetch/decrypt pass shared by native metadata and cache.
++    pub async fn native_snapshot_items(
++        &self,
++        share_id: &ShareId,
++    ) -> Result<Vec<(Item, NativeOfflineItem)>> {
++        let revisions = self.fetch_items(share_id).await?;
++        if revisions.is_empty() {
++            return Ok(vec![]);
++        }
++        let count = revisions.len();
++        let mut originals: HashMap<_, _> = revisions
++            .iter()
++            .map(|r| (r.item_id.clone(), r.clone()))
++            .collect();
++        ensure!(originals.len() == count, "Duplicate server item IDs");
++        let opened = self.open_items(share_id, revisions).await?;
++        ensure!(opened.len() == count, "Incomplete decrypted snapshot");
++        let mut result = Vec::with_capacity(count);
++        for entry in opened {
++            let item = entry.item;
++            let original = originals
++                .remove(item.id.value())
++                .context("Inconsistent item snapshot")?;
++            ensure!(
++                entry.item_key.key_rotation == original.key_rotation,
++                "Inconsistent key rotation"
++            );
++            let saved = NativeOfflineItem {
++                id: item.id.clone(),
++                share_id: item.share_id.clone(),
++                vault_id: item.vault_id.clone(),
++                revision: original.revision,
++                key_rotation: original.key_rotation,
++                encrypted_content: original.content,
++                item_key: entry.item_key.key.as_ref().to_vec(),
++                state: item.state,
++                flags: item.flags.clone(),
++                create_time: item.create_time,
++                modify_time: item.modify_time,
++                folder_id: item.folder_id.clone(),
++                alias_email: item.alias_email.clone(),
++            };
++            result.push((item, saved));
++        }
++        Ok(result)
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use crate::PlanType;
++    use crate::test_tools::*;
++
++    #[muon_test::test]
++    async fn native_snapshot_retains_original_ciphertext_and_rotation_for_local_selected_read(
++        server: muon_test::Server,
++    ) {
++        let (raw, api) = server.client::<()>();
++        let client = make_test_pass_client_with_setup(raw, &api, PlanType::Plus).await;
++        setup_vault_share(&api, "share");
++        setup_share_keys(&api, "share");
++        let content = create_random_item();
++        let encrypted = encrypt_item_contents(content.clone());
++        let cipher = crate::utils::b64_encode(&encrypted.encrypted_contents);
++        let revision = ItemRevisionBuilder::new("item".into())
++            .with_content(cipher.clone())
++            .with_item_key(Some(crate::utils::b64_encode(
++                &encrypted.encrypted_item_key,
++            )))
++            .with_state(ItemState::Active as u8)
++            .build();
++        let expected_revision = revision.revision;
++        let handled = api.handler_with_method(Method::GET, "/pass/v1/share/share/item", move |_| {
++            success(serde_json::json!({"Items": {"RevisionsData": [revision.clone()], "LastToken": null}}))
++        });
++        let records = client
++            .native_snapshot_items(&share_id!("share"))
++            .await
++            .unwrap();
++        assert_hit!(handled);
++        assert_eq!(records.len(), 1);
++        let (opened, saved) = &records[0];
++        assert_eq!(opened.content, content);
++        assert_eq!(saved.encrypted_content, cipher);
++        assert_eq!(saved.revision, expected_revision);
++        let local = saved.open().unwrap();
++        assert_eq!(local.content, content);
++        assert_eq!(local.id, opened.id);
++        assert_eq!(local.vault_id, opened.vault_id);
++    }
++
++    #[muon_test::test]
++    async fn native_snapshot_refuses_corrupt_revisions_instead_of_publishing_partial_cache(
++        server: muon_test::Server,
++    ) {
++        let (raw, api) = server.client::<()>();
++        let client = make_test_pass_client_with_setup(raw, &api, PlanType::Plus).await;
++        setup_vault_share(&api, "share");
++        setup_share_keys(&api, "share");
++        let encrypted = encrypt_item_contents(create_random_item());
++        let good = ItemRevisionBuilder::new("good".into())
++            .with_content(crate::utils::b64_encode(&encrypted.encrypted_contents))
++            .with_item_key(Some(crate::utils::b64_encode(
++                &encrypted.encrypted_item_key,
++            )))
++            .with_state(ItemState::Active as u8)
++            .build();
++        let mut broken = good.clone();
++        broken.item_id = "broken".into();
++        broken.content = "invalid".into();
++        api.handler_with_method(Method::GET, "/pass/v1/share/share/item", move |_| {
++            success(serde_json::json!({"Items": {"RevisionsData": [good.clone(), broken.clone()], "LastToken": null}}))
++        });
++        assert!(
++            client
++                .native_snapshot_items(&share_id!("share"))
++                .await
++                .is_err()
++        );
++    }
++}
 diff --git a/pass/src/item/update.rs b/pass/src/item/update.rs
 index 5d3c0db..469d4f1 100644
 --- a/pass/src/item/update.rs
@@ -1857,15 +2898,17 @@ index 5d3c0db..469d4f1 100644
 +    }
 +}
 diff --git a/pass/src/lib.rs b/pass/src/lib.rs
-index 5a55781..757bc9d 100644
+index 5a55781..2738aa9 100644
 --- a/pass/src/lib.rs
 +++ b/pass/src/lib.rs
-@@ -84,6 +84,8 @@ pub use domain::{ClientFeatures, LocalKeyProvider};
+@@ -84,6 +84,10 @@ pub use domain::{ClientFeatures, LocalKeyProvider};
  pub use error::{AnyhowErrorExt, SessionInvalidatedError};
  pub use first_time_setup::FirstTimeSetupKey;
  pub use folder::create::CreateFolderPayload;
 +#[cfg(feature = "protonx-native")]
 +pub use item::NativeRevisionConflict;
++#[cfg(feature = "protonx-native")]
++pub use item::NativeOfflineItem;
  pub use item::create::{credit_card, custom, identity, login, note, ssh_key, wifi};
  pub use item::find::FindItemQuery;
  pub use organization::{

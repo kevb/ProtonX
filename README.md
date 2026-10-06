@@ -20,7 +20,7 @@ ProtonX is independent of Proton AG. GPL-3.0-or-later.
 
 | Product | Implemented | Current limits |
 | --- | --- | --- |
-| Pass | macOS authentication window and experimental native password prompts; atomic vault/Trash loading, title search and sorting; on-demand item details; password copy and reveal; TOTP copy/setup/edit; create/edit logins and notes with multiple websites and text/hidden custom fields; revision conflict protection; trash/restore; remote sign-out | no browser autofill, passkey operations, attachments, sharing UI, account switching, or offline UI |
+| Pass | macOS authentication window and experimental native password prompts; atomic vault/Trash loading, title search and sorting; on-demand item details; password copy and reveal; TOTP copy/setup/edit; create/edit logins and notes with multiple websites and text/hidden custom fields; revision conflict protection; trash/restore; remote sign-out; encrypted saved-first loading and read-only offline browsing for personal paid accounts | no browser autofill, passkey operations, attachments, sharing UI or account switching; managed accounts stay online-only |
 | Mail | Direct native username/password, TOTP and second-password flow; separate Keychain-backed session restoration; folders, paged message list and selected-message decryption through Proton’s Mail SDK; safe text reader; native compose/reply/reply-all, From selection, draft saving and confirmed-send state | Sending and linked-Gmail delivery unverified; no human verification/FIDO-only login, threading, file upload/viewing, rich-text editing or push UI. Search covers loaded metadata, capped at 1,000 messages. Bridge compose remains an advanced prototype |
 | Drive | Architecture decision and planned integration boundary | No Drive client implemented |
 
@@ -94,6 +94,13 @@ Server failures expose only a fixed category and numeric HTTP/API codes.
 After restarting or locking, **Unlock Pass** uses Touch ID or your Mac password.
 Lock is a local UI boundary, not a server-session revocation; **Sign Out** performs
 remote logout and removes this app's local session after it succeeds.
+
+Pass restores a saved encrypted vault before refreshing online. A successful refresh
+shows **Encrypted saved vault ready**; connection failures show saved/read-only
+state and the actual last-sync time. Saved access lasts up to 24 hours, subject to
+known subscription/trial expiry, and is currently limited to personal paid plans.
+Changes, verification-code generation and attachments require online access.
+See [storage boundaries and the test walkthrough](docs/OFFLINE_DESIGN.md).
 
 ## Connect Mail
 

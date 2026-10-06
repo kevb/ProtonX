@@ -38,6 +38,7 @@ actor CommandGate {
 public final class PassService: Sendable {
     private let runner: any HelperRunning
     private let gate = CommandGate()
+    private let cacheGate = CommandGate()
     public init(runner: any HelperRunning) { self.runner = runner }
     public func cancel() { runner.cancelAll() }
     private func execute(_ command: HelperCommand, challenge: ChallengeHandler? = nil) async throws -> Data {
@@ -56,6 +57,26 @@ public final class PassService: Sendable {
     public func logout() async throws { _ = try await execute(HelperCommand(["logout"])) }
     public func snapshot() async throws -> PassSnapshot {
         try JSONDecoder().decode(PassSnapshot.self, from: await execute(HelperCommand(["native-snapshot"])))
+    }
+    // Independent local read gate: a slow network refresh must not block browsing
+    // saved items. SQLCipher transactions serialize publication in the helper.
+    private func executeCache(_ command: HelperCommand) async throws -> Data {
+        await cacheGate.acquire()
+        do {
+            try Task.checkCancellation()
+            let data = try await runner.run(command, challenge: nil)
+            try Task.checkCancellation()
+            await cacheGate.release()
+            return data
+        } catch { await cacheGate.release(); throw error }
+    }
+    public func savedSnapshot() async throws -> SavedPassSnapshot? {
+        try JSONDecoder().decode(SavedPassSnapshot?.self, from: await executeCache(HelperCommand(["native-cache-snapshot"])))
+    }
+    public func savedDetail(_ item: PassItem, generation: String) async throws -> ItemDetail {
+        guard UUID(uuidString: generation) != nil else { throw ProtonXError.invalidInput("Refresh your saved vault.") }
+        return try ItemDetail.decode(await executeCache(HelperCommand(["native-cache-detail", "--generation", generation,
+            "--share-id", item.shareID, "--item-id", item.itemID])))
     }
     public func create(_ draft: NativeItemDraft, vault: Vault) async throws -> String {
         guard vault.canCreate == true else { throw ProtonXError.invalidInput("This vault is read-only for creating items.") }

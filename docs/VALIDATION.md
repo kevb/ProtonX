@@ -477,3 +477,39 @@ and is staged at `build/ProtonX Migration Preparation.app`, packaging the normal
 helper. It was not launched or installed in Applications. Debug SDK linking emitted
 the existing large-unwind-table warning; optimized builds completed successfully.
 No new public binary or corresponding-source archive was released.
+
+## Encrypted Pass saved-first/read-only cache, 2026-10-06
+
+The durable item-cache absence recorded in the earlier offline review is superseded
+by this milestone. [OFFLINE_DESIGN.md](OFFLINE_DESIGN.md) describes the implementation
+and remaining acceptance; this feature does not change Mail storage.
+
+- 100 Swift contracts passed. New coverage exercises saved metadata and one selected
+  detail before a delayed online response; separate local read scheduling; read-only
+  actions/no queued writes; reconnect with changed permissions; missing/corrupt/
+  expired cache fallback; TLS/authentication/session invalidation refusal; lease
+  bounds/clock rollback; expiry timers; lock races and late cache errors after
+  reconnect. Test responses are synthetic; local unlock is injected only in tests.
+- The full helper suite passed: 115 original CLI tests, 131 desktop-helper tests,
+  232 SDK unit tests and 24 update integration tests. Two upstream fixture-dump
+  helpers remain ignored. Eight new SQLCipher/storage/session contracts exercise
+  encrypted close/reopen, missing/wrong keys without reset, database truncation,
+  corrupt item content, generation/schema/account/session/lease checks, atomic
+  rollback, explicit invalidation and actual encrypted session restoration without
+  a network client. Two SDK tests preserve original ciphertext/key rotation and
+  reject incomplete decrypt snapshots. Error classification retains caches only
+  for connection errors, including wrapped errors.
+- Tests inspect disposable database files for synthetic plaintext markers and
+  confirm selected credentials decrypt through Proton's existing crypto. This is
+  evidence about the fixture/database, not a whole-machine plaintext audit or
+  memory-zeroization guarantee.
+- Desktop source identity verification passed against `macos-pass@1.42.0`. A fresh
+  pinned-source extraction plus the complete tracked helper patch matched every
+  materialized helper build input byte-for-byte. Dependency and source pins are
+  unchanged. The full source archive remains a CI gate; no binary/vendor archive
+  is publicly distributed by this milestone.
+- No real account/profile or Keychain credential was accessed, no Mac connection
+  was disabled, and no running app was replaced. Disconnected real-account restart,
+  Keychain update continuity, larger-vault performance and measured startup gains
+  remain unverified. Free/managed accounts stay online-only; the personal paid
+  lease lasts at most 24 hours and cannot discover server revocation offline.

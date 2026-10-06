@@ -221,3 +221,20 @@ private final class RecordingRunner: HelperRunning, @unchecked Sendable {
     runner.response = Data("not-a-code".utf8)
     await #expect(throws: ProtonXError.self) { try await service.totp(item) }
 }
+
+@Test func savedPassSnapshotRejectsMalformedLeasesAndGenerationBeforeUse() throws {
+    let metadata = #"{"vaults":[],"items":[],"trashed_items":[],"capabilities":{"totp_limit":null,"custom_fields_allowed":true}}"#
+    func data(_ saved: Int64, _ expires: Int64, _ generation: String = "00000000-0000-4000-8000-000000000001") -> Data {
+        Data("{\"snapshot\":\(metadata),\"saved_at\":\(saved),\"expires_at\":\(expires),\"generation\":\"\(generation)\"}".utf8)
+    }
+    for (saved, expires) in [(Int64(0), Int64(60)), (100, 100), (100, 99), (100, 86501), (1, Int64.max), (Int64.min, Int64.max)] {
+        #expect(throws: (any Error).self) { try JSONDecoder().decode(SavedPassSnapshot.self, from: data(saved, expires)) }
+    }
+    #expect(throws: (any Error).self) { try JSONDecoder().decode(SavedPassSnapshot.self, from: data(100, 200, "unknown")) }
+    let saved = try JSONDecoder().decode(SavedPassSnapshot.self, from: data(100, 200))
+    #expect(!saved.usable(at: Date(timeIntervalSince1970: 99)))
+    #expect(saved.usable(at: Date(timeIntervalSince1970: 100)))
+    #expect(!saved.usable(at: Date(timeIntervalSince1970: 200)))
+    let unknown = metadata.dropLast() + #", "cache_status":"future-unknown"}"#
+    #expect(throws: (any Error).self) { try JSONDecoder().decode(PassSnapshot.self, from: Data(unknown.utf8)) }
+}

@@ -156,7 +156,9 @@ private func syntheticSession() throws -> URL {
 
 @Test @MainActor func passSavedSessionRequiresLocalUnlockOnEachNewStore() async throws {
     let root = try syntheticSession(); defer { try? FileManager.default.removeItem(at: root) }
-    let runner = RecoveryRunner([.init(method: "native-snapshot", response: recoverySnapshot()), .init(method: "native-snapshot", response: recoverySnapshot())])
+    let runner = RecoveryRunner([
+        .init(method: "native-cache-snapshot", response: "null"), .init(method: "native-snapshot", response: recoverySnapshot()),
+        .init(method: "native-cache-snapshot", response: "null"), .init(method: "native-snapshot", response: recoverySnapshot())])
     var unlocks = 0
     let service = PassService(runner: runner)
     let first = PassStore(service: service, sessionDirectory: root, previewOnly: false, localUnlock: { unlocks += 1; return true })
@@ -169,7 +171,7 @@ private func syntheticSession() throws -> URL {
     #expect(restarted.phase == .locked); #expect(restarted.lastSyncedAt == nil)
     restarted.unlock(); await waitForPass { !restarted.busy }
     #expect(restarted.phase == .open); #expect(unlocks == 2)
-    #expect(runner.calls == ["native-snapshot", "native-snapshot"])
+    #expect(runner.calls == ["native-cache-snapshot", "native-snapshot", "native-cache-snapshot", "native-snapshot"])
     restarted.lock()
 }
 
@@ -185,6 +187,7 @@ private func syntheticSession() throws -> URL {
 @Test @MainActor func passExpiredSavedSessionRequiresSignInAndSuccessfulLoginResetsIt() async throws {
     let root = try syntheticSession(); defer { try? FileManager.default.removeItem(at: root) }
     let runner = RecoveryRunner([
+        .init(method: "native-cache-snapshot", response: "null"),
         .init(method: "native-snapshot", failure: try expiredPassSession()),
         .init(method: "login"), .init(method: "native-snapshot", response: recoverySnapshot())
     ])
@@ -193,7 +196,7 @@ private func syntheticSession() throws -> URL {
     store.unlock(); await waitForPass { !store.busy }
     #expect(store.phase == .welcome); #expect(store.error?.contains("Sign in again") == true)
     store.unlock(); store.refresh()
-    #expect(unlocks == 1); #expect(runner.calls == ["native-snapshot"])
+    #expect(unlocks == 1); #expect(runner.calls == ["native-cache-snapshot", "native-snapshot"])
     store.cancelLogin(); #expect(store.phase == .welcome)
     store.login(); await waitForPass { !store.busy }
     #expect(store.phase == .open); #expect(store.error == nil)
@@ -202,7 +205,7 @@ private func syntheticSession() throws -> URL {
 
 @Test @MainActor func passDemoAfterSessionExpiryKeepsIndependentLockAndRejectedAccountState() async throws {
     let root = try syntheticSession(); defer { try? FileManager.default.removeItem(at: root) }
-    let runner = RecoveryRunner([.init(method: "native-snapshot", failure: try expiredPassSession())])
+    let runner = RecoveryRunner([.init(method: "native-cache-snapshot", response: "null"), .init(method: "native-snapshot", failure: try expiredPassSession())])
     let store = PassStore(service: PassService(runner: runner), sessionDirectory: root, previewOnly: false, localUnlock: { true })
     store.unlock(); await waitForPass { !store.busy }
     #expect(store.phase == .welcome)
@@ -210,7 +213,7 @@ private func syntheticSession() throws -> URL {
     store.unlock(); #expect(store.phase == .open); #expect(store.isDemo)
     store.signOut(); #expect(store.phase == .welcome); #expect(!store.isDemo)
     store.unlock(); store.refresh()
-    #expect(runner.calls == ["native-snapshot"])
+    #expect(runner.calls == ["native-cache-snapshot", "native-snapshot"])
 }
 
 @Test(arguments: ["login", "snapshot", "unlock"]) @MainActor func passLateRecoveryCannotReopenLockedWorkspace(_ stage: String) async throws {

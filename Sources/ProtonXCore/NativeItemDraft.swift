@@ -78,15 +78,39 @@ public struct PassSnapshot: Decodable, Sendable {
     public let items: [PassItem]
     public let trashedItems: [PassItem]
     public let capabilities: PassCapabilities
-    enum CodingKeys: String, CodingKey { case vaults, items, capabilities; case trashedItems = "trashed_items" }
+    public let cacheStatus: String?
+    enum CodingKeys: String, CodingKey { case vaults, items, capabilities; case trashedItems = "trashed_items"; case cacheStatus = "cache_status" }
     public init(from decoder: any Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         vaults = try values.decode([Vault].self, forKey: .vaults)
         items = try values.decode([PassItem].self, forKey: .items)
         trashedItems = try values.decode([PassItem].self, forKey: .trashedItems)
         capabilities = try values.decode(PassCapabilities.self, forKey: .capabilities)
+        cacheStatus = try values.decodeIfPresent(String.self, forKey: .cacheStatus)
+        guard cacheStatus == nil || ["ready", "unavailable", "planUnavailable"].contains(cacheStatus!) else { throw ProtonXError.invalidResponse }
         let shares = Set(vaults.map(\.id)), all = items + trashedItems
         guard shares.count == vaults.count, !shares.contains(""), Set(all.map(\.id)).count == all.count,
               all.allSatisfy({ !$0.itemID.isEmpty && shares.contains($0.shareID) }) else { throw ProtonXError.invalidResponse }
     }
+}
+
+/// Metadata only. All persisted contents and selected-item decryption stay in Rust.
+public struct SavedPassSnapshot: Decodable, Sendable {
+    public let snapshot: PassSnapshot
+    public let savedAt: Date
+    public let expiresAt: Date
+    public let generation: String
+    enum CodingKeys: String, CodingKey { case snapshot, generation; case savedAt = "saved_at"; case expiresAt = "expires_at" }
+    public init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        snapshot = try values.decode(PassSnapshot.self, forKey: .snapshot)
+        let saved = try values.decode(Int64.self, forKey: .savedAt)
+        let expires = try values.decode(Int64.self, forKey: .expiresAt)
+        generation = try values.decode(String.self, forKey: .generation)
+        guard saved > 0, expires > saved, expires - saved <= 86400,
+              UUID(uuidString: generation) != nil else { throw ProtonXError.invalidResponse }
+        savedAt = Date(timeIntervalSince1970: TimeInterval(saved))
+        expiresAt = Date(timeIntervalSince1970: TimeInterval(expires))
+    }
+    public func usable(at date: Date) -> Bool { date >= savedAt && date < expiresAt }
 }

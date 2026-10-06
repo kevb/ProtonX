@@ -24,8 +24,10 @@ belong in this document, screenshots, tests, or public issues.
 - Synthetic UI and contract tests cover create/edit/validation errors/Trash/restore,
   native selection, concealed custom fields, permission denial, unsupported-field
   preservation and an acknowledged save followed by failed refresh.
-- [Offline storage review](OFFLINE_DESIGN.md) found that cached keys/settings do
-  not constitute a persisted item vault. [AutoFill feasibility](CREDENTIAL_PROVIDER.md)
+- [Encrypted offline browsing](OFFLINE_DESIGN.md) now adds SQLCipher item revisions,
+  atomic generation replacement and saved-first/read-only UI for personal paid
+  accounts, with synthetic recovery/policy/lock coverage. Real-account disconnected
+  restart and startup benchmarks remain pending. [AutoFill feasibility](CREDENTIAL_PROVIDER.md)
   now includes a checked native API probe and conservative origin tests; no
   ProtonX extension is installed and no credential disclosure is implemented.
   Safari filling can use the separate official extension; its installed wrapper
@@ -101,7 +103,7 @@ Authentication and a verified basic workflow are the first acceptance gates.
 | TOTP | Setup and use of two-factor secrets | Permitted code copy and concealed setup/replacement/removal UI | Live enrollment round trip; preserve server limits |
 | Organisation | Vault management, moving items | Vault selection only; no create/rename/delete/move UI | Create/rename vaults and move items after permission-aware metadata |
 | Permissions | Shared vaults and role-specific access | Create/update/trash flags surfaced; UI + native SDK guards; server remains authoritative | Shared-role interoperability and item-share edge cases |
-| Offline | Paid desktop access to cached items | Persisted key/settings cache; item cache only process-local; last-loaded interruption state | Persist encrypted item revisions; read-only offline policy and recovery tests |
+| Offline | Paid desktop access to cached items | SQLCipher revisions, saved-first loading and read-only browsing; personal paid plans only, maximum 24-hour lease; synthetic recovery tested | Disconnected real-account acceptance, Keychain update continuity, larger-vault benchmarks and managed-policy support |
 | Autofill | Browser extensions, including Safari; paid desktop autotype | Copy/reveal, optional global quick access and compile-only credential-provider probe | Use the standalone official Safari extension; defer a ProtonX system/native-app provider |
 | Passkeys | Existing Proton passkey support across clients | Counts only; cannot create or use passkeys | Retain official extension for supported browser passkeys; direct native use is deferred; preserve unsupported fields |
 | Attachments | Attach/open/save/manage files on supported paid plans | Counts only | Deferred until encrypted file handling, quota and safe temporary-file lifecycle are designed |

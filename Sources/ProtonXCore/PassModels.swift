@@ -90,11 +90,13 @@ public struct ItemDetail: Sendable {
     public let urls: [String]
     public let hasTOTP: Bool
     public let attachmentCount: Int
+    public let offlineAttachmentsUnavailable: Bool
     public let passkeyCount: Int
     public let editableCustomFields: [CustomFieldDraft]
     public let unsupportedCustomFieldCount: Int
-    public init(title: String, note: String, fields: [SecretField], revision: UInt64? = nil, urls: [String] = [], hasTOTP: Bool = false, attachmentCount: Int = 0, passkeyCount: Int = 0, editableCustomFields: [CustomFieldDraft] = [], unsupportedCustomFieldCount: Int = 0) {
+    public init(title: String, note: String, fields: [SecretField], revision: UInt64? = nil, urls: [String] = [], hasTOTP: Bool = false, attachmentCount: Int = 0, offlineAttachmentsUnavailable: Bool = false, passkeyCount: Int = 0, editableCustomFields: [CustomFieldDraft] = [], unsupportedCustomFieldCount: Int = 0) {
         self.revision = revision
+        self.offlineAttachmentsUnavailable = offlineAttachmentsUnavailable
         self.editableCustomFields = editableCustomFields; self.unsupportedCustomFieldCount = unsupportedCustomFieldCount
         self.passkeyCount = passkeyCount
         self.title = title; self.note = note; self.fields = fields; self.urls = urls; self.hasTOTP = hasTOTP; self.attachmentCount = attachmentCount
@@ -150,7 +152,7 @@ public struct ItemDetail: Sendable {
         var uniqueURLs = Set<String>()
         return ItemDetail(title: title, note: content["note"] as? String ?? "", fields: fields, revision: revision,
                           urls: allURLs.filter { uniqueURLs.insert($0).inserted }, hasTOTP: !(value["totp_uri"] as? String ?? "").isEmpty,
-                          attachmentCount: (root["attachments"] as? [Any])?.count ?? 0, passkeyCount: (value["passkeys"] as? [Any])?.count ?? 0,
+                          attachmentCount: (root["attachments"] as? [Any])?.count ?? 0, offlineAttachmentsUnavailable: root["offline_attachments_unavailable"] as? Bool ?? false, passkeyCount: (value["passkeys"] as? [Any])?.count ?? 0,
                           editableCustomFields: editableExtras, unsupportedCustomFieldCount: extras.count - editableExtras.count)
     }
 }
@@ -169,7 +171,7 @@ public struct LoginDraft: Codable, Sendable {
 }
 
 public enum HelperFailure: String, Codable, Sendable {
-    case eligibility, authentication, network, tls, sessionInvalidated, interactiveUnsupported, conflict, operation
+    case eligibility, authentication, network, tls, sessionInvalidated, interactiveUnsupported, conflict, cacheUnavailable, operation
 }
 public struct HelperDiagnostic: Codable, Equatable, Sendable {
     public let failure: HelperFailure
@@ -185,6 +187,7 @@ public struct HelperDiagnostic: Codable, Equatable, Sendable {
         case .sessionInvalidated: explanation = "Proton invalidated this session. Sign in again."
         case .interactiveUnsupported: explanation = "This account requires a sign-in method that ProtonX’s native login does not yet support."
         case .conflict: explanation = "This item changed in another client. Reopen it before editing; your changes have not been applied."
+        case .cacheUnavailable: explanation = "This saved vault has expired or changed. Refresh online to continue."
         case .operation: explanation = "The Proton client could not complete this operation."
         }
         var codes: [String] = []

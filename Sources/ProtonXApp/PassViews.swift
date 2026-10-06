@@ -76,14 +76,26 @@ struct PassWindow: View {
             .safeAreaInset(edge: .bottom) {
                 VStack(alignment: .leading, spacing: 10) {
                     Text(store.isDemo ? "Demo workspace" : "Pass workspace").font(.system(size: 13, weight: .medium))
-                    if store.mustRefreshBeforeWriting {
+                    if store.isUsingSavedVault {
+                        Label(store.busy ? "Saved vault · refreshing" : "Saved vault · read only", systemImage: "internaldrive").font(.caption).foregroundStyle(PassTheme.accent)
+                        Button("Refresh Online") { store.refresh() }.disabled(store.busy).accessibilityIdentifier("recoverPassSync")
+                    } else if store.mustRefreshBeforeWriting {
                         Label("Refresh needed before changes", systemImage: "exclamationmark.arrow.triangle.2.circlepath").font(.caption).foregroundStyle(.orange)
                         Button("Refresh Vault") { store.refresh() }.disabled(store.busy).accessibilityIdentifier("recoverPassSync")
+                    }
+                    if !store.isDemo && !store.isUsingSavedVault {
+                        if store.offlineCacheStatus == "ready" {
+                            Label("Encrypted saved vault ready", systemImage: "internaldrive").font(.caption).foregroundStyle(.secondary)
+                        } else if store.offlineCacheStatus == "unavailable" {
+                            Label("Saved vault unavailable", systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange)
+                        } else if store.offlineCacheStatus == "planUnavailable" {
+                            Text("This account requires an online connection").font(.caption).foregroundStyle(.secondary)
+                        }
                     }
                     if let synced = store.lastSyncedAt {
                         HStack(spacing: 6) {
                             Circle().fill(store.mustRefreshBeforeWriting ? Color.orange : Color.green).frame(width: 5, height: 5).accessibilityHidden(true)
-                            Text("Updated \(synced, style: .relative) ago").font(.caption).foregroundStyle(.secondary)
+                            Text("\(store.isUsingSavedVault ? "Last synced" : "Updated") \(synced, style: .relative) ago").font(.caption).foregroundStyle(.secondary)
                         }
                     }
                     HStack {
@@ -284,11 +296,11 @@ struct ItemDetailView: View {
                                 }
                                 HStack(spacing: 4) {
                                     if field.concealed {
-                                        Button { if !revealed.insert(String(index)).inserted { revealed.remove(String(index)) } } label: { Image(systemName: revealed.contains(String(index)) ? "eye.slash" : "eye") }
+                                        Button { if store.canUseVisibleDetail(), !revealed.insert(String(index)).inserted { revealed.remove(String(index)) } } label: { Image(systemName: revealed.contains(String(index)) ? "eye.slash" : "eye") }
                                             .accessibilityLabel(revealed.contains(String(index)) ? "Hide \(field.label)" : "Reveal \(field.label)")
                                             .help(revealed.contains(String(index)) ? "Hide \(field.label)" : "Reveal \(field.label)")
                                     }
-                                    Button { ClipboardController.shared.copy(field.value); copied = String(index) } label: { Image(systemName: copied == String(index) ? "checkmark" : "doc.on.doc") }
+                                    Button { if store.canUseVisibleDetail() { ClipboardController.shared.copy(field.value); copied = String(index) } } label: { Image(systemName: copied == String(index) ? "checkmark" : "doc.on.doc") }
                                         .accessibilityLabel("Copy \(field.label)").help("Copy \(field.label)")
                                 }.buttonStyle(PassIconStyle()).padding(.top, 7)
                             }.padding(18)
@@ -320,7 +332,8 @@ struct ItemDetailView: View {
                     detailCard("Note", symbol: "note.text") { Text(detail.note).font(.system(size: 14)).lineSpacing(4).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }
                 }
                 if detail.passkeyCount > 0 { Label("\(detail.passkeyCount) passkey(s) · use the official app for authentication", systemImage: "person.badge.key").font(.caption).foregroundStyle(.secondary) }
-                if detail.attachmentCount > 0 { Label("\(detail.attachmentCount) attachment(s) · use the official app to download", systemImage: "paperclip").font(.caption).foregroundStyle(.secondary) }
+                if detail.offlineAttachmentsUnavailable { Label("Attachments are unavailable in the saved vault", systemImage: "paperclip").font(.caption).foregroundStyle(.secondary) }
+                else if detail.attachmentCount > 0 { Label("\(detail.attachmentCount) attachment(s) · use the official app to download", systemImage: "paperclip").font(.caption).foregroundStyle(.secondary) }
                 if let item = store.currentItem {
                     VStack(alignment: .leading, spacing: 16) {
                         if store.currentVault?.canUpdate != true { Label("Shared vault · read-only", systemImage: "lock").font(.caption).foregroundStyle(.secondary) }

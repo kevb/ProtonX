@@ -11,6 +11,13 @@ final class PassStore: ObservableObject {
     @Published private(set) var items: [PassItem] = []
     @Published private(set) var trashedItems: [PassItem] = []
     @Published private(set) var lastSyncedAt: Date?
+    @Published private(set) var savedVaultGeneration: String?
+    @Published private(set) var offlineCacheStatus: String?
+    private var savedVaultExpiresAt: Date?
+    private var savedVaultSavedAt: Date?
+    private var cacheExpiryTask: Task<Void, Never>?
+    private let now: @MainActor @Sendable () -> Date
+    var isUsingSavedVault: Bool { savedVaultGeneration != nil }
     @Published private(set) var mustRefreshBeforeWriting = false
     @Published var sort: ItemSort = .title
     @Published var selectedVault: String? { didSet { reconcileSelection() } }
@@ -46,10 +53,10 @@ final class PassStore: ObservableObject {
         return item
     }
     var writableVaults: [Vault] { vaults.filter { $0.canCreate == true } }
-    var canCreate: Bool { !mustRefreshBeforeWriting && phase == .open && !busy && !showingTrash && !writableVaults.isEmpty }
-    var canEdit: Bool { phase == .open && !busy && !mustRefreshBeforeWriting && !showingTrash && currentItem.map { ["login", "note"].contains($0.kind) } == true && currentVault?.canUpdate == true && (isDemo || detail?.revision != nil) }
+    var canCreate: Bool { !isUsingSavedVault && !mustRefreshBeforeWriting && phase == .open && !busy && !showingTrash && !writableVaults.isEmpty }
+    var canEdit: Bool { !isUsingSavedVault && phase == .open && !busy && !mustRefreshBeforeWriting && !showingTrash && currentItem.map { ["login", "note"].contains($0.kind) } == true && currentVault?.canUpdate == true && (isDemo || detail?.revision != nil) }
     var currentVault: Vault? { guard let item = currentItem else { return nil }; return vaults.first { $0.id == item.shareID } }
-    var canTrash: Bool { phase == .open && !busy && !mustRefreshBeforeWriting && currentVault?.canTrash == true }
+    var canTrash: Bool { !isUsingSavedVault && phase == .open && !busy && !mustRefreshBeforeWriting && currentVault?.canTrash == true }
     var customFieldsAllowed: Bool { capabilities?.customFieldsAllowed == true }
     func canSetupTOTP(for item: PassItem?) -> Bool { capabilities?.allowsTOTPSetup(itemID: item?.id, items: items) == true }
     private func reconcileSelection() {
@@ -58,14 +65,15 @@ final class PassStore: ObservableObject {
     var canCopyTOTP: Bool {
         guard phase == .open, !busy else { return false }
         if isDemo { return !showingTrash }
-        guard !mustRefreshBeforeWriting, !showingTrash, let selectedItem, let capabilities else { return false }
+        guard !isUsingSavedVault, !mustRefreshBeforeWriting, !showingTrash, let selectedItem, let capabilities else { return false }
         return capabilities.allowsTOTP(itemID: selectedItem, items: items)
     }
     var hasSession: Bool { !previewOnly && FileManager.default.fileExists(atPath: sessionDirectory.appendingPathComponent(".session/session.json").path) }
 
-    init(service: PassService? = nil, sessionDirectory: URL? = nil, previewOnly: Bool = Bundle.main.bundleIdentifier == "org.kevb.ProtonX.Preview", localUnlock: (@MainActor @Sendable () async throws -> Bool)? = nil) {
+    init(service: PassService? = nil, sessionDirectory: URL? = nil, previewOnly: Bool = Bundle.main.bundleIdentifier == "org.kevb.ProtonX.Preview", localUnlock: (@MainActor @Sendable () async throws -> Bool)? = nil, now: @escaping @MainActor @Sendable () -> Date = { Date() }) {
         self.previewOnly = previewOnly
         self.localUnlock = localUnlock
+        self.now = now
         self.sessionDirectory = sessionDirectory ?? FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(previewOnly ? "Library/Application Support/ProtonX/Preview" : "Library/Application Support/ProtonX/Pass", isDirectory: true)
         let helper = Bundle.main.url(forAuxiliaryExecutable: "protonx-pass") ??
@@ -130,7 +138,24 @@ final class PassStore: ObservableObject {
             guard success else { throw ProtonXError.cancelled }
             try check(captured)
             phase = .open
-            try await loadSnapshot()
+            do {
+                if let saved = try await service.savedSnapshot(), saved.usable(at: now()) {
+                    try check(captured)
+                    applySnapshot(saved.snapshot)
+                    lastSyncedAt = saved.savedAt; savedVaultGeneration = saved.generation
+                    savedVaultExpiresAt = saved.expiresAt; savedVaultSavedAt = saved.savedAt
+                    mustRefreshBeforeWriting = true
+                    scheduleCacheExpiry(saved)
+                }
+            } catch {
+                try check(captured)
+                if handleSessionFailure(error, captured: captured) { return }
+                // Cache failure never resets keys or deletes the profile. Try online.
+            }
+            try check(captured)
+            try await refreshSnapshot()
+            try check(captured)
+            selectItem()
         }
     }
     func lock() {
@@ -138,6 +163,8 @@ final class PassStore: ObservableObject {
         authContext?.invalidate(); authContext = nil
         webAuthentication.cancel()
         operation?.cancel(); selectionTask?.cancel(); service.cancel()
+        cacheExpiryTask?.cancel(); cacheExpiryTask = nil
+        savedVaultGeneration = nil; savedVaultExpiresAt = nil; savedVaultSavedAt = nil; offlineCacheStatus = nil
         let continuation = credentialContinuation; credentialContinuation = nil; credentialRequestID = nil; challenge = nil
         continuation?.resume(throwing: ProtonXError.cancelled)
         ClipboardController.shared.clearOwned()
@@ -148,15 +175,61 @@ final class PassStore: ObservableObject {
     func refresh() {
         guard phase == .open else { return }
         perform { [self] in
-            do { try await loadSnapshot(); selectItem() }
-            catch {
-                if case ProtonXError.helperDiagnostic(let diagnostic) = error, diagnostic.failure == .sessionInvalidated { throw error }
-                if phase == .open && lastSyncedAt != nil {
-                    mustRefreshBeforeWriting = true
-                    self.error = "Could not refresh. Showing the last loaded vault; refresh successfully before saving changes. " + error.localizedDescription
-                } else { throw error }
-            }
+            try await refreshSnapshot()
+            selectItem()
         }
+    }
+    private func refreshSnapshot() async throws {
+        do { try await loadSnapshot() }
+        catch {
+            if isUsingSavedVault {
+                let permitsSavedRead: Bool
+                if case ProtonXError.helperDiagnostic(let diagnostic) = error { permitsSavedRead = diagnostic.failure == .network }
+                else { permitsSavedRead = (error as? ProtonXError) == .timeout }
+                if !permitsSavedRead || !savedVaultUsable() { discardSavedVault() }
+            }
+            if case ProtonXError.helperDiagnostic(let diagnostic) = error, diagnostic.failure == .sessionInvalidated { throw error }
+            if phase == .open && lastSyncedAt != nil {
+                mustRefreshBeforeWriting = true
+                self.error = isUsingSavedVault ? "Could not connect. Browsing your saved vault; changes require an online refresh." :
+                    "Could not refresh. Showing the last loaded vault; refresh successfully before saving changes. " + error.localizedDescription
+            } else { throw error }
+        }
+    }
+    private func applySnapshot(_ snapshot: PassSnapshot) {
+        capabilities = snapshot.capabilities; vaults = snapshot.vaults; items = snapshot.items; trashedItems = snapshot.trashedItems
+        if let selectedVault, !vaults.contains(where: { $0.id == selectedVault }) { self.selectedVault = nil }
+        reconcileSelection()
+    }
+    private func savedVaultUsable() -> Bool {
+        guard let expires = savedVaultExpiresAt, let saved = savedVaultSavedAt else { return false }
+        return now() >= saved && now() < expires
+    }
+    private func scheduleCacheExpiry(_ saved: SavedPassSnapshot) {
+        cacheExpiryTask?.cancel()
+        let remaining = max(0, saved.expiresAt.timeIntervalSince(now()))
+        cacheExpiryTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(remaining))
+            guard let self, !Task.isCancelled, savedVaultGeneration == saved.generation else { return }
+            discardSavedVault()
+            error = "Your saved vault has expired. Refresh online to continue."
+        }
+    }
+    private func discardSavedVault() {
+        cacheExpiryTask?.cancel(); cacheExpiryTask = nil
+        savedVaultGeneration = nil; savedVaultExpiresAt = nil; savedVaultSavedAt = nil
+        selectionEpoch.invalidate(); selectionTask?.cancel()
+        vaults = []; items = []; trashedItems = []; capabilities = nil; detail = nil; lastSyncedAt = nil
+        selectedItem = nil; selectedVault = nil; mustRefreshBeforeWriting = true
+        ClipboardController.shared.clearOwned()
+    }
+    func canUseVisibleDetail() -> Bool {
+        guard phase == .open else { return false }
+        if isUsingSavedVault && !savedVaultUsable() {
+            discardSavedVault(); error = "Your saved vault has expired. Refresh online to continue."
+            return false
+        }
+        return true
     }
     private func loadSnapshot() async throws {
         guard !isDemo else { return }
@@ -164,34 +237,43 @@ final class PassStore: ObservableObject {
         let snapshot = try await service.snapshot()
         try Task.checkCancellation()
         guard epoch.accepts(captured), phase == .open else { return }
-        capabilities = snapshot.capabilities; vaults = snapshot.vaults; items = snapshot.items; trashedItems = snapshot.trashedItems
-        lastSyncedAt = Date(); mustRefreshBeforeWriting = false
-        if let selectedVault, !vaults.contains(where: { $0.id == selectedVault }) { self.selectedVault = nil }
-        reconcileSelection()
+        applySnapshot(snapshot)
+        cacheExpiryTask?.cancel(); cacheExpiryTask = nil
+        savedVaultGeneration = nil; savedVaultExpiresAt = nil; savedVaultSavedAt = nil
+        offlineCacheStatus = snapshot.cacheStatus
+        lastSyncedAt = now(); mustRefreshBeforeWriting = false
     }
     func selectItem() {
         selectionEpoch.invalidate(); selectionTask?.cancel(); detail = nil
         // Navigation must not dismiss a write/sync warning that still blocks saving.
         if !mustRefreshBeforeWriting { error = nil }
-        guard phase == .open, let item = currentItem else { return }
+        guard canUseVisibleDetail(), let item = currentItem else { return }
         if isDemo { detail = demoDetails[item.id]; return }
         let captured = epoch.value, selection = selectionEpoch.value
+        let generation = savedVaultGeneration
         selectionTask = Task {
             do {
-                let value = try await service.detail(item)
+                let value: ItemDetail
+                if let generation { value = try await service.savedDetail(item, generation: generation) }
+                else { value = try await service.detail(item) }
                 try Task.checkCancellation()
                 guard epoch.accepts(captured), selectionEpoch.accepts(selection), phase == .open else { return }
+                guard generation == savedVaultGeneration, canUseVisibleDetail() else { return }
                 detail = value
             } catch {
                 if !Task.isCancelled && epoch.accepts(captured) && selectionEpoch.accepts(selection) {
-                    if !handleSessionFailure(error, captured: captured) { self.error = error.localizedDescription }
+                    guard generation == savedVaultGeneration else { return }
+                    if !handleSessionFailure(error, captured: captured) {
+                        if generation != nil { discardSavedVault() }
+                        self.error = error.localizedDescription
+                    }
                 }
             }
         }
     }
     /// Returns only after the write is acknowledged. A later refresh failure must not invite duplicate creation.
     func save(_ draft: NativeItemDraft, item: PassItem?, vaultID: String) async throws {
-        guard !mustRefreshBeforeWriting, !busy, phase == .open, let vault = vaults.first(where: { $0.id == vaultID }),
+        guard !isUsingSavedVault, !mustRefreshBeforeWriting, !busy, phase == .open, let vault = vaults.first(where: { $0.id == vaultID }),
               item == nil ? vault.canCreate == true : vault.canUpdate == true else {
             throw ProtonXError.invalidInput("This vault is unavailable for saving items.")
         }

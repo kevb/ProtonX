@@ -1,60 +1,113 @@
-# Offline Pass design boundary
+# Encrypted saved Pass vault
 
-Review date: 2026-10-06. Durable offline access is not implemented.
+Implementation date: 2026-10-06. Read-only saved-first browsing is implemented;
+real-account disconnected restart acceptance and startup benchmarks remain pending.
 
-The pinned CLI's SQLCipher database stores share/folder keys, organisation policy,
-core event cursors and settings. Its item/vault caches in the Rust client are
-process-local. `list_items` falls back to `fetch_items`; a new helper does not
-have a persisted complete item snapshot. Skipping network errors at bootstrap
-would therefore not create a working offline vault. This corrects the broader
-“encrypted cache exists” description in the initial gap analysis.
+## Storage and upstream decisions
 
-Source anchors: `pass-cli/src/features/mod.rs`, `pass-db/src/models`,
-`pass/src/cache.rs`, `pass/src/item/list.rs`, `pass/src/vault/list.rs` and
-`pass/src/core_events.rs` in the pinned Pass checkout.
+The pinned CLI persists keys/settings in SQLCipher but keeps its item cache in
+process memory. ProtonX adds two namespaced tables to that same database, using
+its existing local encryption key and Keychain provider. Swift writes no item
+cache. No dependency, source pin or cryptographic primitive changed.
 
-Proton documents offline desktop access for paid users in its
-[desktop guide](https://proton.me/support/how-to-use-proton-pass-desktop-app).
-A future ProtonX implementation must preserve that product limit and organisation
-policy; it must not infer entitlement from a saved session or a successful decrypt.
+The upstream review included the Rust `pass/src/cache.rs`, `item/list.rs` and
+`pass-db` schema; the iOS `ItemRepository` stores `SymmetricallyEncryptedItem`
+through its local datasource; WebClients' Pass auth/settings code has its own
+password-derived offline components. ProtonX retains the server's encrypted item
+content rather than adopting a second client implementation or inventing a new
+password-derived format. Proton's Rust decrypt/protobuf path opens one selected
+record. This is ProtonX-specific persistence, not an interoperable official cache.
 
-## Current failure behaviour
+An online snapshot fetches every visible vault's revisions once and decrypts them
+through the SDK for metadata. A complete successful generation stores:
 
-A failed refresh keeps the last successfully loaded in-memory metadata. The app
-shows the failure and last successful refresh time; writes remain disabled until
-refresh succeeds. Previously loaded selected details may remain visible while
-unlocked. Opening other details still requires the helper and can fail. Lock
-clears both metadata and selected secrets. This is an interruption state within
-one unlocked session, not durable offline support or a complete cached vault.
+- Original encrypted item content, revision and key rotation, plus item keys inside
+  SQLCipher. Item-key copies and serialization buffers are zeroized on drop.
+- Encrypted-at-rest vault/item summaries, permissions and capabilities. Summary IPC
+  contains titles/type/membership, not usernames, notes, passwords or TOTP seeds.
+- Schema version, account ID, hashed session UID, random generation ID, saved time
+  and lease expiry. Account/session/schema/generation mismatch refuses reads.
 
-A save acknowledged by Proton followed by a failed refresh closes the editor
-and reports that the item was saved. It disables further writes until a successful
-refresh. A failed/unconfirmed save retains the draft and offers refresh before
-retrying; it does not automatically retry or queue a second create.
+Replacement is one SQL transaction. Incomplete refreshes cannot publish mixed
+items/header. A duplicate insert rolls back to the previous generation. Storage
+is bounded to 20,000 records, 128 MiB total, 8 MiB metadata and 2 MiB per record.
+Missing keys, wrong keys or corruption never cause key regeneration or a database
+reset in this path. Normal server refresh may populate an initially absent cache.
 
-## Read-only offline milestone
+## Entitlement and freshness
 
-Reuse Proton's persisted encrypted representation or add storage through its
-existing crypto layer. Do not serialize decrypted `ItemDetail` into a Swift cache.
-Review the existing Proton iOS/desktop persistence formats before choosing a new
-schema. Required stored data includes encrypted item revisions and key rotations,
-vault metadata, an authenticated capability/policy snapshot, freshness timestamps
-and account-specific ownership. Corruption, unknown schema or missing keys must
-fail closed. Keep Pass storage independent of Mail.
+[Proton documents offline desktop access for paid users](https://proton.me/support/how-to-use-proton-pass-desktop-app)
+(rechecked 2026-10-06). This implementation enables it only for the SDK's personal
+`Plus` plan. Free and Business/managed plans stay online-only: the pinned SDK does
+not expose every organisation offline-policy field. Unknown plan/schema responses
+fail closed. This conservative restriction may exclude otherwise entitled managed
+users; adding reviewed policy support is follow-up work. CLI eligibility remains
+unchanged and separate from the pinned desktop protocol.
 
-Define offline entitlement expiry/downgrade/revocation behaviour explicitly; offline
-clients cannot discover a server revocation without reconnecting. Local unlock is
-not revocation. Unlock/decrypt stays behind a deliberate user-presence policy, and
-screen lock/sleep/account change clears in-memory secrets. Opening or copying one
-item must not decrypt the complete vault into the UI.
+A generation lives for at most **24 hours from its online snapshot**, shortened by
+positive subscription/trial end dates. This is a ProtonX freshness bound, not a
+claim about the official client's expiry rule. Reads reject expiry and a clock
+before the saved timestamp. Local unlock cannot detect remote session, share or
+subscription revocation while disconnected. Reconnect rechecks current authority;
+authentication, certificate or invalid-response failures discard the saved view
+and invalidate the persisted snapshot in the native snapshot path. Only classified
+connection failures/process timeouts permit continued saved browsing.
 
-First ship read-only access with a visible last-sync timestamp and an offline
-indicator. Disable create/edit/trash/sharing and all network-required operations.
-Do not add a write queue until revision conflicts, idempotency, acknowledgements
-and recovery have independent tests.
+Create/edit/Trash/restore invalidate the persisted generation **before** their
+network path, including uncertain outcomes. A successful authoritative refresh
+rebuilds it. Nothing is queued or automatically replayed. Logout retains the SDK's
+existing remote-logout/local-cleanup semantics. Offline browsing adds no credential
+reset or logout substitute.
 
-Acceptance tests must include restart with networking disabled, permitted/denied
-plans, expired policy, missing Keychain key, tampered/truncated cache, rotation,
-corrupt revisions, lock during decrypt and account separation. Use synthetic data
-and a designated disposable account for interoperability. This needs more than
-reusing the current SQLCipher key store.
+## Native experience and locking
+
+After deliberate macOS local unlock, a local-only command restores saved metadata
+before the online refresh. That command returns before event bootstrap, SDK network
+construction and telemetry. A separate local-read gate lets selected cached items
+open while an online refresh is slow. SQL transactions and generation checks prevent
+mixed results. Online success replaces metadata, permissions and selected details.
+
+The sidebar says **Saved vault · refreshing** or **Saved vault · read only**, shows
+the actual last-sync time, and offers **Refresh Online**. An online workspace says
+**Encrypted saved vault ready** only when publication succeeded. Cache failure is
+visible without treating an online vault as empty.
+
+Saved mode permits searching, selecting and revealing/copying one item. It disables
+create/edit/Trash/restore and TOTP generation. Attachments are explicitly unavailable.
+No attachment file or plaintext item body is persisted by this feature. The regular
+clipboard ownership/30-second expiry policy applies. Swift strings cannot guarantee
+zeroization; SQLCipher and UI locking do not defend against malware with the same
+macOS user/Keychain access. Pass and Mail storage remain independent.
+
+Lock/sleep/screen lock clears visible data and cancels local/network requests.
+The lease timer clears an idle saved workspace at expiry. Session and selection
+checks reject late results after lock or reconnect. Same-user clock manipulation
+is outside the UI lock boundary; this is not an offline revocation service.
+
+## Evidence and remaining acceptance
+
+Synthetic tests cover SQLCipher close/reopen; encrypted saved-session restoration
+without constructing a network client; wrong/missing keys; truncated database and
+corrupt selected content; rotation/ciphertext preservation; schema/account/session/
+lease mismatch; transactional rollback; write invalidation; unsupported plans;
+saved-first ordering, independent selected reads, reconnect permissions, lock and
+late-result races. App transport failures are injected, not Mac network changes.
+
+Real-account disconnected restart, Keychain continuity across updates, larger-vault
+performance and matched startup measurements remain acceptance gates. No automated
+real-account access or deliberate real session/subscription revocation is used.
+
+## User acceptance
+
+1. Quit the old ProtonX bundle and open the new staged update. Unlock while online
+   and refresh. Confirm **Encrypted saved vault ready** in the sidebar.
+2. With no unsaved draft, disconnect your connection, quit and reopen ProtonX,
+   then unlock. Search/select a fictional test item; its reveal/copy should work.
+   The sidebar should show saved/read-only state and the prior last-sync time.
+3. Confirm create/edit/Trash/restore and verification-code copy are unavailable.
+   Lock and confirm the visible item disappears; unlock while disconnected again.
+4. Reconnect and click **Refresh Online**. Confirm the saved label disappears and
+   the latest test item/permissions are visible. Edits should then work normally.
+
+Do not use a real secret as the test record or delete Keychain entries to test
+missing keys. Those failure cases have isolated synthetic coverage.

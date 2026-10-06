@@ -71,6 +71,17 @@ include passwords, tokens, real message bodies or vault exports in public issues
   Unconfirmed writes are not automatically retried or queued. Verification-code
   copy rechecks the current plan and active-item ranking in the helper; it does
   not rely solely on a previously loaded UI capability record.
+- Pass saved-first/offline browsing persists original encrypted revisions and item
+  keys/metadata only inside the existing Keychain-backed SQLCipher database. Local
+  reads bind to account/session, schema, generation and a maximum 24-hour lease,
+  shortened by known subscription/trial expiry. Only personal paid Plus accounts
+  are enabled; managed/unknown policies stay online-only. Saved mode is read-only,
+  decrypts one selected record and omits attachments/TOTP generation. Writes
+  invalidate the generation before network access. No replay queue exists. Local
+  unlock cannot detect server revocation while disconnected. Authentication/TLS/
+  invalid-data errors fail closed; missing keys/corruption never reset credentials.
+  Expiry/lock clears the visible workspace and owned clipboard. See
+  docs/OFFLINE_DESIGN.md for exact scope and remaining account acceptance.
 - Pass session invalidation clears the visible workspace and returns to sign-in
   across snapshot, detail and write paths, including post-write refresh.
   The UI adds no saved-file deletion; Proton's existing invalidation/cleanup path
