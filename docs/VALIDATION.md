@@ -171,3 +171,9 @@ synthetic keyboard creation, save, Trash confirmation, restore and collection
 selection; sensitive fields remain concealed. No authentication/helper/crypto
 protocol was changed. The preceding full GitHub run `37437581016` passed both
 native and helper jobs; it predates these visual changes.
+
+The subsequent editor refinement replaced settings-style rows with native inputs
+in outlined cards. A synthetic note retained two lines typed with Return; a new
+login retained its website, note and concealed custom field. Title focus, type
+selection, scrolling, concealed input and explicit save were checked through native
+controls. The existing Swift contracts and release/signature checks passed again.

@@ -92,3 +92,11 @@ keyboard creation, confirmation and Trash/restore. The command
 `scripts/build-app.sh --preview-light --skip-helper` builds the isolated light-mode
 preview without changing macOS settings. Its compile flag has no effect on
 real-account windows. Full VoiceOver and minimum-OS runtime coverage remain follow-ups.
+
+The supplied login/note creation references informed a second editor refinement:
+native inputs now sit in the same outlined cards as item details, with a prominent
+title and visible focus outline. Password generation is beside its input; secure
+notes have a larger writing area, with custom fields below. Type/vault pickers
+stay native. Multiline note entry and saved login notes/websites/concealed custom
+fields passed synthetic interaction checks. The reference screenshots' background
+account/item contents were not copied into project assets or fixtures.
