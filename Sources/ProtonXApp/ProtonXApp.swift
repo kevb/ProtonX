@@ -7,7 +7,7 @@ struct ProtonXApp: App {
     @StateObject private var pass = PassStore()
     var body: some Scene {
         Window("ProtonX Pass", id: "pass") {
-            PassWindow().environmentObject(pass).tint(.purple)
+            PassWindow().environmentObject(pass).tint(PassTheme.accent)
         }.defaultSize(width: 1080, height: 720)
         .commands {
             CommandGroup(replacing: .appInfo) { Button("About ProtonX…") { NSApp.orderFrontStandardAboutPanel(options: [

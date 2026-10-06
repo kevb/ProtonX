@@ -70,3 +70,25 @@ coverage remain follow-ups.
 
 Detail reveal/copy state resets when the selected item revision changes. Copy
 feedback identifies the individual row even when custom field labels repeat.
+
+## Visual design pass, 2026-10-06
+
+The Pass workspace now uses adaptive indigo/lavender surfaces, softer rounded
+cards, larger item badges and clearer type hierarchy. Credentials share one card;
+websites, notes and timestamps have their own quiet groups. Edit is a labelled
+pill beside the title; Trash/restore is in the item actions menu with the existing
+confirmation. Create has a visible label. The editor and locked screen use the
+same palette and shapes. The PX wordmark is an independent native treatment;
+no official brand assets, remote fonts or favicons were added.
+
+Native split-view resizing, list selection, search, menus and keyboard commands
+remain. Selection follows the user's macOS accent; selected icons retain contrast
+on both active and inactive rows. Decorative imagery is hidden from accessibility,
+item rows include their type, and copy/reveal/create controls have explicit names.
+Card borders strengthen with increased contrast; no motion was added.
+
+Synthetic preview checks cover dark and light appearances, the grouped editor,
+keyboard creation, confirmation and Trash/restore. The command
+`scripts/build-app.sh --preview-light --skip-helper` builds the isolated light-mode
+preview without changing macOS settings. Its compile flag has no effect on
+real-account windows. Full VoiceOver and minimum-OS runtime coverage remain follow-ups.

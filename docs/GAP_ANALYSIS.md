@@ -28,6 +28,10 @@ belong in this document, screenshots, tests, or public issues.
   not constitute a persisted item vault. [AutoFill feasibility](CREDENTIAL_PROVIDER.md)
   now includes a checked native API probe and conservative origin tests; no
   extension is installed and no credential disclosure is implemented.
+- The visual pass adds adaptive lavender/indigo surfaces, grouped rounded detail
+  cards and clearer Edit/Create actions. Native selection and keyboard controls
+  remain. The user reported successfully creating, syncing and deleting a live
+  test login; no private contents were inspected by the agent.
 
 The next acceptance gates remain designated disposable-account CRUD verified
 from another client, restart/recovery, large-vault measurements, signed extension

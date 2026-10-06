@@ -137,7 +137,7 @@ unverified. Current source-archive checks remain mandatory in CI.
 ## Not established
 
 - Repeated desktop account-fork login and first-vault setup across account types,
-  remote vault CRUD/sync,
+  independent cross-client verification, remote editing and vault-management workflows,
   TOTP/second/extra-password challenges,
   session expiry/revocation and recovery. Upstream implementation is reused but
   does not eliminate integration risk.
@@ -155,3 +155,19 @@ unverified. Current source-archive checks remain mandatory in CI.
 
 See SECURITY.md, ROADMAP.md and PERFORMANCE.md for boundaries. A successful
 synthetic test is not a claim that a real account has been validated.
+
+## User-reported workflow and design follow-up, 2026-10-06
+
+The user reported successfully creating, syncing and deleting a real test login
+in ProtonX. This is user-driven live validation; the agent did not inspect its
+contents or perform these writes. It does not establish editing, restore,
+permanent deletion, independent verification in another client, or restart/recovery.
+It supersedes the earlier blanket statement that no real item write was observed.
+
+The visual design pass passed the existing 48 Swift contracts (one optional
+Bridge test skipped), a release build and strict ad-hoc signature verification.
+The isolated preview was inspected in both appearances. Native controls completed
+synthetic keyboard creation, save, Trash confirmation, restore and collection
+selection; sensitive fields remain concealed. No authentication/helper/crypto
+protocol was changed. The preceding full GitHub run `37437581016` passed both
+native and helper jobs; it predates these visual changes.

@@ -5,9 +5,11 @@ cd "$PROTONX_ROOT"
 PROTONX_PREVIEW=false
 PROTONX_STAGE_UPDATE=false
 PROTONX_SKIP_HELPER=false
+PROTONX_SWIFT_OPTIONS=()
 for PROTONX_OPTION in "$@"; do
   case "$PROTONX_OPTION" in
     --preview) PROTONX_PREVIEW=true ;;
+    --preview-light) PROTONX_PREVIEW=true; PROTONX_SWIFT_OPTIONS=(-Xswiftc -DPROTONX_DESIGN_LIGHT) ;;
     --stage-update) PROTONX_STAGE_UPDATE=true ;;
     --skip-helper) PROTONX_SKIP_HELPER=true ;;
     *) echo "Unknown build option." >&2; exit 1 ;;
@@ -20,17 +22,16 @@ if $PROTONX_PREVIEW && $PROTONX_STAGE_UPDATE; then echo 'Choose preview or stage
 if $PROTONX_STAGE_UPDATE; then PROTONX_APP_NAME='ProtonX Update'; fi
 PROTONX_FINAL="$PROTONX_ROOT/build/$PROTONX_APP_NAME.app"
 PROTONX_TARGET_RUNNING=false
-if $PROTONX_STAGE_UPDATE; then
-  if [[ -f "$PROTONX_FINAL/Contents/MacOS/$PROTONX_EXECUTABLE" ]] && lsof -t "$PROTONX_FINAL/Contents/MacOS/$PROTONX_EXECUTABLE" >/dev/null 2>&1; then PROTONX_TARGET_RUNNING=true; fi
-elif pgrep -x "$PROTONX_EXECUTABLE" >/dev/null; then PROTONX_TARGET_RUNNING=true; fi
+# Check the exact bundle: another staged bundle may share its executable name.
+if [[ -f "$PROTONX_FINAL/Contents/MacOS/$PROTONX_EXECUTABLE" ]] && lsof -t "$PROTONX_FINAL/Contents/MacOS/$PROTONX_EXECUTABLE" >/dev/null 2>&1; then PROTONX_TARGET_RUNNING=true; fi
 if $PROTONX_TARGET_RUNNING; then
   echo 'Quit ProtonX before rebuilding its app bundle.' >&2
   exit 1
 fi
 if ! $PROTONX_SKIP_HELPER; then scripts/build-helper.sh; fi
 [[ -f upstream/pass-cli/target/release/pass-cli ]] || { echo 'Build the helper first.' >&2; exit 1; }
-"$PROTONX_SWIFT" build --build-system native -c release
-PROTONX_BIN_DIR="$("$PROTONX_SWIFT" build --build-system native -c release --show-bin-path)"
+"$PROTONX_SWIFT" build --build-system native -c release ${PROTONX_SWIFT_OPTIONS[@]+"${PROTONX_SWIFT_OPTIONS[@]}"}
+PROTONX_BIN_DIR="$("$PROTONX_SWIFT" build --build-system native -c release --show-bin-path ${PROTONX_SWIFT_OPTIONS[@]+"${PROTONX_SWIFT_OPTIONS[@]}"})"
 mkdir -p "$PROTONX_ROOT/build"
 PROTONX_STAGE="$(mktemp -d "$PROTONX_ROOT/build/.app-stage.XXXXXX")"
 trap 'rm -rf "$PROTONX_STAGE"' EXIT

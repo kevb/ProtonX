@@ -27,9 +27,12 @@ struct ItemEditor: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Image(systemName: isLogin ? "key" : "note.text").foregroundStyle(.purple)
-                Text(editing ? "Edit \(isLogin ? "login" : "secure note")" : "Create item").font(.title2.weight(.semibold))
-            }.padding(24)
+                PassItemBadge(symbol: isLogin ? "key" : "note.text", kind: draft.kind, size: 40)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(editing ? "Edit \(isLogin ? "login" : "secure note")" : "Create item").font(.title2.weight(.semibold))
+                    Text(editing ? "Keep your details up to date" : "A safe place for the details you need").font(.caption).foregroundStyle(.secondary)
+                }
+            }.padding(24).frame(maxWidth: .infinity, alignment: .leading).background(PassTheme.canvas)
             Divider()
             Form {
                 Section("Details") {
@@ -70,7 +73,7 @@ struct ItemEditor: View {
                 Section("Notes") {
                     TextEditor(text: $draft.note).frame(minHeight: 90).accessibilityLabel("Notes")
                 }
-            }.formStyle(.grouped).disabled(saving)
+            }.formStyle(.grouped).scrollContentBackground(.hidden).background(PassTheme.collection).disabled(saving)
             Divider()
             VStack(alignment: .leading, spacing: 12) {
                 if let localError {
@@ -78,14 +81,15 @@ struct ItemEditor: View {
                     if store.mustRefreshBeforeWriting && !conflicted { Button("Refresh Vault") { store.refresh() }.disabled(store.busy) }
                 }
                 HStack {
-                    Button("Cancel") { clear(); dismiss() }.keyboardShortcut(.cancelAction).disabled(saving)
+                    Button("Cancel") { clear(); dismiss() }.buttonStyle(PassPillStyle()).keyboardShortcut(.cancelAction).disabled(saving)
                     Spacer()
                     if saving { ProgressView().controlSize(.small) }
                     Button(editing ? "Save Changes" : "Create \(isLogin ? "Login" : "Note")", action: save)
+                        .buttonStyle(PassPillStyle(primary: true))
                         .keyboardShortcut(.defaultAction).disabled(conflicted || saving || store.busy || store.mustRefreshBeforeWriting || draft.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || vaultID.isEmpty)
                 }
-            }.padding(20)
-        }.frame(width: 580, height: 690)
+            }.padding(20).background(PassTheme.canvas)
+        }.frame(width: 580, height: 690).tint(PassTheme.accent)
         .onAppear(perform: populate)
         .onDisappear { saveTask?.cancel(); clear() }
         .onChange(of: draft.kind) { _, _ in totpSetup = ""; removeTOTP = false }

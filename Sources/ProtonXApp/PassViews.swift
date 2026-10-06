@@ -14,6 +14,7 @@ struct PassWindow: View {
             if store.phase == .open { workspace } else { WelcomeView() }
         }
         .frame(minWidth: 820, minHeight: 540)
+        .preferredColorScheme(previewColorScheme)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if let error = store.error {
                 HStack { Image(systemName: "exclamationmark.triangle"); Text(error).font(.callout); Spacer(); Button("Dismiss") { store.error = nil } }
@@ -45,60 +46,71 @@ struct PassWindow: View {
         NavigationSplitView {
             List(selection: collectionSelection) {
                 Section {
-                    sidebarRow("All items", symbol: "square.grid.2x2", count: store.items.count).tag("all")
-                    sidebarRow("Logins", symbol: "key", count: store.items.filter { $0.kind == "login" }.count).tag("kind:login")
-                    sidebarRow("Notes", symbol: "note.text", count: store.items.filter { $0.kind == "note" }.count).tag("kind:note")
+                    sidebarRow("All items", symbol: "square.grid.2x2", selection: "all", count: store.items.count).tag("all")
+                    sidebarRow("Logins", symbol: "key", selection: "kind:login", count: store.items.filter { $0.kind == "login" }.count).tag("kind:login")
+                    sidebarRow("Notes", symbol: "note.text", selection: "kind:note", count: store.items.filter { $0.kind == "note" }.count).tag("kind:note")
                 }
                 Section("Types") {
                     ForEach([("credit_card", "Cards", "creditcard"), ("identity", "Identities", "person.text.rectangle"), ("wifi", "Wi-Fi", "wifi"), ("alias", "Aliases", "at"), ("ssh_key", "SSH keys", "terminal"), ("custom", "Other items", "doc.text")], id: \.0) { type in
-                        if store.items.contains(where: { $0.kind == type.0 }) { sidebarRow(type.1, symbol: type.2).tag("kind:" + type.0) }
+                        if store.items.contains(where: { $0.kind == type.0 }) { sidebarRow(type.1, symbol: type.2, selection: "kind:" + type.0).tag("kind:" + type.0) }
                     }
                 }
                 Section("Vaults") {
                     ForEach(store.vaults) { vault in
-                        sidebarRow(vault.name, symbol: vault.canUpdate == true ? "folder" : "folder.badge.person.crop", count: store.items.filter { $0.shareID == vault.id }.count).tag("vault:" + vault.id)
+                        sidebarRow(vault.name, symbol: vault.canUpdate == true ? "folder" : "folder.badge.person.crop", selection: "vault:" + vault.id, count: store.items.filter { $0.shareID == vault.id }.count).tag("vault:" + vault.id)
                     }
                 }
-                Section { sidebarRow("Trash", symbol: "trash", count: store.trashedItems.count).tag("trash") }
+                Section { sidebarRow("Trash", symbol: "trash", selection: "trash", count: store.trashedItems.count).tag("trash") }
             }
-            .listStyle(.sidebar).navigationSplitViewColumnWidth(min: 170, ideal: 195, max: 270)
+            .listStyle(.sidebar).scrollContentBackground(.hidden)
+            .background(PassTheme.sidebar)
+            .navigationSplitViewColumnWidth(min: 200, ideal: 225, max: 300)
+            .safeAreaInset(edge: .top, spacing: 0) {
+                PassWordmark().frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 22).padding(.top, 18).padding(.bottom, 20)
+                    .background(PassTheme.sidebar)
+            }
             .safeAreaInset(edge: .bottom) {
                 VStack(alignment: .leading, spacing: 10) {
-                    if store.isDemo { Label("Demo · synthetic data", systemImage: "testtube.2").font(.caption).foregroundStyle(.orange) }
+                    Text(store.isDemo ? "Demo workspace" : "Pass workspace").font(.system(size: 13, weight: .medium))
                     if store.mustRefreshBeforeWriting { Label("Refresh needed before changes", systemImage: "exclamationmark.arrow.triangle.2.circlepath").font(.caption).foregroundStyle(.orange) }
                     if let synced = store.lastSyncedAt {
-                        Text("Updated \(synced, style: .relative) ago").font(.caption2).foregroundStyle(.secondary)
+                        HStack(spacing: 6) {
+                            Circle().fill(store.mustRefreshBeforeWriting ? Color.orange : Color.green).frame(width: 5, height: 5).accessibilityHidden(true)
+                            Text("Updated \(synced, style: .relative) ago").font(.caption).foregroundStyle(.secondary)
+                        }
                     }
                     HStack {
-                        Button { store.lock() } label: { Label("Lock", systemImage: "lock") }.help("Lock ProtonX (⌘L)")
+                        Button { store.lock() } label: { Label("Lock", systemImage: "lock").fixedSize() }.buttonStyle(PassPillStyle()).help("Lock ProtonX (⌘L)")
                         Spacer()
                         Menu { Button("Settings…") { openSettings() }; Button("Sign Out…", role: .destructive) { confirmSignOut = true } } label: { Image(systemName: "ellipsis.circle") }
                             .menuStyle(.borderlessButton).frame(width: 44, height: 28).accessibilityLabel("Account actions")
                     }
-                }.padding()
+                }.padding(18).frame(maxWidth: .infinity, alignment: .leading).background(PassTheme.sidebar)
             }
         } content: {
             VStack(spacing: 0) {
                 HStack {
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(collectionTitle).font(.headline)
+                        Text(collectionTitle).font(.system(size: 19, weight: .semibold))
                         Text("\(store.filteredItems.count) item\(store.filteredItems.count == 1 ? "" : "s")").font(.caption).foregroundStyle(.secondary)
                     }
                     Spacer()
                     Menu {
                         Picker("Sort items", selection: $store.sort) { ForEach(ItemSort.allCases, id: \.self) { Text($0.rawValue).tag($0) } }
                     } label: { Image(systemName: "arrow.up.arrow.down") }.menuStyle(.borderlessButton).fixedSize().accessibilityLabel("Sort items")
-                }.padding(14)
-                Divider()
+                }.padding(.horizontal, 20).padding(.top, 22).padding(.bottom, 16)
                 List(store.filteredItems, selection: $store.selectedItem) { item in
                 HStack(spacing: 12) {
-                    Image(systemName: item.symbol).foregroundStyle(.purple).frame(width: 32, height: 32).background(.purple.opacity(0.09), in: RoundedRectangle(cornerRadius: 8))
+                    PassItemBadge(symbol: item.symbol, kind: item.kind, selected: store.selectedItem == item.id)
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(item.title).lineLimit(1)
+                        Text(item.title).font(.system(size: 14, weight: store.selectedItem == item.id ? .semibold : .medium)).lineLimit(1)
                         Text(store.vaults.first { $0.id == item.shareID }?.name ?? "Vault").font(.caption).foregroundStyle(.secondary)
                     }
-                }.padding(.vertical, 4).tag(item.id)
+                }.padding(.vertical, 10).accessibilityElement(children: .combine).accessibilityValue(item.typeName).tag(item.id)
+                    .listRowSeparator(.hidden)
+                    .listRowInsets(EdgeInsets(top: 2, leading: 14, bottom: 2, trailing: 14))
             }
+                .listStyle(.sidebar).scrollContentBackground(.hidden)
                 .overlay {
                     if store.filteredItems.isEmpty {
                         ContentUnavailableView {
@@ -111,17 +123,12 @@ struct PassWindow: View {
                         }
                     }
                 }
-            }.navigationSplitViewColumnWidth(min: 250, ideal: 300, max: 440)
+            }.background(PassTheme.collection).navigationSplitViewColumnWidth(min: 270, ideal: 310, max: 440)
         } detail: {
             if let item = store.currentItem {
                 if let detail = store.detail {
-                    ItemDetailView(detail: detail).id(item.id + ":" + String(detail.revision ?? 0))
-                        .toolbar {
-                            ToolbarItemGroup {
-                                Button { showingEdit = true } label: { Label("Edit", systemImage: "square.and.pencil") }.disabled(store.busy || !store.canEdit)
-                                Button { confirmTrash = true } label: { Label(store.showingTrash ? "Restore" : "Trash", systemImage: store.showingTrash ? "arrow.uturn.backward" : "trash") }.disabled(store.busy || !store.canTrash)
-                            }
-                        }
+                    ItemDetailView(detail: detail, onEdit: { showingEdit = true }, onTrash: { confirmTrash = true })
+                        .id(item.id + ":" + String(detail.revision ?? 0))
                 } else if store.error != nil {
                     ContentUnavailableView { Label("Could not open item", systemImage: "exclamationmark.triangle") }
                         description: { Text("Your vault is unchanged. You can retry when your connection is available.") }
@@ -129,20 +136,30 @@ struct PassWindow: View {
                 } else { ProgressView("Opening item…").frame(maxWidth: .infinity, maxHeight: .infinity) }
             } else { ContentUnavailableView("Your vault, at home on Mac", systemImage: "key", description: Text("Choose an item to view its details.")) }
         }
+        .background(PassTheme.canvas)
         .navigationTitle("ProtonX Pass")
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
-                NativeSearchField(text: $store.query).frame(width: 220)
+                NativeSearchField(text: $store.query).frame(width: 280)
                 if store.busy { ProgressView().controlSize(.small).accessibilityLabel("Working") }
                 Button { store.refresh() } label: { Label("Refresh", systemImage: "arrow.clockwise") }.disabled(store.busy || store.isDemo)
-                Button { showingCreate = true } label: { Label("Create Item", systemImage: "plus") }.disabled(!store.canCreate).accessibilityIdentifier("newItem")
+                Button { showingCreate = true } label: { HStack(spacing: 7) { Image(systemName: "plus"); Text("Create item") }.fixedSize() }
+                    .buttonStyle(PassPillStyle(primary: true)).disabled(!store.canCreate).accessibilityLabel("Create item").accessibilityIdentifier("newItem")
             }
         }
+    }
+    private var previewColorScheme: ColorScheme? {
+        #if PROTONX_DESIGN_LIGHT
+        if store.previewOnly { return .light }
+        #endif
+        return nil
     }
     private var collectionTitle: String {
         if store.showingTrash { return "Trash" }
         if let vault = store.vaults.first(where: { $0.id == store.selectedVault }) { return vault.name }
-        if let kind = store.kind { return PassItem(itemID: "", shareID: "", title: "", kind: kind).typeName + "s" }
+        if let kind = store.kind {
+            return ["login": "Logins", "note": "Secure notes", "credit_card": "Cards", "identity": "Identities", "wifi": "Wi-Fi", "alias": "Aliases", "ssh_key": "SSH keys"][kind] ?? "Other items"
+        }
         return "All items"
     }
     private var collectionSelection: Binding<String?> {
@@ -158,12 +175,15 @@ struct PassWindow: View {
             store.kind = value.hasPrefix("kind:") ? String(value.dropFirst(5)) : nil
         })
     }
-    private func sidebarRow(_ title: String, symbol: String, count: Int? = nil) -> some View {
+    private func sidebarRow(_ title: String, symbol: String, selection: String, count: Int? = nil) -> some View {
         HStack {
-            Label(title, systemImage: symbol)
+            Image(systemName: symbol).font(.system(size: 16, weight: .regular)).foregroundStyle(collectionSelection.wrappedValue == selection ? PassTheme.selectedInk : PassTheme.accent)
+                .frame(width: 28, height: 32)
+                .background(collectionSelection.wrappedValue == selection ? Color.white : Color.clear, in: RoundedRectangle(cornerRadius: 9)).accessibilityHidden(true)
+            Text(title).font(.system(size: 14, weight: .medium)).lineLimit(1)
             Spacer()
             if let count { Text(String(count)).font(.caption).foregroundStyle(.secondary) }
-        }.padding(.vertical, 3).contentShape(Rectangle())
+        }.padding(.vertical, 7).contentShape(Rectangle())
     }
 
 }
@@ -174,7 +194,9 @@ struct WelcomeView: View {
     @FocusState private var focused: Bool
     var body: some View {
         VStack(spacing: 22) {
-            Image(systemName: store.phase == .locked ? "lock.shield" : "key.horizontal").font(.system(size: 48, weight: .light)).foregroundStyle(.purple)
+            Image(systemName: store.phase == .locked ? "lock.shield" : "key.horizontal")
+                .font(.system(size: 40, weight: .light)).foregroundStyle(PassTheme.accent)
+                .frame(width: 88, height: 88).background(PassTheme.accent.opacity(0.1), in: RoundedRectangle(cornerRadius: 28))
             Text(store.phase == .locked ? "Pass is locked" : "ProtonX Pass").font(.largeTitle.weight(.semibold))
             Text(store.phase == .locked ? (store.isDemo ? "Unlock the demo to explore synthetic data." : "Unlock with Touch ID or your Mac password.") : "Your Proton vault. A native Mac experience.").foregroundStyle(.secondary)
             if let challenge = store.challenge {
@@ -190,13 +212,14 @@ struct WelcomeView: View {
                 Button("Cancel") { store.cancelLogin() }
             } else {
                 Button(store.previewOnly ? "Explore Preview" : (store.phase == .locked ? "Unlock Pass" : "Sign In to Proton")) { store.previewOnly ? store.enterDemo() : (store.phase == .locked ? store.unlock() : store.login()) }
-                    .buttonStyle(.borderedProminent).controlSize(.large).keyboardShortcut(.defaultAction)
+                    .buttonStyle(PassPillStyle(primary: true)).keyboardShortcut(.defaultAction)
                 if store.phase == .locked && !store.isDemo { Button("Sign In Again") { store.login() } }
                 if store.phase == .welcome && !store.previewOnly { Button("Try direct password sign-in (experimental)") { store.login(interactive: true) }.font(.caption) }
                 if store.phase == .welcome { Button("Explore with demo data") { store.enterDemo() }.accessibilityIdentifier("enterDemo") }
             }
             Text("Independent open source client · GPL-3.0-or-later\nNot affiliated with Proton AG").font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
         }.padding(48).frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background { PassTheme.canvas; RadialGradient(colors: [PassTheme.accent.opacity(0.08), .clear], center: .top, startRadius: 0, endRadius: 600) }
         .onChange(of: store.challenge) { _, _ in answer = ""; focused = true }
         .onChange(of: store.phase) { _, _ in answer = "" }
     }
@@ -206,58 +229,108 @@ struct WelcomeView: View {
 struct ItemDetailView: View {
     @EnvironmentObject var store: PassStore
     let detail: ItemDetail
+    let onEdit: () -> Void
+    let onTrash: () -> Void
     @State private var revealed = Set<String>()
     @State private var copied: String?
     private func readableDate(_ value: String) -> String {
         let parser = ISO8601DateFormatter(); parser.timeZone = TimeZone(secondsFromGMT: 0)
         return parser.date(from: value.hasSuffix("Z") ? value : value + "Z")?.formatted(date: .abbreviated, time: .shortened) ?? value
     }
+    private func fieldSymbol(_ field: SecretField) -> String {
+        switch field.label { case "Password": "key"; case "Username", "Email": "person"; case "Card number": "creditcard"; default: field.concealed ? "lock" : "text.alignleft" }
+    }
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                HStack { Image(systemName: store.currentItem?.symbol ?? "key").font(.title).foregroundStyle(.purple); VStack(alignment: .leading, spacing: 5) { Text(detail.title).font(.title2.weight(.semibold)).textSelection(.enabled); Text(store.currentItem?.typeName ?? "Item").font(.caption).foregroundStyle(.secondary) } }
-                ForEach(Array(detail.fields.enumerated()), id: \.offset) { index, field in
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(field.label).font(.caption).foregroundStyle(.secondary)
-                        HStack(alignment: .top) {
-                            Text(field.concealed && !revealed.contains(String(index)) ? "••••••••••••" : field.value)
-                                .font(field.concealed ? .system(.body, design: .monospaced) : .body).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
-                            if field.concealed {
-                                Button { if !revealed.insert(String(index)).inserted { revealed.remove(String(index)) } } label: { Image(systemName: revealed.contains(String(index)) ? "eye.slash" : "eye") }.accessibilityLabel(revealed.contains(String(index)) ? "Hide \(field.label)" : "Reveal \(field.label)")
-                            }
-                            Button { ClipboardController.shared.copy(field.value); copied = String(index) } label: { Image(systemName: copied == String(index) ? "checkmark" : "doc.on.doc") }.accessibilityLabel("Copy \(field.label)")
-                        }.buttonStyle(.borderless).padding(12).background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
-                    }
+            VStack(alignment: .leading, spacing: 18) {
+                HStack(alignment: .center, spacing: 14) {
+                    PassItemBadge(symbol: store.currentItem?.symbol ?? "key", kind: store.currentItem?.kind ?? "login", size: 52)
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(detail.title).font(.system(size: 23, weight: .semibold)).textSelection(.enabled).lineLimit(3)
+                        Text(store.currentVault?.name ?? store.currentItem?.typeName ?? "Item").font(.caption).foregroundStyle(.secondary)
+                    }.frame(maxWidth: .infinity, alignment: .leading)
+                    Button(action: onEdit) { Label("Edit", systemImage: "pencil") }.buttonStyle(PassPillStyle()).disabled(store.busy || !store.canEdit)
+                    Menu {
+                        Button(store.showingTrash ? "Restore item" : "Move to Trash", systemImage: store.showingTrash ? "arrow.uturn.backward" : "trash", action: onTrash)
+                            .disabled(store.busy || !store.canTrash)
+                    } label: { Image(systemName: "ellipsis").font(.system(size: 18)).frame(width: 38, height: 38).background(PassTheme.accent.opacity(0.08), in: Circle()) }
+                        .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().accessibilityLabel("Item actions")
+                }.padding(.bottom, 10)
+                if !detail.fields.isEmpty {
+                    VStack(spacing: 0) {
+                        ForEach(Array(detail.fields.enumerated()), id: \.offset) { index, field in
+                            HStack(alignment: .top, spacing: 14) {
+                                Image(systemName: fieldSymbol(field)).font(.system(size: 17)).foregroundStyle(PassTheme.accent).frame(width: 22, height: 40).accessibilityHidden(true)
+                                VStack(alignment: .leading, spacing: 7) {
+                                    Text(field.label).font(.system(size: 12)).foregroundStyle(.secondary)
+                                    Text(field.concealed && !revealed.contains(String(index)) ? "••••••••••••" : field.value)
+                                        .font(field.concealed ? .system(size: 14, design: .monospaced) : .system(size: 15))
+                                        .textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+                                }
+                                HStack(spacing: 4) {
+                                    if field.concealed {
+                                        Button { if !revealed.insert(String(index)).inserted { revealed.remove(String(index)) } } label: { Image(systemName: revealed.contains(String(index)) ? "eye.slash" : "eye") }
+                                            .accessibilityLabel(revealed.contains(String(index)) ? "Hide \(field.label)" : "Reveal \(field.label)")
+                                            .help(revealed.contains(String(index)) ? "Hide \(field.label)" : "Reveal \(field.label)")
+                                    }
+                                    Button { ClipboardController.shared.copy(field.value); copied = String(index) } label: { Image(systemName: copied == String(index) ? "checkmark" : "doc.on.doc") }
+                                        .accessibilityLabel("Copy \(field.label)").help("Copy \(field.label)")
+                                }.buttonStyle(PassIconStyle()).padding(.top, 7)
+                            }.padding(18)
+                            if index < detail.fields.count - 1 { Divider().overlay(PassTheme.border.opacity(0.4)).padding(.leading, 54) }
+                        }
+                    }.passSurface()
                 }
                 if detail.hasTOTP {
-                    Button { store.copyTOTP() } label: { Label("Copy verification code", systemImage: "clock.badge.checkmark") }.disabled(store.busy || !store.canCopyTOTP)
-                    if !store.canCopyTOTP { Text("Verification code access is limited for this account.").font(.caption).foregroundStyle(.secondary) }
+                    detailCard("Verification code", symbol: "clock") {
+                        Button { store.copyTOTP() } label: { Label("Copy verification code", systemImage: "doc.on.doc") }
+                            .buttonStyle(PassPillStyle()).disabled(store.busy || !store.canCopyTOTP)
+                        if !store.canCopyTOTP { Text("Verification code access is limited for this account.").font(.caption).foregroundStyle(.secondary) }
+                    }
                 }
                 if !detail.urls.isEmpty {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("Websites").font(.caption).foregroundStyle(.secondary)
+                    detailCard("Websites", symbol: "globe") {
                         ForEach(detail.urls, id: \.self) { value in
-                            if let url = URLPolicy.webURL(value) { Link(value, destination: url).lineLimit(2) }
-                            else { Text("Unsupported website address").foregroundStyle(.secondary) }
+                            if let url = URLPolicy.webURL(value) {
+                                Link(destination: url) {
+                                    HStack(spacing: 8) { Text(value).lineLimit(2).multilineTextAlignment(.leading); Spacer(minLength: 8); Image(systemName: "arrow.up.right").font(.caption) }
+                                        .font(.system(size: 14)).foregroundStyle(PassTheme.accent).padding(12)
+                                        .background(PassTheme.accent.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
+                                }
+                            } else { Text("Unsupported website address").foregroundStyle(.secondary) }
                         }
                     }
                 }
                 if !detail.note.isEmpty {
-                    VStack(alignment: .leading, spacing: 10) { Text("Notes").font(.caption).foregroundStyle(.secondary); Text(detail.note).textSelection(.enabled) }
+                    detailCard("Note", symbol: "note.text") { Text(detail.note).font(.system(size: 14)).lineSpacing(4).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }
                 }
                 if detail.passkeyCount > 0 { Label("\(detail.passkeyCount) passkey(s) · use the official app for authentication", systemImage: "person.badge.key").font(.caption).foregroundStyle(.secondary) }
                 if detail.attachmentCount > 0 { Label("\(detail.attachmentCount) attachment(s) · use the official app to download", systemImage: "paperclip").font(.caption).foregroundStyle(.secondary) }
-                Text("Copied values clear after 30 seconds. Locking clears the item from this window.").font(.caption).foregroundStyle(.secondary)
-                Spacer()
                 if let item = store.currentItem {
-                    VStack(alignment: .leading, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 16) {
                         if store.currentVault?.canUpdate != true { Label("Shared vault · read-only", systemImage: "lock").font(.caption).foregroundStyle(.secondary) }
-                        if let date = item.modifiedAt { LabeledContent("Last changed", value: readableDate(date)) }
-                        if let date = item.createdAt { LabeledContent("Created", value: readableDate(date)) }
-                    }.font(.caption).foregroundStyle(.secondary).padding(14).background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 10))
+                        if let date = item.modifiedAt { metadataRow("Last modified", value: readableDate(date), symbol: "pencil") }
+                        if let date = item.createdAt { metadataRow("Created", value: readableDate(date), symbol: "calendar") }
+                    }.padding(18).frame(maxWidth: .infinity, alignment: .leading).passSurface()
                 }
-            }.padding(28).frame(maxWidth: 650, alignment: .leading).frame(maxWidth: .infinity, alignment: .leading)
-        }.onDisappear { revealed = []; copied = nil }
+                Label("Copied values clear after 30 seconds", systemImage: "lock.shield").font(.caption).foregroundStyle(.secondary).padding(.horizontal, 4).padding(.top, 4)
+            }.padding(24).frame(maxWidth: 760, alignment: .leading).frame(maxWidth: .infinity, alignment: .center)
+        }.background(PassTheme.canvas).onDisappear { revealed = []; copied = nil }
+    }
+    private func detailCard<Content: View>(_ title: String, symbol: String, @ViewBuilder content: () -> Content) -> some View {
+        HStack(alignment: .top, spacing: 14) {
+            Image(systemName: symbol).font(.system(size: 17)).foregroundStyle(PassTheme.accent).frame(width: 22, height: 24).accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 10) {
+                Text(title).font(.system(size: 12)).foregroundStyle(.secondary)
+                content()
+            }.frame(maxWidth: .infinity, alignment: .leading)
+        }.padding(18).passSurface()
+    }
+    private func metadataRow(_ title: String, value: String, symbol: String) -> some View {
+        HStack(alignment: .top, spacing: 14) {
+            Image(systemName: symbol).foregroundStyle(PassTheme.accent).frame(width: 22, height: 20).accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 4) { Text(title).font(.system(size: 12, weight: .medium)); Text(value).font(.caption).foregroundStyle(.secondary) }
+        }
     }
 }
 
