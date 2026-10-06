@@ -1439,7 +1439,7 @@ index ea36cc9..f272454 100644
 +    }
  }
 diff --git a/pass/src/item/create/mod.rs b/pass/src/item/create/mod.rs
-index 1bd2057..b2feade 100644
+index 1bd2057..afe12fe 100644
 --- a/pass/src/item/create/mod.rs
 +++ b/pass/src/item/create/mod.rs
 @@ -30,6 +30,48 @@ pub mod note;
@@ -1581,7 +1581,7 @@ index 1bd2057..b2feade 100644
 +                        key_rotation: 0,
 +                        content: "not-encrypted-on-purpose".into(),
 +                        item_key: None,
-+                        state: 0,
++                        state: crate::domain::ItemState::Active as u8,
 +                        flags: 0,
 +                        alias_email: None,
 +                        create_time: 0,
@@ -1669,10 +1669,10 @@ index 34f94c4..bc691c3 100644
 +#[cfg(feature = "protonx-native")]
 +pub use update::NativeRevisionConflict;
 diff --git a/pass/src/item/update.rs b/pass/src/item/update.rs
-index 5d3c0db..4f2508a 100644
+index 5d3c0db..469d4f1 100644
 --- a/pass/src/item/update.rs
 +++ b/pass/src/item/update.rs
-@@ -60,12 +60,32 @@ impl<C: PassClientContext> PassClient<C> {
+@@ -60,12 +60,33 @@ impl<C: PassClientContext> PassClient<C> {
          share_id: &ShareId,
          item_id: &ItemId,
          new_content: ItemData,
@@ -1695,7 +1695,8 @@ index 5d3c0db..4f2508a 100644
  
 +        #[cfg(feature = "protonx-native")]
 +        if expected_revision.is_some_and(|expected| expected != item_revision.revision)
-+            || (expected_revision.is_some() && item_revision.state != 0)
++            || (expected_revision.is_some()
++                && item_revision.state != crate::domain::ItemState::Active as u8)
 +        {
 +            return Err(NativeRevisionConflict.into());
 +        }
@@ -1705,7 +1706,7 @@ index 5d3c0db..4f2508a 100644
          let item_type = ItemType::from_content(&new_content.content);
  
          let item_key = self
-@@ -124,3 +144,15 @@ impl<C: PassClientContext> PassClient<C> {
+@@ -124,3 +145,149 @@ impl<C: PassClientContext> PassClient<C> {
          Ok(())
      }
  }
@@ -1721,6 +1722,140 @@ index 5d3c0db..4f2508a 100644
 +}
 +#[cfg(feature = "protonx-native")]
 +impl std::error::Error for NativeRevisionConflict {}
++
++#[cfg(all(test, feature = "protonx-native"))]
++mod native_revision_tests {
++    use super::*;
++    use crate::PlanType;
++    use crate::domain::{ItemContent, ItemState, LoginItem};
++    use crate::test_tools::*;
++
++    #[muon_test::test]
++    async fn native_view_then_password_edit_accepts_active_wire_state(server: muon_test::Server) {
++        let (raw_client, api) = server.client::<()>();
++        let client = make_test_pass_client_with_setup(raw_client, &api, PlanType::Plus).await;
++        const SHARE: &str = "synthetic-share";
++        const ITEM: &str = "synthetic-login";
++        setup_vault_share(&api, SHARE);
++        setup_share_keys(&api, SHARE);
++        let original = ItemData::new(
++            "Synthetic login".into(),
++            "Synthetic preserved note".into(),
++            "synthetic-uuid".into(),
++            ItemContent::Login(LoginItem {
++                email: "demo@example.com".into(),
++                username: "synthetic-user".into(),
++                password: "Dummy-Test-Only-73".into(),
++                urls: vec!["https://example.com".into()],
++                totp_uri: String::new(),
++                passkeys: vec![],
++                autofill_urls: vec![],
++            }),
++            vec![],
++        )
++        .unwrap();
++        let encrypted = encrypt_item_contents(original.clone());
++        let revision = ItemRevisionBuilder::new(ITEM.into())
++            .with_revision(7)
++            .with_state(ItemState::Active as u8)
++            .with_content(crate::utils::b64_encode(&encrypted.encrypted_contents))
++            .with_item_key(Some(crate::utils::b64_encode(
++                &encrypted.encrypted_item_key,
++            )))
++            .build();
++        setup_item_revision(&api, SHARE, ITEM, revision.clone());
++        let update = api.handler_with_method(
++            Method::PUT,
++            "/pass/v1/share/synthetic-share/item/synthetic-login",
++            |_| success_code(),
++        );
++        // Viewing does not change either the encrypted content or its revision.
++        let details = client
++            .view_item(&ShareId::new(SHARE.into()), &ItemId::new(ITEM.into()))
++            .await
++            .unwrap();
++        assert_eq!(details.revision, 7);
++        let mut changed = details.item.content;
++        if let ItemContent::Login(login) = &mut changed.content {
++            login.password = "Dummy-Test-Only-73!".into();
++        }
++        // Public mock handlers are consumed once; install the next unchanged server read.
++        setup_item_revision(&api, SHARE, ITEM, revision);
++        let recorder = api.new_recorder();
++        client
++            .update_native_item(
++                &ShareId::new(SHARE.into()),
++                &ItemId::new(ITEM.into()),
++                changed.clone(),
++                details.revision,
++            )
++            .await
++            .unwrap();
++        assert_hit!(update);
++        let request: UpdateItemRequest = last_request!(recorder);
++        assert_eq!(request.last_revision, 7);
++        let ciphertext = crate::utils::b64_decode(&request.content).unwrap();
++        let plaintext = crypto::decrypt(
++            &ciphertext,
++            encrypted.item_key.as_ref(),
++            crypto::EncryptionTag::ItemContent,
++        )
++        .unwrap();
++        let decoded = ItemData::deserialize(&plaintext).unwrap();
++        assert_eq!(decoded, changed);
++        assert_eq!(decoded.note, original.note);
++        assert_eq!(decoded.item_uuid, original.item_uuid);
++    }
++
++    #[muon_test::test]
++    async fn native_update_refuses_trash_and_unknown_wire_states_before_write(
++        server: muon_test::Server,
++    ) {
++        let (raw_client, api) = server.client::<()>();
++        let client = make_test_pass_client_with_setup(raw_client, &api, PlanType::Plus).await;
++        setup_vault_share(&api, "synthetic-share");
++        let update = api.handler_with_method(
++            Method::PUT,
++            "/pass/v1/share/synthetic-share/item/synthetic-login",
++            |_| success_code(),
++        );
++        let content = ItemData::new(
++            "Synthetic".into(),
++            "Demo".into(),
++            "synthetic-uuid".into(),
++            ItemContent::Note(crate::domain::NoteItem),
++            vec![],
++        )
++        .unwrap();
++        for wire_state in [0u8, ItemState::Trashed as u8, 3, 255] {
++            setup_user_access(&api, PlanType::Plus);
++            setup_item_revision(
++                &api,
++                "synthetic-share",
++                "synthetic-login",
++                ItemRevisionBuilder::new("synthetic-login".into())
++                    .with_revision(7)
++                    .with_state(wire_state)
++                    .with_content("not-encrypted-on-purpose".into())
++                    .build(),
++            );
++            let error = client
++                .update_native_item(
++                    &ShareId::new("synthetic-share".into()),
++                    &ItemId::new("synthetic-login".into()),
++                    content.clone(),
++                    7,
++                )
++                .await
++                .unwrap_err();
++            assert!(
++                error.downcast_ref::<NativeRevisionConflict>().is_some(),
++                "Synthetic error: {error:#}"
++            );
++        }
++        assert_not_hit!(update);
++    }
++}
 diff --git a/pass/src/lib.rs b/pass/src/lib.rs
 index 5a55781..757bc9d 100644
 --- a/pass/src/lib.rs

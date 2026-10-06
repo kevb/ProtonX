@@ -5,6 +5,40 @@ Rust 1.99.0. Automated test content is synthetic. User-driven live sign-in and
 local unlock reached a vault workspace in the morning follow-up. Only fixed UI
 states were inspected; no live vault contents were returned to the model.
 
+## False edit-conflict correction, 2026-10-06
+
+- The user reported creating a fictional login, viewing it in the official Pass
+  desktop app, then receiving a conflict when correcting its password in ProtonX.
+  Read-only inspection confirmed blocked editing; a manual refresh restored Edit.
+  No passwords were revealed, copied or changed during that inspection.
+- Root cause: ProtonX's checked-update guard compared the API state to `0`, while
+  Proton's `ItemState::Active` is `1`. It rejected valid active items even with an
+  unchanged revision. The old negative fixture also used `0`, masking the mistake.
+  The guard and stale-revision fixture now use the upstream enum; revision and
+  non-active-state protections remain enforced before encryption/write.
+- A new public mock-server contract decrypts a synthetic active login, changes its
+  password (including final punctuation), executes the real checked SDK update and
+  decrypts the outgoing payload to verify full content and LastRevision. It fails
+  with the old guard's `NativeRevisionConflict` and passes with the correction.
+  A second contract rejects Trash and unknown wire states without reaching PUT.
+  Mock handlers are consumed once, so unchanged repeated reads are registered
+  explicitly; no server/account or new cryptography is involved.
+- Persistent Refresh Vault actions now accompany blocked-write status and error
+  feedback, including after dismissing the banner. The write gate is retained.
+- 91 Swift tests passed. CLI policy suites passed 115/122 tests; the native SDK
+  passed 230 tests and field-update integration passed 24, with two upstream tests
+  ignored. The optimized desktop helper and release app built; strict nested
+  signature verification passed for `build/ProtonX Edit Fix.app`.
+- The materialized helper matches the complete updated corresponding-source patch;
+  dependency/source pins and notices are unchanged. A full source archive is not
+  generated from the locally dirty checkout; no public binary was released.
+- Official desktop search/edit is the acceptance reference. The user's Safari
+  extension does not expose searchable browsing; website filling is separate.
+  The updated app was opened, local unlock completed, and the saved session
+  restored the fictional login with Edit enabled. No sign-in credentials or
+  hidden password were read. Corrected-save interoperability still awaits the
+  user's repeat test.
+
 ## Pass recovery follow-up, 2026-10-06
 
 - Added regression cases that failed before the fix: uncertain Trash/restore could

@@ -45,8 +45,10 @@ records, inspect the results through an independent official client and report
 the observed outcomes. Account access remains explicitly authorised and private
 contents stay out of public tests, screenshots and logs.
 
-1. Authenticate both ProtonX and the standalone official Safari extension to the
-   designated test account. They have independent sessions and local locks.
+1. Authenticate ProtonX and the official Proton Pass desktop app to the designated
+   test account. Use the desktop app for record search/edit/Trash verification; the
+   user's Safari extension does not provide searchable vault browsing. Safari
+   filling is a separate follow-up. Each client has its own session/local lock.
 2. Create a fictional login with reserved example domains. Verify it in the
    other client; edit it there, refresh in ProtonX, and test a stale revision.
 3. Trash and restore only that record; verify active/Trash membership after sync.
@@ -59,4 +61,8 @@ contents stay out of public tests, screenshots and logs.
 Failures discovered here become synthetic regression cases where possible.
 Passing local fixtures does not establish server interoperability, real account
 expiry handling, or actual Safari filling. Record those as separate results.
-See [the Safari integration decision](CREDENTIAL_PROVIDER.md).
+A follow-up corrected the native edit guard to use Proton's `ItemState::Active`
+wire value, with a real encrypted read-then-password-update mock-server contract.
+The UI keeps a visible Refresh Vault action beside a blocked-write warning, even
+when its error banner is dismissed. Genuine stale revisions and non-active states
+remain refused. See [the Safari integration decision](CREDENTIAL_PROVIDER.md).

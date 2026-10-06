@@ -17,7 +17,11 @@ struct PassWindow: View {
         .preferredColorScheme(previewColorScheme)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if let error = store.error {
-                HStack { Image(systemName: "exclamationmark.triangle"); Text(error).font(.callout); Spacer(); Button("Dismiss") { store.error = nil } }
+                HStack {
+                    Image(systemName: "exclamationmark.triangle"); Text(error).font(.callout); Spacer()
+                    if store.mustRefreshBeforeWriting { Button("Refresh Vault") { store.refresh() }.disabled(store.busy) }
+                    Button("Dismiss") { store.error = nil }
+                }
                     .padding(12).background(.orange.opacity(0.12)).accessibilityIdentifier("errorBanner")
             }
         }
@@ -72,7 +76,10 @@ struct PassWindow: View {
             .safeAreaInset(edge: .bottom) {
                 VStack(alignment: .leading, spacing: 10) {
                     Text(store.isDemo ? "Demo workspace" : "Pass workspace").font(.system(size: 13, weight: .medium))
-                    if store.mustRefreshBeforeWriting { Label("Refresh needed before changes", systemImage: "exclamationmark.arrow.triangle.2.circlepath").font(.caption).foregroundStyle(.orange) }
+                    if store.mustRefreshBeforeWriting {
+                        Label("Refresh needed before changes", systemImage: "exclamationmark.arrow.triangle.2.circlepath").font(.caption).foregroundStyle(.orange)
+                        Button("Refresh Vault") { store.refresh() }.disabled(store.busy).accessibilityIdentifier("recoverPassSync")
+                    }
                     if let synced = store.lastSyncedAt {
                         HStack(spacing: 6) {
                             Circle().fill(store.mustRefreshBeforeWriting ? Color.orange : Color.green).frame(width: 5, height: 5).accessibilityHidden(true)

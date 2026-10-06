@@ -78,10 +78,11 @@ were not added to the project.
    metadata-snapshot helper now handles that work with one bootstrap.
    Show refreshing/error/last-success states. Establish session recovery before
    adding periodic background work. Benchmark matched synthetic account sizes.
-5. **Verify interoperability with the standalone official Safari extension.**
+5. **Verify interoperability with the official Pass desktop app.**
    Use a fictional login in a designated test account after both clients sign in.
    Check create/edit/Trash/restore sync and independent local lock/sign-out behavior.
-   Keep the extension's wrapper installed. Defer the ProtonX credential-provider
+   Use the desktop app for searchable records; the user's Safari extension lacks
+   that surface. Keep its wrapper installed and test website filling separately. Defer the ProtonX credential-provider
    spike to optional system/native-app work; the compile-only probe is retained.
 
 This is an ordered backlog, not a promise that every item fits in one day.
