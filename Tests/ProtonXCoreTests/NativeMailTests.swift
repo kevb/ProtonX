@@ -156,3 +156,12 @@ private func mailFixture(_ script: String) throws -> (URL, URL) {
     let saved = try NativeMailProcess.decode(Data(#"{"schema":1,"id":1,"result":{"fresh":false,"refreshFailed":true}}"#.utf8), expectedID: 1)
     #expect(saved.fresh == false); #expect(saved.refreshFailed == true)
 }
+
+@Test func mailStorageRecoveryFailuresRemainTypedAndDoNotRecommendSigningInAgain() {
+    for failure in [NativeMailFailure.storageMigrationPending, .storageVersionUnsupported] {
+        let packet = "{\"schema\":1,\"id\":7,\"failure\":\"\(failure.rawValue)\"}"
+        #expect(throws: failure) { try NativeMailProcess.decode(Data(packet.utf8), expectedID: 7) }
+        #expect(failure.localizedDescription.contains("retained"))
+        #expect(!failure.localizedDescription.contains("sign in"))
+    }
+}

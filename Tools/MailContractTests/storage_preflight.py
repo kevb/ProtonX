@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Candidate startup refusal using only temporary synthetic legacy profiles.
+"""Startup refusals using only temporary synthetic profiles.
 
 Every case fails before Keychain access or SDK initialization. Never test an empty
 profile here: that would request a real local Keychain storage key.
@@ -13,6 +13,7 @@ import sys
 import tempfile
 
 executable = str(Path(sys.argv[1]).resolve())
+legacy = len(sys.argv) == 3 and sys.argv[2] == "--legacy"
 request = json.dumps({"schema": 1, "id": 1, "command": {"method": "restore"}}) + "\n"
 
 def refused(root, expected):
@@ -30,7 +31,8 @@ with tempfile.TemporaryDirectory(prefix="ProtonX-synthetic-storage-") as directo
     database = root / "sessions/account.db"
     database.write_bytes(b"SQLite format 3\0SYNTHETIC-LEGACY-CONTENT")
     before = database.read_bytes()
-    refused(root, "storage_upgrade_required")
+    if not legacy:
+        refused(root, "storage_upgrade_required")
     assert database.read_bytes() == before
     database.write_bytes(b"short")
     refused(root, "storage_unavailable")
@@ -44,4 +46,24 @@ with tempfile.TemporaryDirectory(prefix="ProtonX-synthetic-storage-") as directo
     with (root / ".storage.lock").open("r+b") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         refused(root, "storage_unavailable")
-print("4 synthetic helper preflight refusals passed; profiles retained")
+    # Markers must gate startup before either helper's Keychain/SDK calls.
+    database.unlink()
+    migration = root / ".storage-migration"
+    migration.mkdir()
+    refused(root, "storage_migration_pending")
+    migration.rmdir()
+    migration.symlink_to(root / "missing-migration-target")
+    refused(root, "storage_migration_pending")
+    migration.unlink()
+    if legacy:
+        (root / ".storage-format").write_bytes(b"protonx-mail-sqlcipher-v1\n")
+        refused(root, "storage_version_unsupported")
+        (root / ".storage-format").unlink()
+        database.write_bytes(bytes([0x51]) * 128)
+        before = database.read_bytes()
+        refused(root, "storage_version_unsupported")
+        assert database.read_bytes() == before
+        database.unlink()
+    (root / ".storage-format").write_bytes(b"unknown-format")
+    refused(root, "storage_unavailable")
+print(f"{8 if legacy else 7} synthetic helper preflight refusals passed; profiles retained")

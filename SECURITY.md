@@ -24,8 +24,13 @@ include passwords, tokens, real message bodies or vault exports in public issues
   This is an unresolved release blocker; see docs/LOCAL_STORAGE.md and its synthetic
   storage contract. An opt-in SQLCipher candidate keys new SDK databases with a
   separate Mail storage Keychain key; normal builds do not enable it. Existing
-  plaintext profiles are refused, not converted. Attachment file caches and
-  whole-profile migration remain unprotected/unimplemented release gates.
+  plaintext profiles are refused, not converted. A synthetic-tested migration
+  coordinator stages encrypted database copies while retaining originals; no
+  production upgrade/cutover is exposed. Both updated helpers lock the profile
+  and refuse pending migrations before Keychain/SDK access. Normal builds also
+  refuse encrypted profiles, avoiding SDK reset behavior. Historical older builds
+  do not honor these guards. Attachment file caches, whole-profile cutover and
+  actual draft/send recovery remain release gates. See docs/MAIL_STORAGE_MIGRATION.md.
   It never reuses Pass or Bridge credentials. `nativeMailConnected`
   is an untrusted Boolean hint; reopening requires local unlock and SDK restore.
   Native credentials/challenges travel on private stdin. Human verification and

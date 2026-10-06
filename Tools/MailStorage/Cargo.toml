@@ -6,10 +6,18 @@ license = "AGPL-3.0-only"
 publish = false
 
 [dependencies]
-rusqlite = { workspace = true, features = ["bundled-sqlcipher-vendored-openssl"] }
-zeroize = { workspace = true }
-tempfile = { workspace = true }
+rusqlite = { workspace = true, features = ["bundled-sqlcipher-vendored-openssl"], optional = true }
+zeroize = { workspace = true, optional = true }
+tempfile = { workspace = true, optional = true }
 libc = "0.2"
+
+serde = { workspace = true, features = ["derive"], optional = true }
+serde_json = { workspace = true, optional = true }
+sha2 = { workspace = true, optional = true }
+
+[features]
+default = ["encryption"]
+encryption = ["dep:rusqlite", "dep:zeroize", "dep:tempfile", "dep:serde", "dep:serde_json", "dep:sha2"]
 
 [dev-dependencies]
 mail-common = { workspace = true, features = ["test-utils"] }

@@ -49,6 +49,10 @@ assert "secure-storage" not in manifest["features"].get("default", [])
 main = helper.split("fn main()", 1)[1]
 assert main.index('secure_storage::prepare(&directory)') < main.index('Backend::new(directory.clone())')
 secure = (native / "protonx-mail-helper/src/secure_storage.rs").read_text()
-assert secure.index('return Err("storage_upgrade_required")') < secure.index('get_generic_password(SERVICE, ACCOUNT)')
+assert secure.index('guard.check_startup(true)') < secure.index('get_generic_password(SERVICE, ACCOUNT)')
+assert 'default-features = false' in (native / 'protonx-mail-helper/Cargo.toml').read_text()
+assert main.index('guard.check_startup(false)') < main.index('Backend::new(directory.clone())')
+assert main.index('drop(backend)') < main.index('std::process::exit(0)')
+assert 'drop(storage_guard)' not in main
 assert 'org.kevb.ProtonX.Mail.Storage' in secure
 print("Independent native Mail protocol and privacy contracts verified")

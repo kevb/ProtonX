@@ -1156,7 +1156,6 @@ fn main() {
     let stdout = io::stdout();
     let mut writer = stdout.lock();
     let mut backend: Option<Backend> = None;
-    #[cfg(feature = "secure-storage")]
     let mut storage_guard = None;
     while let Ok(Some(packet)) = read_packet(&mut reader) {
         let Ok(request) = serde_json::from_slice::<Request>(&packet) else {
@@ -1174,7 +1173,27 @@ fn main() {
             Ok(())
         };
         #[cfg(not(feature = "secure-storage"))]
-        let storage_ready: Result<(), &'static str> = Ok(());
+        let storage_ready = if storage_guard.is_none() {
+            protonx_mail_storage::ProfileGuard::acquire(&directory)
+                .and_then(|guard| {
+                    guard.check_startup(false)?;
+                    Ok(guard)
+                })
+                .map(|guard| {
+                    storage_guard = Some(guard);
+                })
+                .map_err(|error| match error {
+                    protonx_mail_storage::StorageError::MigrationPending => {
+                        "storage_migration_pending"
+                    }
+                    protonx_mail_storage::StorageError::EncryptedProfile => {
+                        "storage_version_unsupported"
+                    }
+                    _ => "storage_unavailable",
+                })
+        } else {
+            Ok(())
+        };
         let result = storage_ready
             .and_then(|_| {
                 if backend.is_none() {
@@ -1216,9 +1235,11 @@ fn main() {
         }
     }
     drop(backend);
-    #[cfg(feature = "secure-storage")]
-    drop(storage_guard);
-    // Exiting on EOF/lock ends pending requests and the helper process.
+    // Keep the profile lock held until the OS terminates every helper thread.
+    // The default SDK detaches pool workers; dropping the guard here would allow
+    // another helper/migrator to enter before those workers actually exit.
+    // Replies were flushed above. OS process exit releases the lock descriptor.
+    std::process::exit(0);
 }
 unsafe fn libc_umask() {
     unsafe extern "C" {

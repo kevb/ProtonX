@@ -8,7 +8,7 @@ end-to-end workflow come before additional products.
 
 1. **Finish the secure-storage foundation already in progress.** The opt-in Mail
    candidate encrypts its databases and supports saved-first loading, but the
-   normal app does not enable it. Complete whole-profile migration/recovery,
+   normal app does not enable it. Complete whole-profile cutover/recovery,
    protect decrypted attachment/MIME files, preserve pending drafts/sends and
    prevent older builds reopening a migrated profile. Measure startup integrity
    checks before promising faster opening. See [the storage review](LOCAL_STORAGE.md).
@@ -39,6 +39,10 @@ Pass and the shared macOS experience before expanding the suite.
 - Login/note editing with multiple websites, notes, TOTP and text/hidden custom fields.
 - Revision conflict protection, draft retention and acknowledged-save handling.
 - Compile-only AutoFill feasibility contracts and offline storage review.
+- Experimental Mail encrypted database candidate and resumable database-set staging,
+  with original files retained and startup guards in both updated helpers. Profile
+  activation and attachment protection remain gates; see
+  [the migration boundary](MAIL_STORAGE_MIGRATION.md).
 
 These have synthetic/source validation. The user has also reported successful
 live Pass login creation, sync and deletion, and native Mail sign-in/read access.

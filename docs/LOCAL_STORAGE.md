@@ -65,7 +65,9 @@ letting the SDK rebuild a profile. Any existing plaintext database is refused
 **before Keychain access**. There is no user migration action yet. New databases
 are keyed before schema creation. Database workers are joined on graceful pool
 shutdown to close encrypted connections before process/crypto-library teardown.
-The profile lock coordinates this candidate only; older builds do not honor it.
+Both updated helper variants now hold the profile lock. They refuse a pending
+migration before SDK/Keychain access; the normal helper also refuses encrypted
+profiles. Historically older builds still do not honor this lock or these gates.
 
 `Tools/MailStorage` contains a low-level, synthetic-tested single-file export:
 checkpoint WAL, export with SQLCipher into a same-directory temporary file,
@@ -74,6 +76,16 @@ not called by the helper. It does not yet provide a whole-profile transaction,
 crash recovery manifest, old-build exclusion, backup handling or secure erasure.
 The generic pending-send fixture demonstrates row preservation, not SDK queue
 replay or delivery safety. Never invoke it on a real profile yet.
+
+A separate resumable database-set staging coordinator now prepares encrypted
+copies of every discovered account/user database under a private migration
+directory, retaining originals. It binds the plan to the original key, verifies
+source/WAL fingerprints and acknowledged outputs, and resumes tested process-crash
+points. Both updated helpers refuse that profile even when preparation completes.
+The pinned SDK schema/body fixture also preserves draft references and opaque
+queue bytes without executing the queue. This is not whole-profile activation,
+attachment conversion, actual send recovery or secure removal of old plaintext.
+See [the migration boundary](MAIL_STORAGE_MIGRATION.md).
 
 The candidate advertises `cacheFirst` after authentication. Swift requests a local
 first page, then one refresh. Subsequent `poll` requests read callback status
@@ -102,13 +114,15 @@ and [key API](https://www.zetetic.net/sqlcipher/sqlcipher-api/) underpin this ca
 
 ## Remaining implementation sequence
 
-1. **Protect Mail's existing database first.** Investigate database encryption
-   through an established library, with a separate Mail Keychain key. Cover account
-   and user databases, WAL/SHM/journals, draft queues and attachment caches. Compare
-   this with field encryption using Proton's existing crypto; do not implement a
-   new cryptographic scheme or create a decrypted Swift-side cache.
-2. **Design migration and recovery before enabling it.** Make any existing-file
-   conversion explicit, atomic and recoverable. An encrypted new file is insufficient
+1. **Finish protection beyond the encrypted database candidate.** SQLCipher
+   connection initialization and separate Mail storage keys are implemented behind
+   the opt-in feature. Protect attachment/embedded-MIME file caches through an
+   established encryption layer, preserving SDK read/write semantics. Do not create
+   a decrypted Swift-side cache or call the whole profile secure yet.
+2. **Complete migration cutover and recovery before enabling it.** Resumable
+   database-set staging is implemented and keeps originals. Whole-profile cutover
+   and its native recovery workflow must make conversion explicit and recoverable.
+   An encrypted new file is insufficient
    if old plaintext copies or journals remain. Never erase a saved draft/send queue
    or delete a session key as a shortcut. Missing keys, damaged files and unknown
    schemas must fail closed with a useful recovery path.

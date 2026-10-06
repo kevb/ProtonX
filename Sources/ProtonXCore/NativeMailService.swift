@@ -62,8 +62,11 @@ public enum NativeMailFailure: String, Codable, Error, LocalizedError, Sendable 
     case draftFailed = "draft_failed", draftUnsupported = "draft_unsupported", senderUnavailable = "sender_unavailable"
     case sendUncertain = "send_uncertain", sendRejected = "send_rejected"
     case storageUnavailable = "storage_unavailable", storageKeyMissing = "storage_key_missing", storageUpgradeRequired = "storage_upgrade_required"
+    case storageMigrationPending = "storage_migration_pending", storageVersionUnsupported = "storage_version_unsupported"
     public var errorDescription: String? {
         switch self {
+        case .storageMigrationPending: "Mail’s storage upgrade needs recovery before this profile can open. Your original files and staged upgrade have been retained."
+        case .storageVersionUnsupported: "This Mail profile uses encrypted storage that this build cannot open. Use a compatible build; your saved files have been retained."
         case .storageUnavailable: "Mail’s local storage could not open safely. Your saved files have been retained. Close other ProtonX copies and check Keychain access."
         case .storageKeyMissing: "Mail’s storage key is missing from this Mac’s Keychain. Your saved files have been retained; a replacement key will not be created."
         case .storageUpgradeRequired: "This experimental build requires an encrypted Mail database. Existing storage has been retained. Continue using your current build until the storage upgrade is ready."

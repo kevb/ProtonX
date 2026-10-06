@@ -335,3 +335,52 @@ release app built and passed strict nested signature verification, staged at
 `build/ProtonX Storage Preparation.app`. It packages the default helper, was not
 launched and was not installed in Applications. No existing account profile was
 converted. The candidate helper remains separate in `.tools/mail-helper-secure`.
+
+## Resumable Mail database staging, 2026-10-06
+
+This work used temporary synthetic profiles and public local mock-server tests.
+No installed profile or account Keychain key was read; no account data was
+converted and no production migration action was enabled.
+
+The database-set coordinator passed 19 engine/SDK contracts: eleven migration
+contracts, six existing storage contracts, encrypted SDK local-body/reopen and
+SDK-schema migration preservation. The subprocess-only crash driver is marked
+ignored for ordinary test enumeration; migration tests invoke it explicitly at
+six durable transition points and require abrupt exit followed by successful
+resume. Originals are retained. Wrong-key resume before any completed export,
+committed WAL data, source changes, invalid/missing manifests, damaged/missing
+acknowledged stages, reserved/non-ASCII URI paths, format markers, linked paths,
+permissions and staged plaintext-marker absence are covered.
+
+The SDK-schema fixture preserves a decoded body, draft references, opaque action
+queue bytes and the complete schema. It never dispatches that queue; it is not a
+proof of real pending-message replay or duplicate-delivery prevention.
+
+Swift passed 77 contracts, including typed retained-storage failures. Default
+Mail passed 66 helper/public SDK contracts plus eight actual-helper startup
+refusals. The candidate passed eleven helper contracts plus seven actual-helper
+startup refusals. Resolved production dependency checks confirm normal builds use
+the shared guard without enabling the SQLCipher/encryption feature. Both updated
+helpers refuse a pending migration; a normal helper also refuses encrypted files
+or an unsupported format before SDK initialization. Historically older builds
+remain outside this guard protocol.
+
+A first staging attempt exposed the read-only-main/attached-destination write
+restriction. The final export opens the encrypted destination as main, attaches
+the source with an escaped read-only URI and verifies its actual SQLite read-only
+flag before export. All migration and SDK-schema fixtures passed after this
+correction; sources are never forced through a checkpoint during staging.
+
+Whole-profile cutover/recovery UI, attachment/MIME encryption, actual send replay,
+older-build exclusion, isolated Keychain integration and measured startup costs
+remain activation gates. Source preparation/privacy contracts and documentation
+links were verified. This is local validation, not a report of GitHub CI success.
+
+Both optimized helper builds passed with the final process-exit lock lifetime;
+the optimized normal/candidate helpers also passed all eight/seven synthetic
+startup refusal cases. Both modes' eleven helper contracts were rerun after the
+shutdown change. The native release app passed strict nested signature verification
+and is staged at `build/ProtonX Migration Preparation.app`, packaging the normal
+helper. It was not launched or installed in Applications. Debug SDK linking emitted
+the existing large-unwind-table warning; optimized builds completed successfully.
+No new public binary or corresponding-source archive was released.

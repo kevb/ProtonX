@@ -1,13 +1,18 @@
 # Mail storage candidate
 
-AGPL-3.0-only. Opt-in SQLCipher connection initialization and single-database
-conversion primitives for ProtonX's pinned Mail SDK. No replacement account crypto.
+AGPL-3.0-only. A small profile guard shared by both Mail helpers, with an opt-in
+SQLCipher engine and resumable database-set staging for the pinned Mail SDK.
+No replacement account cryptography or production migration action.
 
-Read [the storage scope and unresolved gates](../../docs/LOCAL_STORAGE.md) before
-using. Tests use only temporary synthetic fixtures; no installed profile or
+Read [the storage scope](../../docs/LOCAL_STORAGE.md) and
+[the migration boundary and recovery gates](../../docs/MAIL_STORAGE_MIGRATION.md)
+before using. Tests use temporary synthetic fixtures; no installed profile or
 Keychain item is opened. Run `scripts/test-mail-storage.sh` from the repository.
 
-The helper refuses plaintext profiles. `upgrade_database` is not connected to a
-user migration action and must not be used on a real profile yet. Profile-wide
-crash recovery, existing send queues, older builds and attachment files require
-additional work before activation. Default app builds remain unchanged.
+Both updated helpers refuse pending migrations. The normal helper also refuses
+encrypted databases, without enabling SQLCipher in its build. Candidate startup
+still refuses legacy plaintext profiles. `migration::stage_databases` retains
+originals and prepares validated encrypted copies; it never activates them or
+replays sends. The older single-file `upgrade_database` primitive remains isolated
+and must not be used on real profiles. Whole-profile cutover, attachment protection,
+historical-build exclusion and actual send recovery remain activation gates.

@@ -18,13 +18,13 @@ serde_json = { workspace = true }
 security-framework = "3.7.0"
 html2text = "0.16.2"
 async-trait = { workspace = true }
-protonx-mail-storage = { path = "../protonx-mail-storage", optional = true }
+protonx-mail-storage = { path = "../protonx-mail-storage", default-features = false }
 zeroize = { workspace = true, optional = true }
 mail-stash = { workspace = true }
 
 [features]
 # Explicit opt-in while migration/attachment storage is being validated.
-secure-storage = ["dep:protonx-mail-storage", "dep:zeroize", "mail-stash/protonx-encrypted"]
+secure-storage = ["protonx-mail-storage/encryption", "dep:zeroize", "mail-stash/protonx-encrypted"]
 
 [[bin]]
 name = "protonx-mail"

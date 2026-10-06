@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ProtonX contributors. SPDX-License-Identifier: AGPL-3.0-only
 // Opt-in candidate: legacy profiles are refused, never automatically rewritten.
 use protonx_mail_storage::{
-    ProfileGuard, configure_database_key, database_files, is_plaintext, validate_encrypted,
+    ProfileGuard, StorageError, configure_database_key, database_files, validate_encrypted,
 };
 use security_framework::passwords::{get_generic_password, set_generic_password};
 use security_framework::random::SecRandom;
@@ -13,12 +13,12 @@ const ACCOUNT: &str = "database-v1";
 
 pub fn prepare(root: &Path) -> Result<ProfileGuard, &'static str> {
     let guard = ProfileGuard::acquire(root).map_err(|_| "storage_unavailable")?;
+    guard.check_startup(true).map_err(|error| match error {
+        StorageError::UpgradeRequired => "storage_upgrade_required",
+        StorageError::MigrationPending => "storage_migration_pending",
+        _ => "storage_unavailable",
+    })?;
     let databases = database_files(root).map_err(|_| "storage_unavailable")?;
-    for path in &databases {
-        if is_plaintext(path).map_err(|_| "storage_unavailable")? {
-            return Err("storage_upgrade_required");
-        }
-    }
     let key = match get_generic_password(SERVICE, ACCOUNT) {
         Ok(value) => {
             let value = Zeroizing::new(value);
