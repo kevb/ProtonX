@@ -155,7 +155,9 @@ final class PassStore: ObservableObject {
         reconcileSelection()
     }
     func selectItem() {
-        selectionEpoch.invalidate(); selectionTask?.cancel(); detail = nil; error = nil
+        selectionEpoch.invalidate(); selectionTask?.cancel(); detail = nil
+        // Navigation must not dismiss a write/sync warning that still blocks saving.
+        if !mustRefreshBeforeWriting { error = nil }
         guard phase == .open, let item = currentItem else { return }
         if isDemo { detail = demoDetails[item.id]; return }
         let captured = epoch.value, selection = selectionEpoch.value

@@ -58,6 +58,8 @@ fields remain secure inputs; existing TOTP setup is never displayed. The form
 keeps invalid/failed drafts open. Revision conflicts prevent resubmission until
 the user reopens the latest item. Confirmed saves with failed refresh close safely
 and report success separately from sync failure.
+Navigation retains that warning until the vault refreshes successfully, including
+when a confirmed edit or Trash action clears the selected item.
 
 The synthetic preview was exercised through native controls: collection selection,
 create with multiple websites and notes, hidden custom field, edit, invalid URL

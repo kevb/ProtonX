@@ -70,30 +70,51 @@ private final class SnapshotRunner: HelperRunning, @unchecked Sendable {
     private let lock = NSLock()
     private var refreshes = 0
     private var writes = 0
-    var createCount: Int { lock.withLock { writes } }
+    var writeCount: Int { lock.withLock { writes } }
     func run(_ command: HelperCommand, challenge: ChallengeHandler?) async throws -> Data {
         switch command.arguments.first {
         case "login": return Data()
         case "native-snapshot":
             let first = lock.withLock { refreshes += 1; return refreshes == 1 }
             if !first { throw ProtonXError.helperFailed(1) }
-            return Data(#"{"vaults":[{"name":"Synthetic","vault_id":"v","share_id":"s","can_create":true,"can_update":true,"can_trash":true}],"items":[],"trashed_items":[],"capabilities":{"totp_limit":null,"custom_fields_allowed":true}}"#.utf8)
+            return Data(#"{"vaults":[{"name":"Synthetic","vault_id":"v","share_id":"s","can_create":true,"can_update":true,"can_trash":true}],"items":[{"id":"existing","share_id":"s","title":"Synthetic existing note","item_type":"note"}],"trashed_items":[],"capabilities":{"totp_limit":null,"custom_fields_allowed":true}}"#.utf8)
         case "native-create":
             lock.withLock { writes += 1 }
             return Data(#"{"item_id":"synthetic-created"}"#.utf8)
+        case "native-edit":
+            lock.withLock { writes += 1 }
+            return Data(#"{"updated":true}"#.utf8)
+        case "item":
+            if command.arguments.dropFirst().first == "trash" {
+                lock.withLock { writes += 1 }
+                return Data()
+            }
+            return Data(#"{"revision":1,"item":{"content":{"title":"Synthetic existing note","note":"Demo","content":{"Note":{}}}}}"#.utf8)
         default: throw ProtonXError.invalidInput("Unexpected synthetic command")
         }
     }
     func cancelAll() {}
 }
-@Test @MainActor func acknowledgedSaveClosesSuccessfullyEvenWhenRefreshFails() async throws {
+@Test(arguments: ["create", "edit", "trash"]) @MainActor func acknowledgedWriteKeepsSyncWarningAcrossNavigation(_ action: String) async throws {
     let runner = SnapshotRunner()
     let store = PassStore(service: PassService(runner: runner), sessionDirectory: URL(fileURLWithPath: "/nonexistent/protonx-synthetic-tests"), previewOnly: false)
     store.login()
     while store.busy { await Task.yield() }
     #expect(store.phase == .open)
+    let item = try #require(store.items.first)
+    store.selectedItem = item.id
+    while store.detail == nil && store.error == nil { await Task.yield() }
+    #expect(store.detail != nil)
     var draft = NativeItemDraft(); draft.kind = "note"; draft.title = "Synthetic acknowledged save"; draft.note = "Demo"
-    try await store.save(draft, item: nil, vaultID: "s")
-    #expect(runner.createCount == 1); #expect(store.error?.hasPrefix("Item saved.") == true)
+    draft.expectedRevision = 1
+    if action == "trash" {
+        store.trashCurrent()
+        while store.busy { await Task.yield() }
+    } else { try await store.save(draft, item: action == "edit" ? item : nil, vaultID: "s") }
+    let warning = try #require(store.error)
+    #expect(runner.writeCount == 1); #expect(warning.contains("Refresh failed"))
     #expect(store.currentItem == nil); #expect(!store.busy); #expect(!store.canCreate); #expect(store.mustRefreshBeforeWriting)
+    store.selectedItem = item.id
+    store.kind = "login"
+    #expect(store.selectedItem == nil); #expect(store.error == warning)
 }

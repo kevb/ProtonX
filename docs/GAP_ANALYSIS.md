@@ -50,9 +50,10 @@ were used only as layout references; their contents were not added to the projec
    synthetic note/login records in the designated account: create, open, edit,
    refresh, trash, restore and verify from another client. Preserve fields not
    represented by the editor. Test locked/cancelled saves, lost acknowledgements,
-   stale selection and errors without losing drafts. Regression tests and native sidebar selection now keep the filtered list
-   and detail consistent; the original issue was: one morning demo snapshot showed a Notes-only list beside
-   a previously selected login detail; this needs a repeatable reproduction.
+   stale selection and errors without losing drafts. Synthetic regression tests
+   and native sidebar checks now keep the filtered list and detail consistent;
+   the morning Notes-filter/stale-login issue is reproduced by a contract test
+   and fixed. Confirmed-write/failed-refresh warnings also survive navigation.
 3. **Improve the everyday login editor.** Multiple website URLs, login notes on
    creation, TOTP setup/edit, and custom fields are more useful immediately than
    adding another product. Expose permissions and plan limits before presenting

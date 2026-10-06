@@ -90,7 +90,9 @@ coverage; system-level interaction is not fully automated.
 - 48 Swift tests passed; one optional Bridge fixture test was skipped in the plain
   test run. Four app-store tests use injected synthetic runners and cover immediate
   filter/detail consistency, full create/edit/Trash/restore/lock, preview account
-  isolation and a confirmed create followed by failed refresh.
+  isolation and confirmed create/edit/Trash followed by failed refresh. The last
+  check starts with an existing selection and verifies navigation retains the
+  warning while further writes remain blocked.
 - 115 original CLI tests, 122 desktop-helper tests and 252 SDK unit/integration
   tests passed. The two upstream fixture-dump helpers remain ignored. New coverage
   checks secret-free summaries, modern URL mode preservation, unsupported custom
