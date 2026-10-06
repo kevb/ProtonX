@@ -29,8 +29,8 @@ struct ProtonXApp: App {
             }
         }
         Window("ProtonX Mail", id: "mail") {
-            MailWindow(previewOnly: pass.previewOnly).tint(PassTheme.accent)
-        }.defaultSize(width: 1000, height: 720)
+            MailWindow(previewOnly: pass.previewOnly).tint(MailTheme.accent)
+        }.defaultSize(width: 1240, height: 800)
         Settings { SettingsView() }
     }
 }

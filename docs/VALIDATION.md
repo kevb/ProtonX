@@ -525,3 +525,25 @@ with a disposable child process; a separate store test confirms the saved view
 remains read-only after that deadline. The final desktop-helper rerun passed all
 131 tests. GitHub CI is queued; these results are local validation, not a claim
 that the new CI run has completed.
+
+## Mail design follow-up — 2026-10-06
+
+- All 101 Swift contracts passed after the final Mail layout changes. Helper,
+  authentication, storage and sending protocols were unchanged; the previously
+  validated helper binaries were reused for this appearance-only build.
+- Native synthetic previews were inspected in dark and light appearances. Reader
+  and composer bodies remain white with fixed dark text; surrounding Mail chrome
+  follows appearance. Sender initials are generated locally. The Bridge reader
+  shares the compiled paper component; a live Bridge account was not exercised.
+- The dark preview walkthrough verified message selection, no-result search
+  clearing the old reader, clearing search, expanding the reader and restoring the
+  mailbox. Reply all retained the synthetic connected-Gmail sending identity.
+  Typed composer text was readable in both appearances; Save & Close completed
+  the synthetic draft flow. These preview actions do not prove server draft sync.
+- This change retains the existing plain-text reader and composer. HTML rendering,
+  remote images, attachments and additional mailbox actions were not added.
+- Optimized normal and preview app bundles built successfully. The final update
+  uses the configured local signing identity and passed strict nested signature
+  verification. It is staged at `build/ProtonX Mail Design Update.app`; the running
+  account-capable app was not replaced. No real account was accessed for this
+  design validation, and private reference screenshots were not added to Git.

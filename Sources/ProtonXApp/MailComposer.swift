@@ -32,7 +32,7 @@ struct MailComposer: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
-                Image(systemName: "square.and.pencil").foregroundStyle(PassTheme.accent)
+                Image(systemName: "square.and.pencil").foregroundStyle(MailTheme.accent)
                 Text(subject.isEmpty ? "New message" : subject).font(.headline).lineLimit(1)
                 Spacer()
                 if store.busy { ProgressView().controlSize(.small) }
@@ -41,7 +41,7 @@ struct MailComposer: View {
                 } else {
                     Button("Close") { confirmClosePending = true }.disabled(store.busy)
                 }
-            }.padding(20).background(PassTheme.sidebar)
+            }.padding(20).background(MailTheme.sidebar)
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     HStack {
@@ -54,7 +54,7 @@ struct MailComposer: View {
                     Divider()
                     HStack {
                         recipientField("To", text: $to, focus: "to")
-                        Button(expandedRecipients ? "Hide Cc/Bcc" : "Cc/Bcc") { expandedRecipients.toggle() }.buttonStyle(.plain).foregroundStyle(PassTheme.accent)
+                        Button(expandedRecipients ? "Hide Cc/Bcc" : "Cc/Bcc") { expandedRecipients.toggle() }.buttonStyle(.plain).foregroundStyle(MailTheme.accent)
                     }
                     Divider()
                     if expandedRecipients {
@@ -71,6 +71,8 @@ struct MailComposer: View {
                             .font(.callout).foregroundStyle(.orange).padding(.vertical, 14)
                     }
                     TextEditor(text: $text).font(.body).scrollContentBackground(.hidden)
+                        .foregroundStyle(MailTheme.ink).padding(12).background(MailTheme.paper, in: RoundedRectangle(cornerRadius: 8))
+                        .environment(\.colorScheme, .light)
                         .frame(minHeight: 230).focused($focus, equals: "body").padding(.top, 16)
                         .accessibilityLabel("Message body")
                     if !current.quote.isEmpty {
@@ -82,7 +84,7 @@ struct MailComposer: View {
                         Label("\(current.attachments) existing attachment(s) retained by Proton", systemImage: "paperclip").font(.caption).foregroundStyle(.secondary).padding(.bottom, 12)
                     }
                 }.disabled(!editable).padding(.horizontal, 24)
-            }.background(PassTheme.canvas)
+            }.background(MailTheme.canvas)
             if let error = store.error {
                 Text(error).font(.callout).foregroundStyle(.orange).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 24).padding(.vertical, 10)
             }
@@ -95,8 +97,8 @@ struct MailComposer: View {
                 }
                 Spacer()
                 Button { confirmSend = true } label: { Label("Send", systemImage: "paperplane.fill") }
-                    .buttonStyle(PassPillStyle(primary: true)).disabled(!editable || !valid).keyboardShortcut(.return, modifiers: [.command])
-            }.padding(20).background(PassTheme.collection)
+                    .buttonStyle(MailActionStyle(primary: true)).disabled(!editable || !valid).keyboardShortcut(.return, modifiers: [.command])
+            }.padding(20).background(MailTheme.collection)
         }.frame(width: 710, height: 660)
         .interactiveDismissDisabled()
         .onAppear { focus = to.isEmpty ? "to" : "body" }

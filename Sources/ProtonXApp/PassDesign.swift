@@ -3,7 +3,7 @@ import AppKit
 
 /// Local native surfaces; no remote favicons, fonts or appearance preferences.
 enum PassTheme {
-    private static func adaptive(_ name: String, light: UInt32, dark: UInt32) -> Color {
+    static func adaptive(_ name: String, light: UInt32, dark: UInt32) -> Color {
         func color(_ hex: UInt32) -> NSColor {
             NSColor(srgbRed: Double((hex >> 16) & 255) / 255,
                     green: Double((hex >> 8) & 255) / 255,

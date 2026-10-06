@@ -87,3 +87,17 @@ Next functionality: read/unread, archive/trash with undo, conversation view,
 attachment upload/viewing, recipient completion, rich text and confirmed draft
 sync/auto-save recovery. Gmail read/unread/folder changes are not mirrored back
 to Gmail by Proton's connection; do not promise two-way state synchronization.
+
+## Mail appearance follow-up, 2026-10-06
+
+The sidebar and message list now use a separate Mail palette, with a neutral
+sidebar, purple New message action, locally generated sender initials, aligned
+dates and clearer folder/header hierarchy. The native three-pane layout remains;
+Expand message switches to a wider reader, and Show mailbox restores navigation.
+
+The reader groups From/To/date and reply actions above **white message paper with
+fixed dark text**, in both system appearances. The native composer body and Bridge
+reader use the same light paper policy. The surrounding shell still follows macOS
+appearance. This is a surface/contrast adjustment to the existing plain-text reader,
+not HTML recolouring or a new rich-message renderer. Remote images remain unloaded.
+No authentication, sender-choice, draft or sending protocol was changed.

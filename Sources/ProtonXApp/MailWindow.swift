@@ -8,6 +8,7 @@ struct MailWindow: View {
     @State private var code = ""
     @State private var bridge = false
     @State private var confirmSignOut = false
+    @State private var readerExpanded = false
     @FocusState private var focus: String?
     init(previewOnly: Bool = false) { _store = StateObject(wrappedValue: NativeMailStore(previewOnly: previewOnly)) }
     var body: some View {
@@ -15,7 +16,7 @@ struct MailWindow: View {
             if store.phase == .open { workspace }
             else { authentication }
         }
-        .background(PassTheme.collection)
+        .background(MailTheme.collection)
         .preferredColorScheme(designAppearance)
         .frame(minWidth: 860, minHeight: 580)
         .safeAreaInset(edge: .bottom) {
@@ -40,6 +41,7 @@ struct MailWindow: View {
         .onDisappear { clearCredentials(); store.lock() }
         .onChange(of: store.phase) { _, phase in
             if phase != .welcome { password = "" }
+            if phase != .open { readerExpanded = false }
             code = ""
             focus = phase == .totp || phase == .mailboxPassword ? "challenge" : "username"
         }
@@ -106,109 +108,190 @@ struct MailWindow: View {
         default: "Sign in with your Proton account, in a native Mac window."
         }
     }
+    private var folderTitle: String { store.folders.first { $0.id == store.selectedFolder }?.name ?? "Mail" }
     private var workspace: some View {
-        NavigationSplitView {
-            List(selection: $store.selectedFolder) {
-                Section {
-                    Button { store.compose() } label: { Label("New message", systemImage: "square.and.pencil").frame(maxWidth: .infinity) }
-                        .buttonStyle(PassPillStyle(primary: true)).disabled(store.busy || store.draft != nil)
-                }
-                Section("Mail") {
-                    ForEach(store.folders) { folder in
-                        HStack(spacing: 12) {
-                            Image(systemName: folder.name.localizedCaseInsensitiveContains("inbox") ? "tray" : "folder").foregroundStyle(PassTheme.accent)
-                            Text(folder.name)
-                            Spacer()
-                            if folder.count > 0 { Text(folder.count.formatted()).font(.caption).foregroundStyle(.secondary) }
-                        }.padding(.vertical, 6).tag(folder.id)
-                    }
-                }
-            }.disabled(store.busy).scrollContentBackground(.hidden).background(PassTheme.sidebar)
-                .navigationSplitViewColumnWidth(min: 180, ideal: 220, max: 290)
-                .onChange(of: store.selectedFolder) { _, _ in store.changeFolder() }
-                .safeAreaInset(edge: .bottom) {
-                    VStack(alignment: .leading, spacing: 14) {
-                        if let notice = store.notice { Text(notice).font(.caption).foregroundStyle(PassTheme.accent) }
-                        if store.demo { Label("Synthetic preview", systemImage: "testtube.2").font(.caption).foregroundStyle(.secondary) }
-                        else { Text(store.email).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
-                        Button("Lock Mail", systemImage: "lock") { store.lock() }
-                        if !store.demo { Button("Sign Out…", systemImage: "rectangle.portrait.and.arrow.right") { confirmSignOut = true }.disabled(store.busy) }
-                    }.buttonStyle(.plain).padding(18).frame(maxWidth: .infinity, alignment: .leading).background(PassTheme.sidebar)
-                }
-        } content: {
-            List(selection: $store.selectedItem) {
-                ForEach(store.visibleMessages) { message in
-                    HStack(alignment: .top, spacing: 12) {
-                        Circle().fill(message.unread ? (store.selectedItem == message.id ? Color.white : PassTheme.accent) : .clear).frame(width: 7, height: 7).padding(.top, 7)
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(message.senderName.isEmpty ? message.sender : message.senderName).font(.system(size: 13, weight: message.unread ? .semibold : .regular)).lineLimit(1)
-                            Text(message.subject.isEmpty ? "(No subject)" : message.subject).font(.callout).lineLimit(2)
-                            if message.date > 0 { Text(Date(timeIntervalSince1970: Double(message.date)), style: .date).font(.caption).foregroundStyle(.secondary) }
-                        }
-                        Spacer(minLength: 0)
-                        if message.attachments > 0 { Image(systemName: "paperclip").font(.caption).foregroundStyle(.secondary).accessibilityLabel("Has attachments") }
-                    }.padding(.vertical, 9).tag(message.id)
-                }
-            }.frame(minWidth: 280).scrollContentBackground(.hidden).background(PassTheme.collection)
-                .navigationSplitViewColumnWidth(min: 280, ideal: 330, max: 460)
-                .searchable(text: $store.query, prompt: "Search loaded mail")
-                .onChange(of: store.query) { _, _ in store.reconcileSelection() }
-                .onChange(of: store.selectedItem) { _, _ in store.select() }
-                .overlay {
-                    if store.visibleMessages.isEmpty {
-                        if store.isLoadingList {
-                            ProgressView("Loading your mailbox…").frame(maxWidth: .infinity, maxHeight: .infinity)
-                        } else if store.initialListFailed {
-                            ContentUnavailableView {
-                                Label("Could not load this folder", systemImage: "exclamationmark.circle")
-                            } description: { Text("Try refreshing when your connection is available.") }
-                            actions: { Button("Retry") { store.refresh() } }
-                        } else {
-                            ContentUnavailableView(store.query.isEmpty ? "No messages here" : "No matching messages", systemImage: "tray", description: Text("Refresh or choose another folder."))
-                        }
-                    }
-                }
-                .safeAreaInset(edge: .bottom) {
-                    HStack {
-                        if store.loading { ProgressView().controlSize(.small); Text("Syncing…") }
-                        else if store.showingSavedContent { Label(store.cacheRefreshFailed ? "Saved content · refresh unavailable" : "Saved on this Mac", systemImage: "internaldrive") }
-                        else { Text("\(store.messages.count) messages loaded") }
-                        Spacer()
-                        if !store.demo && !store.messages.isEmpty { Button("Load more") { store.refresh(more: true) }.disabled(store.busy || store.messages.count >= 1000) }
-                    }.font(.caption).foregroundStyle(.secondary).padding(12)
-                }
-        } detail: {
-            if let message = store.selectedMessage {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 22) {
-                        Text(message.subject.isEmpty ? "(No subject)" : message.subject).font(.system(size: 25, weight: .semibold))
-                        HStack(spacing: 10) {
-                            if message.isDraft == true && message.isScheduled != true {
-                                Button("Edit draft", systemImage: "pencil") { store.compose("open") }.buttonStyle(PassPillStyle())
-                            } else if message.canReply != false {
-                                Button("Reply", systemImage: "arrowshape.turn.up.left") { store.compose("reply") }.buttonStyle(PassPillStyle())
-                                Button("Reply all", systemImage: "arrowshape.turn.up.left.2") { store.compose("reply_all") }.buttonStyle(PassPillStyle())
-                            }
-                        }.disabled(store.busy || store.body == nil || store.draft != nil)
-                        VStack(alignment: .leading, spacing: 9) {
-                            Label(message.sender, systemImage: "person")
-                            Text("To: \(message.recipient)").foregroundStyle(.secondary)
-                            if message.date > 0 { Text(Date(timeIntervalSince1970: Double(message.date)), format: .dateTime).font(.caption).foregroundStyle(.secondary) }
-                        }.font(.callout).padding(18).frame(maxWidth: .infinity, alignment: .leading).passSurface()
-                        if let body = store.body { Text(body).textSelection(.enabled).font(.body).lineSpacing(5).frame(maxWidth: .infinity, alignment: .leading) }
-                        else if store.error != nil { Button("Retry loading message") { store.select() } }
-                        else { ProgressView("Decrypting message…").frame(maxWidth: .infinity) }
-                        if message.attachments > 0 { Label("\(message.attachments) attachment(s) · open with the official client for now", systemImage: "paperclip").font(.caption).foregroundStyle(.secondary) }
-                    }.padding(30).frame(maxWidth: 900, alignment: .leading).frame(maxWidth: .infinity, alignment: .leading)
-                }.background(PassTheme.canvas)
-            } else { ContentUnavailableView("Choose a message", systemImage: "envelope", description: Text("Read your mail in its own Mac window.")).frame(maxWidth: .infinity, maxHeight: .infinity).background(PassTheme.canvas) }
+        Group {
+            if readerExpanded { messageReader }
+            else { mailboxLayout }
         }
+        .onChange(of: store.selectedItem) { _, selected in if selected == nil { readerExpanded = false } }
         .navigationTitle("ProtonX Mail")
         .toolbar {
             ToolbarItem { if store.busy { ProgressView().controlSize(.small) } }
             ToolbarItem { Button { store.compose() } label: { Label("New message", systemImage: "square.and.pencil") }.disabled(store.busy || store.draft != nil).keyboardShortcut("n", modifiers: [.command]) }
             ToolbarItem { Button { store.refresh() } label: { Label("Refresh Mail", systemImage: "arrow.clockwise") }.disabled(store.busy || store.demo).keyboardShortcut("r", modifiers: [.command, .shift]) }
         }
+    }
+    private var mailboxLayout: some View {
+        NavigationSplitView {
+            List(selection: $store.selectedFolder) {
+                ForEach(store.folders) { folder in
+                    HStack(spacing: 12) {
+                        Image(systemName: MailTheme.symbol(for: folder.name)).font(.system(size: 17)).frame(width: 22)
+                        Text(folder.name).font(.system(size: 14, weight: store.selectedFolder == folder.id ? .semibold : .regular))
+                        Spacer()
+                        if folder.count > 0 {
+                            Text(folder.count.formatted()).font(.system(size: 11, weight: .semibold))
+                                .padding(.horizontal, 7).padding(.vertical, 4)
+                                .background(MailTheme.accent.opacity(0.15), in: RoundedRectangle(cornerRadius: 6))
+                        }
+                    }.padding(.vertical, 8).tag(folder.id)
+                }
+            }.disabled(store.busy).listStyle(.sidebar).scrollContentBackground(.hidden).background(MailTheme.sidebar)
+                .navigationSplitViewColumnWidth(min: 190, ideal: 225, max: 290)
+                .onChange(of: store.selectedFolder) { _, _ in store.changeFolder() }
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    VStack(alignment: .leading, spacing: 20) {
+                        HStack(spacing: 10) {
+                            Image(systemName: "envelope.fill").foregroundStyle(MailTheme.accent).font(.title3)
+                            Text("ProtonX Mail").font(.system(size: 16, weight: .semibold))
+                        }
+                        Button { store.compose() } label: { Text("New message").frame(maxWidth: .infinity) }
+                            .buttonStyle(MailActionStyle(primary: true)).disabled(store.busy || store.draft != nil)
+                    }.padding(.horizontal, 16).padding(.top, 18).padding(.bottom, 16).background(MailTheme.sidebar)
+                }
+                .safeAreaInset(edge: .bottom) {
+                    VStack(alignment: .leading, spacing: 14) {
+                        if let notice = store.notice { Text(notice).font(.caption).foregroundStyle(MailTheme.accent) }
+                        Divider()
+                        HStack(spacing: 10) {
+                            MailSenderAvatar(name: store.email)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(store.demo ? "Demo account" : "Mail account").font(.system(size: 12, weight: .medium))
+                                Text(store.email).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                            }
+                        }
+                        if store.demo { Label("Synthetic preview", systemImage: "testtube.2").font(.caption).foregroundStyle(.secondary) }
+                        HStack {
+                            Button("Lock", systemImage: "lock") { store.lock() }
+                            Spacer()
+                            if !store.demo { Button("Sign Out…") { confirmSignOut = true }.disabled(store.busy) }
+                        }.font(.callout)
+                    }.buttonStyle(.plain).padding(18).frame(maxWidth: .infinity, alignment: .leading).background(MailTheme.sidebar)
+                }
+        } content: {
+            VStack(spacing: 0) {
+                HStack(spacing: 10) {
+                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                    TextField("Search loaded messages", text: $store.query).textFieldStyle(.plain).font(.system(size: 14))
+                        .accessibilityIdentifier("mailSearch")
+                    if !store.query.isEmpty {
+                        Button { store.query = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
+                            .buttonStyle(.plain).accessibilityLabel("Clear mail search")
+                    }
+                }.padding(12).background(MailTheme.canvas, in: RoundedRectangle(cornerRadius: 10)).padding(16)
+                HStack(alignment: .firstTextBaseline) {
+                    Text(folderTitle).font(.system(size: 20, weight: .semibold))
+                    Spacer()
+                    Text("\(store.visibleMessages.count) loaded").font(.caption).foregroundStyle(.secondary)
+                }.padding(.horizontal, 18).padding(.bottom, 16)
+                Divider()
+                List(selection: $store.selectedItem) {
+                    ForEach(store.visibleMessages) { message in
+                        HStack(alignment: .top, spacing: 11) {
+                            MailSenderAvatar(name: message.senderName.isEmpty ? message.sender : message.senderName)
+                            VStack(alignment: .leading, spacing: 7) {
+                                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                    Text(message.senderName.isEmpty ? message.sender : message.senderName)
+                                        .font(.system(size: 13, weight: message.unread ? .semibold : .regular)).lineLimit(1)
+                                    Spacer(minLength: 0)
+                                    if message.date > 0 {
+                                        Text(Date(timeIntervalSince1970: Double(message.date)), format: .dateTime.month(.abbreviated).day())
+                                            .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize()
+                                    }
+                                }
+                                Text(message.subject.isEmpty ? "(No subject)" : message.subject)
+                                    .font(.system(size: 13, weight: message.unread ? .medium : .regular)).lineLimit(2)
+                                HStack(spacing: 6) {
+                                    if message.unread { Circle().fill(MailTheme.accent).frame(width: 6, height: 6); Text("Unread") }
+                                    if message.attachments > 0 { Image(systemName: "paperclip"); Text("\(message.attachments)") }
+                                }.font(.system(size: 10)).foregroundStyle(.secondary)
+                            }
+                        }.padding(.vertical, 11).tag(message.id)
+                    }
+                }.listStyle(.plain).scrollContentBackground(.hidden)
+                    .overlay {
+                        if store.visibleMessages.isEmpty {
+                            if store.isLoadingList {
+                                ProgressView("Loading your mailbox…").frame(maxWidth: .infinity, maxHeight: .infinity)
+                            } else if store.initialListFailed {
+                                ContentUnavailableView {
+                                    Label("Could not load this folder", systemImage: "exclamationmark.circle")
+                                } description: { Text("Try refreshing when your connection is available.") }
+                                actions: { Button("Retry") { store.refresh() } }
+                            } else {
+                                ContentUnavailableView(store.query.isEmpty ? "No messages here" : "No matching messages", systemImage: "tray", description: Text("Refresh or choose another folder."))
+                            }
+                        }
+                    }
+                Divider()
+                HStack {
+                    if store.loading { ProgressView().controlSize(.small); Text("Syncing…") }
+                    else if store.showingSavedContent { Label(store.cacheRefreshFailed ? "Saved content · refresh unavailable" : "Saved on this Mac", systemImage: "internaldrive") }
+                    else { Text("\(store.messages.count) messages loaded") }
+                    Spacer()
+                    if !store.demo && !store.messages.isEmpty { Button("Load more") { store.refresh(more: true) }.disabled(store.busy || store.messages.count >= 1000) }
+                }.font(.caption).foregroundStyle(.secondary).padding(12)
+            }.frame(minWidth: 300).background(MailTheme.collection)
+                .navigationSplitViewColumnWidth(min: 300, ideal: 340, max: 460)
+                .onChange(of: store.query) { _, _ in store.reconcileSelection() }
+                .onChange(of: store.selectedItem) { _, _ in store.select() }
+        } detail: { messageReader }
+    }
+    @ViewBuilder private var messageReader: some View {
+            if let message = store.selectedMessage {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 22) {
+                        HStack(alignment: .top) {
+                            Text(message.subject.isEmpty ? "(No subject)" : message.subject).font(.system(size: 25, weight: .semibold))
+                            Spacer(minLength: 12)
+                            Button { readerExpanded.toggle() } label: {
+                                Image(systemName: readerExpanded ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
+                            }.buttonStyle(.plain).foregroundStyle(.secondary)
+                                .help(readerExpanded ? "Show mailbox" : "Expand message")
+                                .accessibilityLabel(readerExpanded ? "Show mailbox" : "Expand message")
+                        }
+                        VStack(alignment: .leading, spacing: 0) {
+                            VStack(alignment: .leading, spacing: 18) {
+                                VStack(alignment: .leading, spacing: 10) {
+                                    HStack(alignment: .firstTextBaseline, spacing: 12) {
+                                        Text("From").foregroundStyle(.secondary).frame(width: 38, alignment: .leading)
+                                        Text(message.senderName.isEmpty ? message.sender : message.senderName).fontWeight(.medium)
+                                        Spacer(minLength: 0)
+                                    }
+                                    if !message.senderName.isEmpty { Text(message.sender).font(.caption).foregroundStyle(MailTheme.accent).padding(.leading, 50) }
+                                    HStack(alignment: .firstTextBaseline, spacing: 12) {
+                                        Text("To").foregroundStyle(.secondary).frame(width: 38, alignment: .leading)
+                                        Text(message.recipient).foregroundStyle(.secondary)
+                                    }
+                                    if message.date > 0 { Text(Date(timeIntervalSince1970: Double(message.date)), format: .dateTime).font(.caption).foregroundStyle(.secondary).padding(.leading, 50) }
+                                }.font(.system(size: 13)).textSelection(.enabled)
+                                HStack(spacing: 8) {
+                                    if message.isDraft == true && message.isScheduled != true {
+                                        Button("Edit draft", systemImage: "pencil") { store.compose("open") }.buttonStyle(MailActionStyle())
+                                    } else if message.canReply != false {
+                                        Button("Reply", systemImage: "arrowshape.turn.up.left") { store.compose("reply") }.buttonStyle(MailActionStyle())
+                                        Button("Reply all", systemImage: "arrowshape.turn.up.left.2") { store.compose("reply_all") }.buttonStyle(MailActionStyle())
+                                    }
+                                }.disabled(store.busy || store.body == nil || store.draft != nil)
+                            }.padding(22).frame(maxWidth: .infinity, alignment: .leading)
+                            Divider()
+                            if let body = store.body { MailMessagePaper(text: body) }
+                            else if store.error != nil { Button("Retry loading message") { store.select() }.padding(28).frame(maxWidth: .infinity) }
+                            else { ProgressView("Decrypting message…").padding(28).frame(maxWidth: .infinity) }
+                            if message.attachments > 0 {
+                                Divider()
+                                Label("\(message.attachments) attachment(s) · open with the official client for now", systemImage: "paperclip")
+                                    .font(.caption).foregroundStyle(.secondary).padding(18)
+                            }
+                        }.background(MailTheme.canvas).clipShape(RoundedRectangle(cornerRadius: 14))
+                            .overlay { RoundedRectangle(cornerRadius: 14).strokeBorder(MailTheme.border, lineWidth: 1).allowsHitTesting(false) }
+                    }.padding(26).frame(maxWidth: 940, alignment: .leading).frame(maxWidth: .infinity)
+                }.background(MailTheme.canvas)
+            } else {
+                ContentUnavailableView("Choose a message", systemImage: "envelope", description: Text("Read your mail in its own Mac window."))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity).background(MailTheme.canvas)
+            }
     }
     private func signIn() { let supplied = password; password = ""; store.signIn(username: username, password: supplied) }
     private func submitChallenge() { let supplied = code; code = ""; store.submitChallenge(supplied) }

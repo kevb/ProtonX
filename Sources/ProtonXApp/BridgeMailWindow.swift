@@ -151,7 +151,7 @@ struct BridgeMailWindow: View {
                 ScrollView { VStack(alignment: .leading, spacing: 20) {
                     Text(message.subject).font(.title2.weight(.semibold))
                     VStack(alignment: .leading, spacing: 6) { Text("From: " + message.sender); Text("To: " + message.recipient); Text(message.date).foregroundStyle(.secondary) }.font(.callout).textSelection(.enabled)
-                    Divider(); Text(message.body).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+                    Divider(); MailMessagePaper(text: message.body).clipShape(RoundedRectangle(cornerRadius: 12))
                     if message.attachmentCount > 0 { Text("\(message.attachmentCount) attachment(s). Use the official client to download.").font(.caption).foregroundStyle(.secondary) }
                 }.padding(28).frame(maxWidth: .infinity, alignment: .leading) }
             } else { ContentUnavailableView("Choose a message", systemImage: "envelope", description: Text("Read your mail without loading remote images.")) }
