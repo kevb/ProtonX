@@ -484,7 +484,7 @@ The durable item-cache absence recorded in the earlier offline review is superse
 by this milestone. [OFFLINE_DESIGN.md](OFFLINE_DESIGN.md) describes the implementation
 and remaining acceptance; this feature does not change Mail storage.
 
-- 100 Swift contracts passed. New coverage exercises saved metadata and one selected
+- 101 Swift contracts passed. New coverage exercises saved metadata and one selected
   detail before a delayed online response; separate local read scheduling; read-only
   actions/no queued writes; reconnect with changed permissions; missing/corrupt/
   expired cache fallback; TLS/authentication/session invalidation refusal; lease
@@ -513,3 +513,15 @@ and remaining acceptance; this feature does not change Mail storage.
   Keychain update continuity, larger-vault performance and measured startup gains
   remain unverified. Free/managed accounts stay online-only; the personal paid
   lease lasts at most 24 hours and cannot discover server revocation offline.
+
+The final packaged update built optimized Pass/Swift code and passed strict nested
+app/helper signature verification using the existing configured local certificate.
+It is staged at `build/ProtonX Offline Update.app`; no running bundle was replaced
+and no app was installed in Applications. Mail uses the existing default helper.
+The final helper source comparison passed again after cleanup handling was adjusted
+to preserve the original authentication/session failure if cache invalidation also
+fails. Swift's actual process deadline now emits the typed timeout error, tested
+with a disposable child process; a separate store test confirms the saved view
+remains read-only after that deadline. The final desktop-helper rerun passed all
+131 tests. GitHub CI is queued; these results are local validation, not a claim
+that the new CI run has completed.

@@ -177,3 +177,14 @@ func unavailableSavedPassCacheFallsBackToOnlineWithoutDeletingSession(_ kind: St
     #expect(!store.isUsingSavedVault); #expect(store.items.first?.title == "Reconnected")
     #expect(store.error == nil); #expect(store.detail != nil); #expect(!store.mustRefreshBeforeWriting)
 }
+
+@Test @MainActor func savedPassRemainsReadOnlyAfterOnlineHelperDeadline() async throws {
+    let root = try offlineSession(); defer { try? FileManager.default.removeItem(at: root) }
+    let runner = OfflineRunner(online: [.init(failure: .timeout)])
+    let store = PassStore(service: PassService(runner: runner), sessionDirectory: root, previewOnly: false,
+        localUnlock: { true }, now: { offlineNow }); defer { store.lock() }
+    store.unlock(); await awaitOffline { !store.busy }
+    #expect(store.isUsingSavedVault); #expect(!store.canCreate); #expect(store.mustRefreshBeforeWriting)
+    store.selectedItem = "s:i"; await awaitOffline { store.detail != nil }
+    #expect(store.error?.contains("saved vault") == true)
+}

@@ -29,7 +29,7 @@ private func fixture(_ script: String) throws -> (URL, URL) {
     let (root, executable) = try fixture("exec /bin/sleep 30\n")
     defer { try? FileManager.default.removeItem(at: root) }
     let start = ContinuousClock.now
-    await #expect(throws: Error.self) { try await NativeProcess(executable: executable, directory: root, timeout: .milliseconds(100)).run(HelperCommand([]), challenge: nil) }
+    await #expect(throws: ProtonXError.timeout) { try await NativeProcess(executable: executable, directory: root, timeout: .milliseconds(100)).run(HelperCommand([]), challenge: nil) }
     #expect(start.duration(to: .now) < .seconds(5))
 }
 @Test func cancellationTerminatesTheHelper() async throws {

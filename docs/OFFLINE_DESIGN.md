@@ -50,7 +50,9 @@ claim about the official client's expiry rule. Reads reject expiry and a clock
 before the saved timestamp. Local unlock cannot detect remote session, share or
 subscription revocation while disconnected. Reconnect rechecks current authority;
 authentication, certificate or invalid-response failures discard the saved view
-and invalidate the persisted snapshot in the native snapshot path. Only classified
+and attempt to invalidate the persisted snapshot in the native snapshot path.
+Cleanup failure preserves the original failure category; it never resets keys or
+turns the failed refresh into cached success. Only classified
 connection failures/process timeouts permit continued saved browsing.
 
 Create/edit/Trash/restore invalidate the persisted generation **before** their

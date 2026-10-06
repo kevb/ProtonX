@@ -1269,10 +1269,10 @@ index 0000000..e13147f
 +}
 diff --git a/pass-cli/src/native_ui.rs b/pass-cli/src/native_ui.rs
 new file mode 100644
-index 0000000..7721344
+index 0000000..039c293
 --- /dev/null
 +++ b/pass-cli/src/native_ui.rs
-@@ -0,0 +1,545 @@
+@@ -0,0 +1,547 @@
 +// Copyright (c) 2026 ProtonX contributors. GPL-3.0-or-later.
 +// Native presentation/transport only: all cryptography and writes use Proton's SDK.
 +use crate::helpers::{CliPassClient, PassClientExt};
@@ -1307,8 +1307,10 @@ index 0000000..7721344
 +    let result = snapshot_inner(client, binding).await;
 +    if let Err(error) = &result {
 +        if !may_retain_cache(error) {
-+            // Failure to invalidate is itself a failure; never silently reset keys.
-+            crate::native_cache::clear(&features.database_manager).await?;
++            // The operation already failed. Preserve its authentication/session
++            // diagnostic even if cleanup also fails (e.g. SDK deleted the profile).
++            // Never reset credentials or convert this error into cached success.
++            let _ = crate::native_cache::clear(&features.database_manager).await;
 +        }
 +    }
 +    result

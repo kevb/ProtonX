@@ -1,6 +1,13 @@
 import Foundation
 import Darwin
 
+private final class ProcessDeadline: @unchecked Sendable {
+    private let lock = NSLock()
+    private var reached = false
+    var expired: Bool { lock.withLock { reached } }
+    func mark() { lock.withLock { reached = true } }
+}
+
 /// Private stdin/stdout pipes. No shell, passwords in argv, inherited Proton credentials, or raw error logging.
 public final class NativeProcess: HelperRunning, @unchecked Sendable {
     private let executable: URL
@@ -54,9 +61,10 @@ public final class NativeProcess: HelperRunning, @unchecked Sendable {
                 try? stdin.fileHandleForWriting.close()
             }
             if Task.isCancelled { throw CancellationError() }
+            let deadline = ProcessDeadline()
             let watchdog = Task.detached { [timeout, authenticationTimeout] in
                 try? await Task.sleep(for: challenge == nil ? timeout : authenticationTimeout)
-                if !Task.isCancelled { Self.stop(process) }
+                if !Task.isCancelled && process.isRunning { deadline.mark(); Self.stop(process) }
             }
             defer { watchdog.cancel() }
             let output = Task.detached {
@@ -107,10 +115,12 @@ public final class NativeProcess: HelperRunning, @unchecked Sendable {
             catch {
                 Self.stop(process)
                 try Task.checkCancellation()
+                if deadline.expired { throw ProtonXError.timeout }
                 if process.terminationStatus != 0 { throw ProtonXError.helperFailed(process.terminationStatus) }
                 throw error
             }
             try Task.checkCancellation()
+            if deadline.expired { throw ProtonXError.timeout }
             guard process.terminationStatus == 0 else {
                 if let diagnostic { throw ProtonXError.helperDiagnostic(diagnostic) }
                 throw ProtonXError.helperFailed(process.terminationStatus)
