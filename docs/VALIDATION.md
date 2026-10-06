@@ -1,8 +1,9 @@
 # Validation record
 
 Dates: 2026-10-05–06. Apple Silicon Mac, macOS 26.6.2, Xcode 27 / Swift 6.4,
-Rust 1.99.0. Automated test content is synthetic. A live sign-in was separately
-attempted with the account owner's authorization; no vault contents were accessed.
+Rust 1.99.0. Automated test content is synthetic. User-driven live sign-in and
+local unlock reached a vault workspace in the morning follow-up. Only fixed UI
+states were inspected; no live vault contents were returned to the model.
 
 ## Completed
 
@@ -84,6 +85,48 @@ coverage; system-level interaction is not fully automated.
 - The feature comparison and next acceptance gates are recorded in
   [GAP_ANALYSIS.md](GAP_ANALYSIS.md).
 
+## Native editor and UX follow-up, 2026-10-06
+
+- 48 Swift tests passed; one optional Bridge fixture test was skipped in the plain
+  test run. Four app-store tests use injected synthetic runners and cover immediate
+  filter/detail consistency, full create/edit/Trash/restore/lock, preview account
+  isolation and a confirmed create followed by failed refresh.
+- 115 original CLI tests, 122 desktop-helper tests and 252 SDK unit/integration
+  tests passed. The two upstream fixture-dump helpers remain ignored. New coverage
+  checks secret-free summaries, modern URL mode preservation, unsupported custom
+  field preservation, custom-index/deletion correctness, active-item TOTP limits,
+  original CLI command/policy separation and native command allowlisting.
+- The synthetic SDK server confirms that native creation encrypts login notes,
+  multiple websites and a hidden custom field using the original request path.
+  Native create/update against a read-only share never reaches a write endpoint.
+  A changed item revision is refused before decrypt/encrypt/write; the existing
+  server revision guard remains on the final update request.
+- Verification-code copy uses a native command that rechecks the current plan and
+  active configured-item ranking. It returns only the generated code; the UI's
+  previous capability snapshot is not the sole access check.
+- Release helper, Swift app and separate ad-hoc signed **ProtonX Update.app** and
+  **ProtonX Preview.app** bundles built and verified. The running real bundle was
+  not replaced. The preview forces synthetic Pass data and refuses account login,
+  Mail access, additional menu-bar registration and global shortcut registration.
+- Synthetic native-control walkthrough passed collection selection, creating a
+  login with notes/multiple websites/hidden custom field, editing websites, invalid
+  URL rejection with draft retention, corrected save, Trash, restore and account
+  actions. Keyboard Find focused search, repeated Find replaced the old query,
+  and search cleared hidden selected details. Automatic inactivity lock was also
+  observed in the preview. No primary-account contents were inspected or changed
+  by these checks; the supplied official screenshot was a layout reference only.
+- The compile-only credential-provider probe passed Swift 6 typechecking with
+  warnings treated as errors and 20 synthetic origin candidate cases. It is not
+  embedded, installed, registered or capable of returning credentials. The offline
+  source review found no persisted complete item cache in this pinned helper.
+- Rust formatting used the repository-local Rustup toolchain under `.tools`; the
+  formatter component was installed there. No global dependency was installed.
+
+See [GAP_ANALYSIS.md](GAP_ANALYSIS.md), [CREDENTIAL_PROVIDER.md](CREDENTIAL_PROVIDER.md)
+and [OFFLINE_DESIGN.md](OFFLINE_DESIGN.md) for the remaining acceptance gates.
+Live remote writes, restart/recovery and a matched resource benchmark are still
+unverified. Current source-archive checks remain mandatory in CI.
+
 ## Not established
 
 - Repeated desktop account-fork login and first-vault setup across account types,
@@ -93,9 +136,9 @@ coverage; system-level interaction is not fully automated.
   does not eliminate integration risk.
 - Real Proton Bridge account interoperability, remote delivery, thread semantics,
   arbitrary MIME/charset encodings and large/complex mailbox behavior.
-- Touch ID/Mac-password prompts with a persisted authenticated desktop session.
-  Synthetic automated tests don't touch account Keychain data; the separate,
-  authorized live attempt used a temporary credential in local Keychain.
+- Repeated Touch ID/Mac-password recovery after app restart with a persisted
+  desktop session. One user-driven local unlock was observed; synthetic automated
+  tests do not touch account Keychain data.
 - Automated sleep/screen-lock and user-switch tests; code listens for system
   notifications, while synthetic UI lock was manually verified.
 - Intel GUI interaction, minimum-macOS-14 runtime, controlled memory/energy comparison,

@@ -42,3 +42,18 @@ aid; when both apps are running, split the rows into each product set.
 No daemon or automatic sync polling is added in 0.1. The inactivity lock timer
 checks every five seconds. There is no automatic login item. Closing a window
 keeps the single suite process available; use Quit for zero ProtonX runtime.
+
+## Snapshot/navigation change, 2026-10-06
+
+A refresh now starts one `native-snapshot` helper instead of separate capabilities,
+vault-list and per-vault item-list helpers (`2 + vaultCount` starts previously).
+Active and trashed summaries, share permissions and plan capabilities arrive in
+one bounded response. This removes repeated process/client bootstrap for that
+operation. It does not reduce every Proton API call to one request or establish
+a measured latency/energy percentage.
+
+Selected-item visibility checks now match only the selected record instead of
+sorting the entire filtered list again for detail/actions/reconciliation. The
+visible list still uses the common title/type/vault predicate and deterministic
+sorting. No background polling or resident helper has been added. A matched
+large-vault/account benchmark remains a release gate.

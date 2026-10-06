@@ -9,11 +9,15 @@ final class PassStore: ObservableObject {
     @Published private(set) var isDemo = false
     @Published private(set) var vaults: [Vault] = []
     @Published private(set) var items: [PassItem] = []
-    @Published var selectedVault: String?
-    @Published var selectedItem: String?
-    @Published var query = ""
-    @Published var kind: String?
-    @Published var showingTrash = false
+    @Published private(set) var trashedItems: [PassItem] = []
+    @Published private(set) var lastSyncedAt: Date?
+    @Published private(set) var mustRefreshBeforeWriting = false
+    @Published var sort: ItemSort = .title
+    @Published var selectedVault: String? { didSet { reconcileSelection() } }
+    @Published var selectedItem: String? { didSet { if oldValue != selectedItem { selectItem() } } }
+    @Published var query = "" { didSet { reconcileSelection() } }
+    @Published var kind: String? { didSet { reconcileSelection() } }
+    @Published var showingTrash = false { didSet { reconcileSelection() } }
     @Published private(set) var detail: ItemDetail?
     @Published private(set) var busy = false
     @Published var error: String?
@@ -24,31 +28,47 @@ final class PassStore: ObservableObject {
     private var selectionEpoch = SessionEpoch()
     private var operation: Task<Void, Never>?
     private var selectionTask: Task<Void, Never>?
-    private var capabilities: PassCapabilities?
+    private(set) var capabilities: PassCapabilities?
+    let previewOnly: Bool
     private var demoDetails: [String: ItemDetail] = [:]
     let service: PassService
     let sessionDirectory: URL
     private var authContext: LAContext?
     private let webAuthentication = NativeWebAuthentication()
-    var filteredItems: [PassItem] { ItemSearch.filter(items, query: query, vaultID: selectedVault, kind: kind) }
-    var currentItem: PassItem? { items.first { $0.id == selectedItem } }
+    var filteredItems: [PassItem] { ItemSearch.filter(showingTrash ? trashedItems : items, query: query, vaultID: selectedVault, kind: kind, sort: sort) }
+    var currentItem: PassItem? {
+        guard let selectedItem, let item = (showingTrash ? trashedItems : items).first(where: { $0.id == selectedItem }),
+              ItemSearch.matches(item, query: query, vaultID: selectedVault, kind: kind) else { return nil }
+        return item
+    }
+    var writableVaults: [Vault] { vaults.filter { $0.canCreate == true } }
+    var canCreate: Bool { !mustRefreshBeforeWriting && phase == .open && !busy && !showingTrash && !writableVaults.isEmpty }
+    var canEdit: Bool { !mustRefreshBeforeWriting && !showingTrash && currentItem.map { ["login", "note"].contains($0.kind) } == true && currentVault?.canUpdate == true && (isDemo || detail?.revision != nil) }
+    var currentVault: Vault? { guard let item = currentItem else { return nil }; return vaults.first { $0.id == item.shareID } }
+    var canTrash: Bool { !mustRefreshBeforeWriting && currentVault?.canTrash == true }
+    var customFieldsAllowed: Bool { capabilities?.customFieldsAllowed == true }
+    func canSetupTOTP(for item: PassItem?) -> Bool { capabilities?.allowsTOTPSetup(itemID: item?.id, items: items) == true }
+    private func reconcileSelection() {
+        if selectedItem != nil && currentItem == nil { self.selectedItem = nil }
+    }
     var canCopyTOTP: Bool {
-        if isDemo { return true }
-        guard !showingTrash, let selectedItem, let capabilities else { return false }
+        if isDemo { return !showingTrash }
+        guard !mustRefreshBeforeWriting, !showingTrash, let selectedItem, let capabilities else { return false }
         return capabilities.allowsTOTP(itemID: selectedItem, items: items)
     }
-    var hasSession: Bool { FileManager.default.fileExists(atPath: sessionDirectory.appendingPathComponent(".session/session.json").path) }
+    var hasSession: Bool { !previewOnly && FileManager.default.fileExists(atPath: sessionDirectory.appendingPathComponent(".session/session.json").path) }
 
-    init() {
-        sessionDirectory = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/ProtonX/Pass", isDirectory: true)
+    init(service: PassService? = nil, sessionDirectory: URL? = nil, previewOnly: Bool = Bundle.main.bundleIdentifier == "org.kevb.ProtonX.Preview") {
+        self.previewOnly = previewOnly
+        self.sessionDirectory = sessionDirectory ?? FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(previewOnly ? "Library/Application Support/ProtonX/Preview" : "Library/Application Support/ProtonX/Pass", isDirectory: true)
         let helper = Bundle.main.url(forAuxiliaryExecutable: "protonx-pass") ??
             Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/protonx-pass")
-        service = PassService(runner: NativeProcess(executable: helper, directory: sessionDirectory))
+        self.service = service ?? PassService(runner: NativeProcess(executable: helper, directory: self.sessionDirectory))
         phase = hasSession ? .locked : .welcome
     }
     func login(interactive: Bool = false) {
-        guard !busy else { return }
+        guard !busy, !previewOnly else { return }
         isDemo = false
         perform { [self] in
             defer { webAuthentication.cancel() }
@@ -107,23 +127,32 @@ final class PassStore: ObservableObject {
         let continuation = credentialContinuation; credentialContinuation = nil; credentialRequestID = nil; challenge = nil
         continuation?.resume(throwing: ProtonXError.cancelled)
         ClipboardController.shared.clearOwned()
-        vaults = []; items = []; detail = nil; demoDetails = [:]; capabilities = nil
+        vaults = []; items = []; trashedItems = []; lastSyncedAt = nil; mustRefreshBeforeWriting = false; detail = nil; demoDetails = [:]; capabilities = nil
         selectedItem = nil; selectedVault = nil; query = ""; busy = false; error = nil
         phase = hasSession || isDemo ? .locked : .welcome
     }
-    func refresh() { perform { [self] in try await loadSnapshot(); selectItem() } }
+    func refresh() {
+        perform { [self] in
+            do { try await loadSnapshot(); selectItem() }
+            catch {
+                if case ProtonXError.helperDiagnostic(let diagnostic) = error, diagnostic.failure == .sessionInvalidated { throw error }
+                if phase == .open && lastSyncedAt != nil {
+                    mustRefreshBeforeWriting = true
+                    self.error = "Could not refresh. Showing the last loaded vault; refresh successfully before saving changes. " + error.localizedDescription
+                } else { throw error }
+            }
+        }
+    }
     private func loadSnapshot() async throws {
         guard !isDemo else { return }
         let captured = epoch.value
-        let nextCapabilities = try await service.capabilities()
-        let nextVaults = try await service.vaults()
-        var nextItems: [PassItem] = []
-        for vault in nextVaults { try Task.checkCancellation(); nextItems += try await service.items(in: vault, trashed: showingTrash) }
+        let snapshot = try await service.snapshot()
         try Task.checkCancellation()
         guard epoch.accepts(captured), phase == .open else { return }
-        capabilities = nextCapabilities; vaults = nextVaults; items = nextItems
-        if let selectedItem, !items.contains(where: { $0.id == selectedItem }) { self.selectedItem = nil; detail = nil }
+        capabilities = snapshot.capabilities; vaults = snapshot.vaults; items = snapshot.items; trashedItems = snapshot.trashedItems
+        lastSyncedAt = Date(); mustRefreshBeforeWriting = false
         if let selectedVault, !vaults.contains(where: { $0.id == selectedVault }) { self.selectedVault = nil }
+        reconcileSelection()
     }
     func selectItem() {
         selectionEpoch.invalidate(); selectionTask?.cancel(); detail = nil; error = nil
@@ -136,47 +165,78 @@ final class PassStore: ObservableObject {
                 try Task.checkCancellation()
                 guard epoch.accepts(captured), selectionEpoch.accepts(selection), phase == .open else { return }
                 detail = value
-            } catch { if !Task.isCancelled && epoch.accepts(captured) { self.error = error.localizedDescription } }
+            } catch { if !Task.isCancelled && epoch.accepts(captured) && selectionEpoch.accepts(selection) { self.error = error.localizedDescription } }
         }
     }
-    func create(draft: LoginDraft, note: String?, vaultID: String) {
-        guard let vault = vaults.first(where: { $0.id == vaultID }) else { return }
-        perform { [self] in
-            if isDemo {
-                selectedVault = vault.id; kind = nil; query = ""
-                let item = PassItem(itemID: UUID().uuidString, shareID: vault.id, title: draft.title, kind: note == nil ? "login" : "note")
-                items.append(item)
-                demoDetails[item.id] = ItemDetail(title: draft.title, note: note ?? "", fields: note == nil ?
-                    [SecretField(label: "Username", value: draft.username, concealed: false), SecretField(label: "Password", value: draft.password)] : [], urls: draft.urls)
-                selectedItem = item.id; selectItem()
-            } else {
-                if let note { try await service.createNote(title: draft.title, note: note, vault: vault) }
-                else { try await service.createLogin(draft, vault: vault) }
-                try Task.checkCancellation()
-                selectedVault = vault.id; kind = nil; query = ""
-                try await loadSnapshot()
+    /// Returns only after the write is acknowledged. A later refresh failure must not invite duplicate creation.
+    func save(_ draft: NativeItemDraft, item: PassItem?, vaultID: String) async throws {
+        guard !mustRefreshBeforeWriting, !busy, phase == .open, let vault = vaults.first(where: { $0.id == vaultID }),
+              item == nil ? vault.canCreate == true : vault.canUpdate == true else {
+            throw ProtonXError.invalidInput("This vault is unavailable for saving items.")
+        }
+        _ = try draft.encodedInput()
+        guard !showingTrash else { throw ProtonXError.invalidInput("Restore the item before editing.") }
+        let captured = epoch.value
+        busy = true; error = nil
+        defer { if epoch.accepts(captured) { busy = false } }
+        var savedID: String
+        if isDemo {
+            let id = item?.itemID ?? UUID().uuidString
+            let old = item.flatMap { demoDetails[$0.id] }
+            var extras = old?.editableCustomFields ?? []
+            for field in draft.customFields where field.sourceIndex != nil {
+                if let index = extras.firstIndex(where: { $0.sourceIndex == field.sourceIndex }) {
+                    if field.removed { extras.remove(at: index) } else { extras[index] = field }
+                }
+            }
+            extras += draft.customFields.filter { $0.sourceIndex == nil && !$0.removed }
+            extras = extras.enumerated().map { CustomFieldDraft(sourceIndex: $0.offset, name: $0.element.name, value: $0.element.value, concealed: $0.element.concealed) }
+            let next = PassItem(itemID: id, shareID: vault.id, title: draft.title, kind: draft.kind,
+                                hasTOTP: draft.totpURI.map { !$0.isEmpty } ?? old?.hasTOTP ?? false,
+                                createdAt: item?.createdAt ?? ISO8601DateFormatter().string(from: Date()), modifiedAt: ISO8601DateFormatter().string(from: Date()))
+            items.removeAll { $0.id == next.id }; items.append(next)
+            let fields = draft.kind == "login" ? [("Email", draft.email ?? "", false), ("Username", draft.username ?? "", false), ("Password", draft.password ?? "", true)].filter { !$0.1.isEmpty }.map { SecretField(label: $0.0, value: $0.1, concealed: $0.2) } : []
+            demoDetails[next.id] = ItemDetail(title: draft.title, note: draft.note,
+                fields: fields + extras.map { SecretField(label: "Custom: " + $0.name, value: $0.value, concealed: $0.concealed) },
+                revision: (old?.revision ?? 0) + 1, urls: draft.urls ?? old?.urls ?? [], hasTOTP: next.hasTOTP == true,
+                editableCustomFields: extras, unsupportedCustomFieldCount: old?.unsupportedCustomFieldCount ?? 0)
+            savedID = next.id; lastSyncedAt = Date()
+        } else {
+            do {
+                if let item { try await service.edit(draft, item: item, vault: vault); savedID = item.id }
+                else { savedID = vault.id + ":" + (try await service.create(draft, vault: vault)) }
+            } catch {
+                if epoch.accepts(captured), phase == .open { mustRefreshBeforeWriting = true }
+                throw error
+            }
+            // A committed write and a successful refresh are distinct outcomes.
+            guard epoch.accepts(captured), phase == .open else { return }
+            do { try await loadSnapshot() }
+            catch {
+                guard epoch.accepts(captured), phase == .open else { return }
+                mustRefreshBeforeWriting = true
+                self.error = "Item saved. Refresh failed; refresh your vault before making further changes."
+                selectedItem = nil
+                return
             }
         }
-    }
-    func updateCurrent(fields: [String: String]) {
-        guard let item = currentItem else { return }
-        perform { [self] in
-            if isDemo {
-                let old = demoDetails[item.id]
-                let title = fields["title"] ?? item.title
-                items = items.map { $0.id == item.id ? PassItem(itemID: $0.itemID, shareID: $0.shareID, title: title, kind: $0.kind) : $0 }
-                demoDetails[item.id] = ItemDetail(title: title, note: fields["note"] ?? old?.note ?? "", fields: old?.fields.map {
-                    SecretField(label: $0.label, value: fields[$0.label.lowercased()] ?? $0.value, concealed: $0.concealed)
-                } ?? [], urls: old?.urls ?? [])
-            } else { try await service.update(item, fields: fields); try await loadSnapshot() }
-            selectItem()
-        }
+        guard epoch.accepts(captured), phase == .open else { return }
+        selectedVault = vault.id; kind = nil; query = ""; showingTrash = false
+        selectedItem = savedID; selectItem()
     }
     func trashCurrent() {
-        guard let item = currentItem else { return }
+        guard !busy, canTrash, let item = currentItem else { return }
+        let restore = showingTrash
         perform { [self] in
-            if isDemo { items.removeAll { $0.id == item.id }; demoDetails.removeValue(forKey: item.id) }
-            else { try await service.trash(item, restore: showingTrash); try await loadSnapshot() }
+            if isDemo {
+                if restore { trashedItems.removeAll { $0.id == item.id }; items.append(item) }
+                else { items.removeAll { $0.id == item.id }; trashedItems.append(item) }
+                lastSyncedAt = Date()
+            } else {
+                try await service.trash(item, restore: restore)
+                do { try await loadSnapshot() }
+                catch { if phase == .open { mustRefreshBeforeWriting = true; self.error = "Item \(restore ? "restored" : "moved to Trash"). Refresh failed; refresh to see the latest state." } }
+            }
             selectedItem = nil; detail = nil
         }
     }
@@ -203,26 +263,33 @@ final class PassStore: ObservableObject {
         let captured = epoch.value
         operation = Task {
             do { try await action() }
-            catch { if !Task.isCancelled && epoch.accepts(captured) { self.error = error.localizedDescription } }
+            catch {
+                if !Task.isCancelled && epoch.accepts(captured) {
+                    if case ProtonXError.helperDiagnostic(let diagnostic) = error, diagnostic.failure == .sessionInvalidated {
+                        lock(); self.error = diagnostic.message
+                    } else { self.error = error.localizedDescription }
+                }
+            }
             if epoch.accepts(captured) { busy = false }
         }
     }
     func enterDemo() {
         lock(); isDemo = true; phase = .open; showingTrash = false
-        vaults = [Vault(name: "Personal", vaultID: "demo-personal", shareID: "demo-personal"),
-                  Vault(name: "Work", vaultID: "demo-work", shareID: "demo-work")]
+        vaults = [Vault(name: "Personal", vaultID: "demo-personal", shareID: "demo-personal", canCreate: true, canUpdate: true, canTrash: true),
+                  Vault(name: "Work", vaultID: "demo-work", shareID: "demo-work", canCreate: true, canUpdate: true, canTrash: true)]
         let examples: [(String, String, String, String, String)] = [
             ("GitHub", "login", "demo-work", "developer@example.com", "Synthetic-Passphrase-42!"),
             ("Proton", "login", "demo-personal", "alex@example.com", "Demo-Only-Password-73!"),
             ("Travel notes", "note", "demo-personal", "", ""),
             ("Home Wi-Fi", "wifi", "demo-personal", "ProtonX Demo Network", "Demo-Wifi-Not-A-Secret")]
+        capabilities = PassCapabilities(totpLimit: nil, customFieldsAllowed: true)
         items = examples.enumerated().map { index, value in
-            let item = PassItem(itemID: String(index), shareID: value.2, title: value.0, kind: value.1)
+            let item = PassItem(itemID: String(index), shareID: value.2, title: value.0, kind: value.1, hasTOTP: value.0 == "Proton", createdAt: "2026-09-30T10:00:00", modifiedAt: "2026-10-05T12:00:00")
             demoDetails[item.id] = ItemDetail(title: value.0, note: value.1 == "note" ? "A synthetic note for exploring the native experience. No Proton account is connected." : "", fields:
                 value.1 == "note" ? [] : [SecretField(label: value.1 == "wifi" ? "Network" : "Username", value: value.3, concealed: false), SecretField(label: "Password", value: value.4)],
                 urls: value.1 == "login" ? ["https://example.com"] : [], hasTOTP: value.0 == "Proton")
             return item
         }
-        selectedItem = items.first?.id; selectItem()
+        lastSyncedAt = Date(); selectedItem = items.first?.id; selectItem()
     }
 }

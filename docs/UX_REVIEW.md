@@ -34,3 +34,34 @@ long vault/title names, large vault counts, high-contrast appearance, non-Latin
 mailboxes, reduced motion, multiple displays, menu-bar overflow, session expiry,
 network failures, and blocked account login. Test native autofill/passkey system
 extensions before treating Pass as a day-to-day replacement.
+
+## Native UX follow-up, 2026-10-06
+
+The supplied official-app screenshot informed hierarchy and task flow only. Its
+account/item contents were not copied into fixtures or assets. Keep familiar
+three-column navigation with macOS controls and system appearance.
+
+Native sidebar selection replaces buttons embedded in list rows: the latter
+looked active but did not reliably execute collection changes. Selection clearing
+now belongs to the store and is covered independently of view updates. The
+synthetic GUI check confirmed Notes selection clears an old login detail.
+
+The middle pane now identifies the collection and count, offers name/recently
+changed sorting, and distinguishes empty vaults, empty Trash and unmatched search.
+Selected details show type and timestamps. Unsupported actions are disabled using
+permissions and capabilities. Account actions have a larger hit area.
+
+The editor groups details, sign-in fields, websites, verification setup, custom
+fields and notes. Notes are available for new logins; websites are editable on
+existing items. Website rows have stable identities for add/remove. Concealed
+fields remain secure inputs; existing TOTP setup is never displayed. The form
+keeps invalid/failed drafts open. Revision conflicts prevent resubmission until
+the user reopens the latest item. Confirmed saves with failed refresh close safely
+and report success separately from sync failure.
+
+The synthetic preview was exercised through native controls: collection selection,
+create with multiple websites and notes, hidden custom field, edit, invalid URL
+rejection without draft loss, corrected save, Trash, restore and account menu.
+The preview is isolated from accounts, Mail credentials, menu-bar slots and global
+shortcut registration. Full VoiceOver, minimum-OS, high-contrast and multi-display
+coverage remain follow-ups.

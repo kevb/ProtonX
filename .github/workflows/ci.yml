@@ -20,6 +20,8 @@ jobs:
         run: |
           scripts/test-bridge.sh
           scripts/test-bridge.sh --starttls
+      - name: Credential-provider feasibility contracts
+        run: scripts/test-credential-provider.sh
       - name: Native app build
         run: swift build -c release
   helper:

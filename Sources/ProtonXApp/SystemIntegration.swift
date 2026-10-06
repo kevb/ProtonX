@@ -50,6 +50,7 @@ final class SystemIntegration: NSObject {
         }
     }
     func updateMenuBar() {
+        guard Bundle.main.bundleIdentifier != "org.kevb.ProtonX.Preview" else { return }
         let enabled = UserDefaults.standard.object(forKey: "menuBarEnabled") as? Bool ?? true
         if !enabled { if let statusItem { NSStatusBar.system.removeStatusItem(statusItem) }; statusItem = nil; return }
         guard statusItem == nil else { return }
@@ -75,6 +76,7 @@ final class SystemIntegration: NSObject {
     @objc private func lockNow() { lockSuite?() }
     @objc private func quit() { lockSuite?(); NSApp.terminate(nil) }
     func updateHotKey() {
+        guard Bundle.main.bundleIdentifier != "org.kevb.ProtonX.Preview" else { return }
         if let hotKey { UnregisterEventHotKey(hotKey) }; hotKey = nil
         guard UserDefaults.standard.bool(forKey: "quickAccessEnabled") else { return }
         if hotKeyHandler == nil {

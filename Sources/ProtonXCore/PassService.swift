@@ -54,6 +54,23 @@ public final class PassService: Sendable {
         _ = try await execute(HelperCommand(interactive ? ["login", "--interactive"] : ["login"]), challenge: challenge)
     }
     public func logout() async throws { _ = try await execute(HelperCommand(["logout"])) }
+    public func snapshot() async throws -> PassSnapshot {
+        try JSONDecoder().decode(PassSnapshot.self, from: await execute(HelperCommand(["native-snapshot"])))
+    }
+    public func create(_ draft: NativeItemDraft, vault: Vault) async throws -> String {
+        guard vault.canCreate == true else { throw ProtonXError.invalidInput("This vault is read-only for creating items.") }
+        struct Result: Decodable { let item_id: String }
+        let result = try JSONDecoder().decode(Result.self, from: await execute(HelperCommand(["native-create", "--share-id", vault.shareID], input: draft.encodedInput())))
+        guard !result.item_id.isEmpty else { throw ProtonXError.invalidResponse }
+        return result.item_id
+    }
+    public func edit(_ draft: NativeItemDraft, item: PassItem, vault: Vault) async throws {
+        guard vault.id == item.shareID, vault.canUpdate == true else { throw ProtonXError.invalidInput("This vault is read-only for editing items.") }
+        guard draft.expectedRevision != nil else { throw ProtonXError.invalidInput("Reopen the item before editing to load its current revision.") }
+        struct Result: Decodable { let updated: Bool }
+        let result = try JSONDecoder().decode(Result.self, from: await execute(HelperCommand(["native-edit", "--share-id", item.shareID, "--item-id", item.itemID], input: draft.encodedInput())))
+        guard result.updated else { throw ProtonXError.invalidResponse }
+    }
     public func capabilities() async throws -> PassCapabilities {
         try JSONDecoder().decode(PassCapabilities.self, from: await execute(HelperCommand(["native-capabilities"])))
     }
@@ -86,7 +103,7 @@ public final class PassService: Sendable {
         _ = try await execute(HelperCommand(["item", restore ? "untrash" : "trash", "--share-id", item.shareID, "--item-id", item.itemID]))
     }
     public func totp(_ item: PassItem) async throws -> String {
-        let data = try await execute(HelperCommand(["item", "view", "pass://" + item.shareID + "/" + item.itemID + "/totp"] ))
+        let data = try await execute(HelperCommand(["native-totp", "--share-id", item.shareID, "--item-id", item.itemID] ))
         guard let text = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
               (6...8).contains(text.count), text.allSatisfy(\.isNumber) else { throw ProtonXError.invalidResponse }
         return text

@@ -6,6 +6,34 @@ it is not a walkthrough of private accounts in the official apps. Implemented
 features still need live interoperability checks. No account contents or secrets
 belong in this document, screenshots, tests, or public issues.
 
+## Progress after the UX pass
+
+- Native sidebar selection now uses macOS list selection. Changing collection,
+  vault or title search clears a hidden selection and its details immediately.
+  Type filters, counts, sorting, distinct empty states and account actions work
+  in the synthetic preview.
+- Login/note forms now include login notes, multiple editable websites, TOTP
+  setup/replacement/removal and text/hidden custom field edits. Unchanged setup
+  and unsupported fields remain intact. Editing is bound to the opened item's
+  revision; a changed revision is refused before writing.
+- One bounded metadata snapshot replaces capabilities + vault list + one item
+  helper per vault. Active items, Trash, create/update/trash permissions and plan
+  capabilities are loaded atomically. This reduces helper starts, not all server
+  requests. The UI shows last-success/failure state and disables writes after an
+  unconfirmed save or failed refresh until a successful refresh.
+- Synthetic UI and contract tests cover create/edit/validation errors/Trash/restore,
+  native selection, concealed custom fields, permission denial, unsupported-field
+  preservation and an acknowledged save followed by failed refresh.
+- [Offline storage review](OFFLINE_DESIGN.md) found that cached keys/settings do
+  not constitute a persisted item vault. [AutoFill feasibility](CREDENTIAL_PROVIDER.md)
+  now includes a checked native API probe and conservative origin tests; no
+  extension is installed and no credential disclosure is implemented.
+
+The next acceptance gates remain designated disposable-account CRUD verified
+from another client, restart/recovery, large-vault measurements, signed extension
+registration and an authenticated credential broker. Primary-account screenshots
+were used only as layout references; their contents were not added to the project.
+
 ## What should happen today
 
 1. **Make desktop sign-in and session recovery dependable.** The morning handoff
@@ -22,17 +50,17 @@ belong in this document, screenshots, tests, or public issues.
    synthetic note/login records in the designated account: create, open, edit,
    refresh, trash, restore and verify from another client. Preserve fields not
    represented by the editor. Test locked/cancelled saves, lost acknowledgements,
-   stale selection and errors without losing drafts. Confirm the filtered list
-   and detail agree: one morning demo snapshot showed a Notes-only list beside
+   stale selection and errors without losing drafts. Regression tests and native sidebar selection now keep the filtered list
+   and detail consistent; the original issue was: one morning demo snapshot showed a Notes-only list beside
    a previously selected login detail; this needs a repeatable reproduction.
 3. **Improve the everyday login editor.** Multiple website URLs, login notes on
    creation, TOTP setup/edit, and custom fields are more useful immediately than
    adding another product. Expose permissions and plan limits before presenting
    unavailable actions. Keep hidden fields hidden and unsupported fields intact.
-4. **Reduce repeated work and surface sync state.** Each helper command starts
-   a process and bootstraps event sync. Loading a snapshot calls capabilities,
-   vault listing and then item listing separately for every vault. Profile that
-   cost, then consider one bounded metadata-snapshot command with a single sync.
+4. **Reduce repeated work and surface sync state.** The batched snapshot is now implemented. Each helper command starts
+   a process and bootstraps event sync. The original snapshot called capabilities,
+   vault listing and then item listing separately for every vault. One bounded
+   metadata-snapshot helper now handles that work with one bootstrap.
    Show refreshing/error/last-success states. Establish session recovery before
    adding periodic background work. Benchmark matched synthetic account sizes.
 5. **Start a native AutoFill feasibility spike.** Use Apple's credential-provider
@@ -49,13 +77,13 @@ Authentication and a verified basic workflow are the first acceptance gates.
 | Area | Official baseline | ProtonX today | Next action |
 | --- | --- | --- | --- |
 | Sign-in | Desktop account handoff; account verification | Corrected system handoff and local unlock reached a live vault; native password prompts remain experimental | Finish setup/restart/recovery coverage; no CLI-eligibility workaround |
-| Vault browsing and sync | Synced vault/item workspace | Native three-column UI, title search, explicit refresh; repeated helper startup/sync | Reliable snapshot, status, large-vault timing and cancellation |
-| Item editing | Logins, notes, cards and other supported item forms; custom fields | Creates/edits login and note basics; reads several other kinds; URLs editable only at creation; one URL input | Complete login editor, then cards/identities/Wi-Fi/SSH forms |
-| TOTP | Setup and use of two-factor secrets | Copy of an existing permitted code; no setup/edit UI | Synthetic enrollment fixture, URI validation, entitlement-aware editing; preserve server limits |
+| Vault browsing and sync | Synced vault/item workspace | Native three-column UI, title search, sorting, atomic metadata/Trash snapshot and sync status | Large-vault timing, reconnect and cancellation |
+| Item editing | Logins, notes, cards and other supported item forms; custom fields | Login/note editor with notes, multiple URLs and text/hidden custom fields; revision-bound saves; other kinds readable | Live editor interoperability, then cards/identities/Wi-Fi/SSH forms |
+| TOTP | Setup and use of two-factor secrets | Permitted code copy and concealed setup/replacement/removal UI | Live enrollment round trip; preserve server limits |
 | Organisation | Vault management, moving items | Vault selection only; no create/rename/delete/move UI | Create/rename vaults and move items after permission-aware metadata |
-| Permissions | Shared vaults and role-specific access | Swift vault model omits roles; SDK/server remain authoritative | Surface create/update/trash permissions and disable misleading actions |
-| Offline | Paid desktop access to cached items | Upstream encrypted cache exists, but no supported offline UI | Read-only offline mode first; review unlock, expiry, cache freshness and entitlement policy |
-| Autofill | Browser extensions, including Safari; paid desktop autotype | Copy/reveal plus optional global quick access | Native credential-provider spike; retain official browser extensions during transition |
+| Permissions | Shared vaults and role-specific access | Create/update/trash flags surfaced; UI + native SDK guards; server remains authoritative | Shared-role interoperability and item-share edge cases |
+| Offline | Paid desktop access to cached items | Persisted key/settings cache; item cache only process-local; last-loaded interruption state | Persist encrypted item revisions; read-only offline policy and recovery tests |
+| Autofill | Browser extensions, including Safari; paid desktop autotype | Copy/reveal, optional global quick access and compile-only credential-provider probe | Signed extension registration + broker; retain official extensions during transition |
 | Passkeys | Existing Proton passkey support across clients | Counts only; cannot create or use passkeys | Separate extension integration and origin-bound tests; no new crypto |
 | Attachments | Attach/open/save/manage files on supported paid plans | Counts only | Deferred until encrypted file handling, quota and safe temporary-file lifecycle are designed |
 | History and recovery | Paid item history; Trash | Trash/restore; no history UI; no permanent deletion | Read-only item history and recovery before considering permanent deletion |
@@ -125,7 +153,7 @@ The reviewed official source is pinned in `upstream.lock.json` (WebClients
 - Pass CLI `pass-cli/src/main.rs`: per-command `bootstrap_event_sync`.
 - Pass SDK `pass/src/permission/mod.rs`: existing permission checks.
 - ProtonX `PassStore.loadSnapshot`, `PassService`, `PassModels.Vault` and
-  `PassViews.ItemEditor`: actual native feature boundaries.
+  `ItemEditor`: actual native feature boundaries.
 
 For test results see [VALIDATION.md](VALIDATION.md); for release/license and
 performance boundaries see [LICENSE_REVIEW.md](LICENSE_REVIEW.md),

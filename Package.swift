@@ -10,6 +10,7 @@ let package = Package(
               .target(name: "ProtonXCore", dependencies: ["CBridgeTransport"]),
               .executableTarget(name: "ProtonXApp", dependencies: ["ProtonXCore"]),
               .executableTarget(name: "ProtonXValidation", dependencies: ["ProtonXCore"], path: "Tools/ProtonXValidation"),
+              .testTarget(name: "ProtonXAppTests", dependencies: ["ProtonXApp", "ProtonXCore"]),
               .testTarget(name: "ProtonXCoreTests", dependencies: ["ProtonXCore"], resources: [.copy("Fixtures")])],
     swiftLanguageModes: [.v6]
 )

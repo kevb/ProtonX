@@ -31,51 +31,66 @@ struct PassWindow: View {
         .onChange(of: store.phase) { _, phase in
             if phase != .open { showingCreate = false; showingEdit = false; confirmTrash = false }
         }
-        .onReceive(NotificationCenter.default.publisher(for: .protonXNewItem)) { _ in if store.phase == .open { showingCreate = true } }
+        .onReceive(NotificationCenter.default.publisher(for: .protonXNewItem)) { _ in if store.canCreate { showingCreate = true } }
         .onAppear {
             SystemIntegration.shared.openPass = { openWindow(id: "pass"); NSApp.activate(ignoringOtherApps: true) }
             SystemIntegration.shared.openMail = { openWindow(id: "mail"); NSApp.activate(ignoringOtherApps: true) }
             SystemIntegration.shared.lockSuite = { store.lock(); NotificationCenter.default.post(name: .protonXLock, object: nil) }
             SystemIntegration.shared.openSettings = { openSettings(); NSApp.activate(ignoringOtherApps: true) }
             SystemIntegration.shared.configure()
-            if ProcessInfo.processInfo.arguments.contains("--demo") { store.enterDemo() }
+            if store.previewOnly || ProcessInfo.processInfo.arguments.contains("--demo") { store.enterDemo() }
         }
     }
     private var workspace: some View {
         NavigationSplitView {
-            List {
+            List(selection: collectionSelection) {
                 Section {
-                    sidebarButton("All items", symbol: "square.grid.2x2", count: store.items.count, selected: store.selectedVault == nil && store.kind == nil && !store.showingTrash) {
-                        store.selectedVault = nil; store.kind = nil; setTrash(false)
+                    sidebarRow("All items", symbol: "square.grid.2x2", count: store.items.count).tag("all")
+                    sidebarRow("Logins", symbol: "key", count: store.items.filter { $0.kind == "login" }.count).tag("kind:login")
+                    sidebarRow("Notes", symbol: "note.text", count: store.items.filter { $0.kind == "note" }.count).tag("kind:note")
+                }
+                Section("Types") {
+                    ForEach([("credit_card", "Cards", "creditcard"), ("identity", "Identities", "person.text.rectangle"), ("wifi", "Wi-Fi", "wifi"), ("alias", "Aliases", "at"), ("ssh_key", "SSH keys", "terminal"), ("custom", "Other items", "doc.text")], id: \.0) { type in
+                        if store.items.contains(where: { $0.kind == type.0 }) { sidebarRow(type.1, symbol: type.2).tag("kind:" + type.0) }
                     }
-                    sidebarButton("Logins", symbol: "key", selected: store.kind == "login") { store.kind = "login"; store.selectedVault = nil; setTrash(false) }
-                    sidebarButton("Notes", symbol: "note.text", selected: store.kind == "note") { store.kind = "note"; store.selectedVault = nil; setTrash(false) }
                 }
                 Section("Vaults") {
                     ForEach(store.vaults) { vault in
-                        sidebarButton(vault.name, symbol: "folder", count: store.items.filter { $0.shareID == vault.id }.count, selected: store.selectedVault == vault.id) {
-                            store.selectedVault = vault.id; store.kind = nil; setTrash(false)
-                        }
+                        sidebarRow(vault.name, symbol: vault.canUpdate == true ? "folder" : "folder.badge.person.crop", count: store.items.filter { $0.shareID == vault.id }.count).tag("vault:" + vault.id)
                     }
                 }
-                Section {
-                    sidebarButton("Trash", symbol: "trash", selected: store.showingTrash) { store.selectedVault = nil; store.kind = nil; setTrash(true) }
-                }
+                Section { sidebarRow("Trash", symbol: "trash", count: store.trashedItems.count).tag("trash") }
             }
             .listStyle(.sidebar).navigationSplitViewColumnWidth(min: 170, ideal: 195, max: 270)
             .safeAreaInset(edge: .bottom) {
                 VStack(alignment: .leading, spacing: 10) {
                     if store.isDemo { Label("Demo · synthetic data", systemImage: "testtube.2").font(.caption).foregroundStyle(.orange) }
+                    if store.mustRefreshBeforeWriting { Label("Refresh needed before changes", systemImage: "exclamationmark.arrow.triangle.2.circlepath").font(.caption).foregroundStyle(.orange) }
+                    if let synced = store.lastSyncedAt {
+                        Text("Updated \(synced, style: .relative) ago").font(.caption2).foregroundStyle(.secondary)
+                    }
                     HStack {
                         Button { store.lock() } label: { Label("Lock", systemImage: "lock") }.help("Lock ProtonX (⌘L)")
                         Spacer()
                         Menu { Button("Settings…") { openSettings() }; Button("Sign Out…", role: .destructive) { confirmSignOut = true } } label: { Image(systemName: "ellipsis.circle") }
-                            .menuStyle(.borderlessButton).frame(width: 20).accessibilityLabel("Account actions")
+                            .menuStyle(.borderlessButton).frame(width: 44, height: 28).accessibilityLabel("Account actions")
                     }
                 }.padding()
             }
         } content: {
-            List(store.filteredItems, selection: $store.selectedItem) { item in
+            VStack(spacing: 0) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(collectionTitle).font(.headline)
+                        Text("\(store.filteredItems.count) item\(store.filteredItems.count == 1 ? "" : "s")").font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Menu {
+                        Picker("Sort items", selection: $store.sort) { ForEach(ItemSort.allCases, id: \.self) { Text($0.rawValue).tag($0) } }
+                    } label: { Image(systemName: "arrow.up.arrow.down") }.menuStyle(.borderlessButton).fixedSize().accessibilityLabel("Sort items")
+                }.padding(14)
+                Divider()
+                List(store.filteredItems, selection: $store.selectedItem) { item in
                 HStack(spacing: 12) {
                     Image(systemName: item.symbol).foregroundStyle(.purple).frame(width: 32, height: 32).background(.purple.opacity(0.09), in: RoundedRectangle(cornerRadius: 8))
                     VStack(alignment: .leading, spacing: 4) {
@@ -84,20 +99,27 @@ struct PassWindow: View {
                     }
                 }.padding(.vertical, 4).tag(item.id)
             }
-            .navigationSplitViewColumnWidth(min: 240, ideal: 300, max: 440)
-            .overlay { if store.filteredItems.isEmpty { ContentUnavailableView.search(text: store.query) } }
-            .onChange(of: store.selectedItem) { _, _ in store.selectItem() }
-            .onChange(of: store.filteredItems.map(\.id)) { _, ids in
-                if let selected = store.selectedItem, !ids.contains(selected) { store.selectedItem = nil }
-            }
+                .overlay {
+                    if store.filteredItems.isEmpty {
+                        ContentUnavailableView {
+                            Label(store.query.isEmpty ? (store.showingTrash ? "Trash is empty" : "No items yet") : "No matching items", systemImage: store.query.isEmpty ? (store.showingTrash ? "trash" : "key") : "magnifyingglass")
+                        } description: {
+                            Text(store.query.isEmpty ? (store.showingTrash ? "Items you move to Trash can be restored here." : "Create a login or secure note in this vault.") : "Try a different title or clear your search.")
+                        } actions: {
+                            if !store.query.isEmpty { Button("Clear Search") { store.query = "" } }
+                            else if store.canCreate { Button("Create Item") { showingCreate = true } }
+                        }
+                    }
+                }
+            }.navigationSplitViewColumnWidth(min: 250, ideal: 300, max: 440)
         } detail: {
             if let item = store.currentItem {
                 if let detail = store.detail {
                     ItemDetailView(detail: detail).id(item.id)
                         .toolbar {
                             ToolbarItemGroup {
-                                Button { showingEdit = true } label: { Label("Edit", systemImage: "square.and.pencil") }.disabled(store.busy || !["login", "note"].contains(item.kind))
-                                Button { confirmTrash = true } label: { Label(store.showingTrash ? "Restore" : "Trash", systemImage: store.showingTrash ? "arrow.uturn.backward" : "trash") }.disabled(store.busy)
+                                Button { showingEdit = true } label: { Label("Edit", systemImage: "square.and.pencil") }.disabled(store.busy || !store.canEdit)
+                                Button { confirmTrash = true } label: { Label(store.showingTrash ? "Restore" : "Trash", systemImage: store.showingTrash ? "arrow.uturn.backward" : "trash") }.disabled(store.busy || !store.canTrash)
                             }
                         }
                 } else if store.error != nil {
@@ -113,21 +135,37 @@ struct PassWindow: View {
                 NativeSearchField(text: $store.query).frame(width: 220)
                 if store.busy { ProgressView().controlSize(.small).accessibilityLabel("Working") }
                 Button { store.refresh() } label: { Label("Refresh", systemImage: "arrow.clockwise") }.disabled(store.busy || store.isDemo)
-                Button { showingCreate = true } label: { Label("New Item", systemImage: "plus") }.disabled(store.busy || store.vaults.isEmpty).accessibilityIdentifier("newItem")
+                Button { showingCreate = true } label: { Label("Create Item", systemImage: "plus") }.disabled(!store.canCreate).accessibilityIdentifier("newItem")
             }
         }
     }
-    private func setTrash(_ value: Bool) {
-        guard value != store.showingTrash else { return }
-        if store.isDemo { store.error = "Trash browsing is available with a connected Proton account."; return }
-        store.showingTrash = value; store.selectedItem = nil; store.refresh()
+    private var collectionTitle: String {
+        if store.showingTrash { return "Trash" }
+        if let vault = store.vaults.first(where: { $0.id == store.selectedVault }) { return vault.name }
+        if let kind = store.kind { return PassItem(itemID: "", shareID: "", title: "", kind: kind).typeName + "s" }
+        return "All items"
     }
-    private func sidebarButton(_ title: String, symbol: String, count: Int? = nil, selected: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack { Label(title, systemImage: symbol); Spacer(); if let count { Text(String(count)).font(.caption).foregroundStyle(.secondary) } }
-                .padding(.vertical, 3).padding(.horizontal, 4).background(selected ? Color.accentColor.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: 5))
-        }.buttonStyle(.plain).accessibilityAddTraits(selected ? [.isSelected] : [])
+    private var collectionSelection: Binding<String?> {
+        Binding(get: {
+            if store.showingTrash { return "trash" }
+            if let vault = store.selectedVault { return "vault:" + vault }
+            if let kind = store.kind { return "kind:" + kind }
+            return "all"
+        }, set: { value in
+            guard let value else { return }
+            store.showingTrash = value == "trash"
+            store.selectedVault = value.hasPrefix("vault:") ? String(value.dropFirst(6)) : nil
+            store.kind = value.hasPrefix("kind:") ? String(value.dropFirst(5)) : nil
+        })
     }
+    private func sidebarRow(_ title: String, symbol: String, count: Int? = nil) -> some View {
+        HStack {
+            Label(title, systemImage: symbol)
+            Spacer()
+            if let count { Text(String(count)).font(.caption).foregroundStyle(.secondary) }
+        }.padding(.vertical, 3).contentShape(Rectangle())
+    }
+
 }
 
 struct WelcomeView: View {
@@ -151,10 +189,10 @@ struct WelcomeView: View {
                 ProgressView("Connecting to Proton…")
                 Button("Cancel") { store.cancelLogin() }
             } else {
-                Button(store.phase == .locked ? "Unlock Pass" : "Sign In to Proton") { store.phase == .locked ? store.unlock() : store.login() }
+                Button(store.previewOnly ? "Explore Preview" : (store.phase == .locked ? "Unlock Pass" : "Sign In to Proton")) { store.previewOnly ? store.enterDemo() : (store.phase == .locked ? store.unlock() : store.login()) }
                     .buttonStyle(.borderedProminent).controlSize(.large).keyboardShortcut(.defaultAction)
                 if store.phase == .locked && !store.isDemo { Button("Sign In Again") { store.login() } }
-                if store.phase == .welcome { Button("Try direct password sign-in (experimental)") { store.login(interactive: true) }.font(.caption) }
+                if store.phase == .welcome && !store.previewOnly { Button("Try direct password sign-in (experimental)") { store.login(interactive: true) }.font(.caption) }
                 if store.phase == .welcome { Button("Explore with demo data") { store.enterDemo() }.accessibilityIdentifier("enterDemo") }
             }
             Text("Independent open source client · GPL-3.0-or-later\nNot affiliated with Proton AG").font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
@@ -170,10 +208,14 @@ struct ItemDetailView: View {
     let detail: ItemDetail
     @State private var revealed = Set<String>()
     @State private var copied: String?
+    private func readableDate(_ value: String) -> String {
+        let parser = ISO8601DateFormatter(); parser.timeZone = TimeZone(secondsFromGMT: 0)
+        return parser.date(from: value.hasSuffix("Z") ? value : value + "Z")?.formatted(date: .abbreviated, time: .shortened) ?? value
+    }
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                HStack { Image(systemName: store.currentItem?.symbol ?? "key").font(.title).foregroundStyle(.purple); Text(detail.title).font(.title2.weight(.semibold)) }
+                HStack { Image(systemName: store.currentItem?.symbol ?? "key").font(.title).foregroundStyle(.purple); VStack(alignment: .leading, spacing: 5) { Text(detail.title).font(.title2.weight(.semibold)).textSelection(.enabled); Text(store.currentItem?.typeName ?? "Item").font(.caption).foregroundStyle(.secondary) } }
                 ForEach(Array(detail.fields.enumerated()), id: \.offset) { index, field in
                     VStack(alignment: .leading, spacing: 8) {
                         Text(field.label).font(.caption).foregroundStyle(.secondary)
@@ -207,73 +249,16 @@ struct ItemDetailView: View {
                 if detail.attachmentCount > 0 { Label("\(detail.attachmentCount) attachment(s) · use the official app to download", systemImage: "paperclip").font(.caption).foregroundStyle(.secondary) }
                 Text("Copied values clear after 30 seconds. Locking clears the item from this window.").font(.caption).foregroundStyle(.secondary)
                 Spacer()
+                if let item = store.currentItem {
+                    VStack(alignment: .leading, spacing: 8) {
+                        if store.currentVault?.canUpdate != true { Label("Shared vault · read-only", systemImage: "lock").font(.caption).foregroundStyle(.secondary) }
+                        if let date = item.modifiedAt { LabeledContent("Last changed", value: readableDate(date)) }
+                        if let date = item.createdAt { LabeledContent("Created", value: readableDate(date)) }
+                    }.font(.caption).foregroundStyle(.secondary).padding(14).background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 10))
+                }
             }.padding(28).frame(maxWidth: 650, alignment: .leading).frame(maxWidth: .infinity, alignment: .leading)
         }.onDisappear { revealed = []; copied = nil }
     }
-}
-
-struct ItemEditor: View {
-    @EnvironmentObject var store: PassStore
-    @Environment(\.dismiss) private var dismiss
-    let editing: Bool
-    @State private var draft = LoginDraft()
-    @State private var isNote = false
-    @State private var note = ""
-    @State private var website = ""
-    @State private var vaultID = ""
-    @State private var localError: String?
-    @State private var saving = false
-    var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            Text(editing ? "Edit item" : "New item").font(.title2.weight(.semibold))
-            Form {
-                if !editing { Picker("Type", selection: $isNote) { Text("Login").tag(false); Text("Secure note").tag(true) } }
-                TextField("Title", text: $draft.title).accessibilityIdentifier("itemTitle")
-                if !editing { Picker("Vault", selection: $vaultID) { ForEach(store.vaults) { Text($0.name).tag($0.id) } } }
-                if !isNote {
-                    TextField("Username", text: $draft.username)
-                    TextField("Email", text: $draft.email)
-                    SecureField("Password", text: $draft.password)
-                    Button("Generate password") { do { draft.password = try PasswordGenerator.generate() } catch { localError = error.localizedDescription } }
-                    if !editing { TextField("Website (https://…)", text: $website) }
-                }
-                if isNote || editing {
-                    Text("Notes").font(.caption).foregroundStyle(.secondary)
-                    TextEditor(text: $note).frame(height: 120).border(.quaternary)
-                }
-            }.formStyle(.grouped)
-            if let localError { Text(localError).foregroundStyle(.red).font(.callout) }
-            HStack { Button("Cancel") { clear(); dismiss() }.keyboardShortcut(.cancelAction).disabled(saving && store.busy); Spacer(); Button("Save", action: save).keyboardShortcut(.defaultAction).disabled(draft.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || store.busy) }
-        }.padding(24).frame(width: 500)
-        .onAppear {
-            vaultID = store.selectedVault ?? store.vaults.first?.id ?? ""
-            if editing, let detail = store.detail {
-                isNote = store.currentItem?.kind == "note"
-                draft.title = detail.title; note = detail.note
-                draft.username = detail.fields.first { $0.label == "Username" }?.value ?? ""
-                draft.email = detail.fields.first { $0.label == "Email" }?.value ?? ""
-                draft.password = detail.fields.first { $0.label == "Password" }?.value ?? ""
-            }
-        }
-        .onChange(of: store.busy) { _, busy in
-            guard saving && !busy else { return }
-            saving = false
-            if let error = store.error { localError = error } else { clear(); dismiss() }
-        }
-        .onDisappear(perform: clear)
-    }
-    private func save() {
-        draft.urls = website.isEmpty ? [] : [website]
-        do { try draft.validate() } catch { localError = error.localizedDescription; return }
-        guard note.utf8.count + draft.password.utf8.count < 262144 else { localError = "Keep items below 256 KB."; return }
-        saving = true; localError = nil
-        if editing {
-            var fields = ["title": draft.title, "note": note]
-            if !isNote { fields["username"] = draft.username; fields["email"] = draft.email; fields["password"] = draft.password }
-            store.updateCurrent(fields: fields)
-        } else { store.create(draft: draft, note: isNote ? note : nil, vaultID: vaultID) }
-    }
-    private func clear() { draft = LoginDraft(); note = ""; website = "" }
 }
 
 struct NativeSearchField: NSViewRepresentable {

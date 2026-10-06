@@ -19,7 +19,7 @@ ProtonX is independent of Proton AG. GPL-3.0-or-later.
 
 | Product | Implemented | Current limits |
 | --- | --- | --- |
-| Pass | macOS authentication window and experimental native password prompts; vault browsing and search; on-demand item details; password copy and reveal; TOTP copy; create logins/notes; edit login/note fields; trash/restore; remote sign-out | no browser autofill, passkey operations, attachments, sharing UI, account switching, or offline UI |
+| Pass | macOS authentication window and experimental native password prompts; atomic vault/Trash loading, title search and sorting; on-demand item details; password copy and reveal; TOTP copy/setup/edit; create/edit logins and notes with multiple websites and text/hidden custom fields; revision conflict protection; trash/restore; remote sign-out | no browser autofill, passkey operations, attachments, sharing UI, account switching, or offline UI |
 | Mail | Native mailbox/message lists; plain-text MIME reader; single-recipient plain-text compose/send; Bridge credentials in Keychain; verified local TLS | Requires a running, eligible Proton Bridge account; newest 25 messages per mailbox; no attachment handling, HTML rendering, reply threading, push or direct Proton login |
 | Drive | Architecture decision and planned integration boundary | No Drive client implemented |
 
@@ -46,6 +46,13 @@ open build/ProtonX.app
 Choose **Explore with demo data** to inspect Pass. Use **Products → Open Mail**
 to explore the separate demo inbox. Build output is ad-hoc signed for local use;
 it is not notarized. No global dependencies are installed by the build scripts.
+
+For UX testing alongside a running session, `./scripts/build-app.sh --preview`
+builds `build/ProtonX Preview.app`: synthetic Pass data only, a separate bundle
+identity, no sign-in and no extra menu-bar item or global shortcut registration.
+`./scripts/build-app.sh --stage-update` builds `build/ProtonX Update.app` without
+replacing a running primary bundle. Quit the old app before opening the update;
+both real bundles use the same isolated ProtonX Pass profile.
 
 The helper is built from an exact Proton source revision. It runs only when a
 Pass operation is requested, and exits afterwards. It uses a separate encrypted
@@ -113,6 +120,7 @@ swift test
 ./scripts/test-bridge.sh        # Synthetic IMAP/SMTP servers, verified TLS
 ./scripts/test-bridge.sh --starttls # Same round trip with STARTTLS
 ./scripts/test-helper.sh        # Public SDK/CLI tests plus native transport contracts
+./scripts/test-credential-provider.sh # Compile-only API probe and synthetic origin cases
 ```
 
 See [validation](docs/VALIDATION.md) for exact results and untested boundaries,

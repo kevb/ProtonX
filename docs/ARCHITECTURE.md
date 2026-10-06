@@ -85,14 +85,36 @@ Cancellation and successful helper completion close the authentication window.
 An experimental direct SRP/password/TOTP path remains available. The desktop
 protocol's live attempt failed with HTTP 422 / API 8004, also observed with an
 obviously synthetic identity; the exact server-side cause is unresolved. We do
-not classify this as a wrong password or CLI entitlement issue. The account-fork
-implementation has synthetic contract coverage and still needs live validation.
+not classify this as a wrong password or CLI entitlement issue. The corrected account-fork
+implementation reached a live workspace after user-driven authentication and
+local unlock; remote writes and recovery still need validation.
 Neither branch has established full security-key/SSO/challenge parity.
 
 The desktop helper restricts its command surface to the native UI contracts.
 CLI automation, agents, PATs, process injection, bulk secret export and permanent
 deletion are rejected before opening a client in desktop mode. The original CLI
 mode retains its original commands and eligibility policy.
+
+## Native snapshot and editor contracts
+
+`native-snapshot` bootstraps once and returns an atomic metadata-only active/Trash
+snapshot, share permissions and plan capabilities. It replaces `2 + vaultCount`
+helper starts with one for a refresh; Proton API calls still run per required
+resource. A selected item is fetched separately. No background polling is added.
+
+`native-create` and `native-edit` accept bounded typed JSON through stdin. Existing
+Proton encryption and single-item requests handle writes. Native creation uses
+its existing create permission guard; native editing uses its update guard and a
+revision check before the existing encrypted update path. The CLI build keeps its
+own original command surface and policy. Unchanged TOTP setup, modern URL modes,
+passkeys and unsupported custom fields are preserved. Explicit custom-field
+changes reference original indices/names/types and are revision-bound.
+
+The UI closes an editor only after acknowledged success. It distinguishes a
+subsequent failed refresh, retains failed drafts, and requires refresh before
+further writes. Last-loaded in-memory data is not durable offline support.
+See [offline design](OFFLINE_DESIGN.md) and the isolated
+[credential-provider feasibility probe](CREDENTIAL_PROVIDER.md).
 
 ## Mail and Drive
 

@@ -118,3 +118,106 @@ private final class RecordingRunner: HelperRunning, @unchecked Sendable {
     #expect(throws: Error.self) { try JSONDecoder().decode(PassCapabilities.self, from: Data("{\"totp_limit\":-1}".utf8)) }
     #expect(try JSONDecoder().decode(PassCapabilities.self, from: Data("{\"totp_limit\":null}".utf8)).totpLimit == nil)
 }
+
+@Test func nativeDraftSendsOnlyChangedCustomFieldsAndPreservesOmittedSetup() throws {
+    var draft = NativeItemDraft(); draft.title = "Synthetic"
+    draft.customFields = [CustomFieldDraft(sourceIndex: 2, name: "Recovery", value: "DEMO", concealed: true)]
+    var json = try #require(JSONSerialization.jsonObject(with: draft.encodedInput()) as? [String: Any])
+    #expect((json["custom_fields"] as? [Any])?.isEmpty == true)
+    #expect(json["totp_uri"] == nil); #expect(json["urls"] == nil)
+    draft.customFields[0].value = "CHANGED"
+    json = try #require(JSONSerialization.jsonObject(with: draft.encodedInput()) as? [String: Any])
+    let edit = try #require((json["custom_fields"] as? [[String: Any]])?.first)
+    #expect(edit["source_index"] as? Int == 2); #expect(edit["expected_hidden"] as? Bool == true)
+    #expect(edit["expected_name"] as? String == "Recovery")
+}
+@Test func completeDraftSizeAndSetupValidationRunsBeforeHelper() async throws {
+    let runner = RecordingRunner()
+    let service = PassService(runner: runner)
+    let vault = Vault(name: "Synthetic", vaultID: "v", shareID: "s", canCreate: true)
+    var draft = NativeItemDraft(); draft.title = "Synthetic"; draft.email = String(repeating: "a", count: 262144)
+    await #expect(throws: ProtonXError.self) { try await service.create(draft, vault: vault) }
+    #expect(runner.last() == nil)
+    draft.email = nil
+    for uri in ["otpauth://hotp/Test?secret=ABC", "otpauth://totp/Test?secret=invalid!", "https://example.com"] {
+        draft.totpURI = uri; #expect(throws: ProtonXError.self) { try draft.encodedInput() }
+    }
+    draft.totpURI = "otpauth://totp/Synthetic?secret=JBSWY3DPEHPK3PXP"
+    #expect(throws: Never.self) { _ = try draft.encodedInput() }
+}
+@Test func nativeWritesUseStdinAndPermissionsFailClosed() async throws {
+    let runner = RecordingRunner(); runner.response = Data(#"{"item_id":"created-synthetic"}"#.utf8)
+    let service = PassService(runner: runner)
+    var draft = NativeItemDraft(); draft.title = "Synthetic"; draft.password = "SYNTHETIC-$()\n=secret"; draft.note = "Login notes"
+    let vault = Vault(name: "Synthetic", vaultID: "v", shareID: "s", canCreate: true, canUpdate: true)
+    #expect(try await service.create(draft, vault: vault) == "created-synthetic")
+    #expect(runner.last()?.arguments == ["native-create", "--share-id", "s"])
+    #expect(runner.last()?.arguments.joined().contains(draft.password!) == false)
+    let input = try #require(runner.last()?.input)
+    let json = try #require(JSONSerialization.jsonObject(with: input) as? [String: Any])
+    #expect(json["note"] as? String == draft.note)
+    let readonly = Vault(name: "Read only", vaultID: "v", shareID: "s")
+    let count = runner.commands.count
+    await #expect(throws: ProtonXError.self) { try await service.create(draft, vault: readonly) }
+    #expect(runner.commands.count == count)
+}
+@Test func atomicSnapshotRejectsUnknownVaultsAndDuplicateAcrossTrash() throws {
+    let valid = #"{"vaults":[{"name":"Synthetic","vault_id":"v","share_id":"s","can_create":false,"can_update":false,"can_trash":false}],"items":[{"id":"i","share_id":"s","title":"Synthetic","item_type":"login"}],"trashed_items":[],"capabilities":{"totp_limit":null}}"#
+    let snapshot = try JSONDecoder().decode(PassSnapshot.self, from: Data(valid.utf8))
+    #expect(snapshot.vaults.first?.canCreate == false); #expect(!snapshot.capabilities.customFieldsAllowed)
+    #expect(throws: Error.self) { try JSONDecoder().decode(PassSnapshot.self, from: Data(valid.replacingOccurrences(of: "\"share_id\":\"s\",\"title\"", with: "\"share_id\":\"unknown\",\"title\"").utf8)) }
+    var json = try #require(JSONSerialization.jsonObject(with: Data(valid.utf8)) as? [String: Any]); json["trashed_items"] = json["items"]
+    #expect(throws: Error.self) { try JSONDecoder().decode(PassSnapshot.self, from: JSONSerialization.data(withJSONObject: json)) }
+}
+@Test func recentlyModifiedSortAndTitleTiesAreDeterministic() {
+    let items = [PassItem(itemID: "a", shareID: "s", title: "Same", kind: "login", modifiedAt: "2026-01-01"), PassItem(itemID: "b", shareID: "s", title: "Same", kind: "login", modifiedAt: "2026-02-01")]
+    #expect(ItemSearch.filter(items.reversed(), query: "").map(\.itemID) == ["a", "b"])
+    #expect(ItemSearch.filter(items, query: "", sort: .recentlyModified).map(\.itemID) == ["b", "a"])
+}
+@Test func TOTPSetupLimitsCountExistingConfiguredLoginsAndPreserveEligibleReplacement() {
+    let item = PassItem(itemID: "a", shareID: "s", title: "Synthetic", kind: "login", hasTOTP: true, createdAt: "2026-01-01")
+    let policy = PassCapabilities(totpLimit: 1)
+    #expect(!policy.allowsTOTPSetup(itemID: nil, items: [item]))
+    #expect(policy.allowsTOTPSetup(itemID: item.id, items: [item]))
+    #expect(!PassCapabilities(totpLimit: 0).allowsTOTPSetup(itemID: nil, items: []))
+}
+@Test func customTOTPSeedIsNeverExposedAsAnOrdinarySecretField() throws {
+    let detail = try ItemDetail.decode(Data(#"{"item":{"content":{"title":"Synthetic","content":{"Note":null},"extra_fields":[{"name":"TOTP","content":{"Totp":"otpauth://totp/Test?secret=SYNTHETIC"}}]}}}"#.utf8))
+    #expect(detail.fields.isEmpty); #expect(detail.editableCustomFields.isEmpty); #expect(detail.unsupportedCustomFieldCount == 1)
+}
+
+@Test func nativeEditRequiresRevisionAndSendsItWithDraft() async throws {
+    let runner = RecordingRunner(); let service = PassService(runner: runner)
+    let vault = Vault(name: "Synthetic", vaultID: "v", shareID: "s", canUpdate: true)
+    let item = PassItem(itemID: "i", shareID: "s", title: "Synthetic", kind: "note")
+    var draft = NativeItemDraft(); draft.kind = "note"; draft.title = "Synthetic"
+    await #expect(throws: ProtonXError.self) { try await service.edit(draft, item: item, vault: vault) }
+    #expect(runner.last() == nil)
+    draft.expectedRevision = 7; runner.response = Data(#"{"updated":true}"#.utf8)
+    try await service.edit(draft, item: item, vault: vault)
+    let input = try #require(runner.last()?.input)
+    let json = try #require(JSONSerialization.jsonObject(with: input) as? [String: Any])
+    #expect(json["expected_revision"] as? Int == 7)
+    let detail = try ItemDetail.decode(Data(#"{"revision":7,"item":{"content":{"title":"Synthetic","content":{"Note":null}}}}"#.utf8))
+    #expect(detail.revision == 7)
+    let conflict = try JSONDecoder().decode(HelperDiagnostic.self, from: Data(#"{"failure":"conflict"}"#.utf8))
+    #expect(conflict.message.contains("Reopen"))
+}
+
+@Test func malformedRevisionsCannotAuthorizeEditing() {
+    for revision in ["true", "-1", "1.5", "\"7\""] {
+        let json = "{\"revision\":" + revision + ",\"item\":{\"content\":{\"title\":\"Synthetic\",\"content\":{\"Note\":null}}}}"
+        #expect(throws: Error.self) { try ItemDetail.decode(Data(json.utf8)) }
+    }
+}
+
+@Test func verificationCodeUsesFreshPlanCheckedNativeCommand() async throws {
+    let runner = RecordingRunner(); runner.response = Data("123456\n".utf8)
+    let service = PassService(runner: runner)
+    let item = PassItem(itemID: "i", shareID: "s", title: "Synthetic", kind: "login")
+    #expect(try await service.totp(item) == "123456")
+    #expect(runner.last()?.arguments == ["native-totp", "--share-id", "s", "--item-id", "i"])
+    #expect(runner.last()?.input == nil)
+    runner.response = Data("not-a-code".utf8)
+    await #expect(throws: ProtonXError.self) { try await service.totp(item) }
+}

@@ -1,5 +1,5 @@
 diff --git a/pass-cli/Cargo.toml b/pass-cli/Cargo.toml
-index c1ac6ab..77605aa 100644
+index c1ac6ab..ef3cf74 100644
 --- a/pass-cli/Cargo.toml
 +++ b/pass-cli/Cargo.toml
 @@ -76,3 +76,6 @@ tempfile.workspace = true
@@ -8,7 +8,7 @@ index c1ac6ab..77605aa 100644
  no-login-restriction = []
 +
 +# Native ProtonX product protocol. This does not alter the default CLI policy.
-+protonx-desktop = []
++protonx-desktop = ["pass/protonx-native"]
 diff --git a/pass-cli/src/auth/terminal_event_handler.rs b/pass-cli/src/auth/terminal_event_handler.rs
 index 351ad0e..eb35728 100644
 --- a/pass-cli/src/auth/terminal_event_handler.rs
@@ -79,9 +79,18 @@ index f6909c3..2575108 100644
      };
  
 diff --git a/pass-cli/src/commands/item/list.rs b/pass-cli/src/commands/item/list.rs
-index e058ce4..1bec18a 100644
+index e058ce4..023a10e 100644
 --- a/pass-cli/src/commands/item/list.rs
 +++ b/pass-cli/src/commands/item/list.rs
+@@ -61,7 +61,7 @@ impl From<&ItemContent> for ItemType {
+ 
+ // Fields here must never carry user-provided secret material (no content, note, extra_fields).
+ #[derive(serde::Serialize)]
+-struct ItemSummary {
++pub(crate) struct ItemSummary {
+     id: ItemId,
+     share_id: ShareId,
+     vault_id: VaultId,
 @@ -73,6 +73,7 @@ struct ItemSummary {
      folder_id: Option<FolderId>,
      title: String,
@@ -170,30 +179,62 @@ index 2fed7a9..5673a84 100644
  const XOR_KEY_LENGTH: usize = 32;
  
 diff --git a/pass-cli/src/main.rs b/pass-cli/src/main.rs
-index 5530278..3122e77 100644
+index 5530278..e084eba 100644
 --- a/pass-cli/src/main.rs
 +++ b/pass-cli/src/main.rs
-@@ -40,6 +40,7 @@ mod env_config;
+@@ -40,6 +40,9 @@ mod env_config;
  mod features;
  mod helpers;
  mod logs;
++#[cfg(feature = "protonx-desktop")]
++mod native_ui;
 +mod protonx;
  mod storage;
  mod telemetry;
  mod utils;
-@@ -167,6 +168,9 @@ enum Commands {
+@@ -167,6 +170,34 @@ enum Commands {
          #[command(subcommand)]
          command: commands::share::ShareCommands,
      },
 +    #[cfg(feature = "protonx-desktop")]
 +    #[command(name = "native-capabilities", hide = true)]
 +    NativeCapabilities,
++    #[cfg(feature = "protonx-desktop")]
++    #[command(name = "native-snapshot", hide = true)]
++    NativeSnapshot,
++    #[cfg(feature = "protonx-desktop")]
++    #[command(name = "native-create", hide = true)]
++    NativeCreate {
++        #[arg(long)]
++        share_id: String,
++    },
++    #[cfg(feature = "protonx-desktop")]
++    #[command(name = "native-edit", hide = true)]
++    NativeEdit {
++        #[arg(long)]
++        share_id: String,
++        #[arg(long)]
++        item_id: String,
++    },
++    #[cfg(feature = "protonx-desktop")]
++    #[command(name = "native-totp", hide = true)]
++    NativeTotp {
++        #[arg(long)]
++        share_id: String,
++        #[arg(long)]
++        item_id: String,
++    },
      #[command(about = "User operations")]
      User {
          #[command(subcommand)]
-@@ -230,12 +234,22 @@ impl Commands {
+@@ -229,13 +260,37 @@ impl Commands {
+ #[tokio::main]
  async fn main() -> Result<()> {
      if let Err(e) = run().await {
++        #[cfg(feature = "protonx-desktop")]
++        if e.downcast_ref::<pass::NativeRevisionConflict>().is_some() {
++            utils::report_native_error("conflict", None, None);
++        }
          if e.is_session_invalidated() {
 +            utils::report_native_error("sessionInvalidated", None, None);
              eprintln!(
@@ -202,45 +243,79 @@ index 5530278..3122e77 100644
              eprintln!("Please log in again with: pass login");
              std::process::exit(1);
          }
-+        if let Some(error) = e.chain().find_map(|source| source.downcast_ref::<muon::Error>()) {
++        if let Some(error) = e
++            .chain()
++            .find_map(|source| source.downcast_ref::<muon::Error>())
++        {
 +            let failure = match error.kind() {
 +                muon::ErrorKind::Tls => "tls",
-+                muon::ErrorKind::Resolve | muon::ErrorKind::Dial | muon::ErrorKind::Connect | muon::ErrorKind::Send => "network",
++                muon::ErrorKind::Resolve
++                | muon::ErrorKind::Dial
++                | muon::ErrorKind::Connect
++                | muon::ErrorKind::Send => "network",
 +                muon::ErrorKind::Auth => "authentication",
 +                _ => "operation",
 +            };
-+            utils::report_native_error(failure, error.http_code().map(|code| code.as_u16()), error.proton_error_code());
++            utils::report_native_error(
++                failure,
++                error.http_code().map(|code| code.as_u16()),
++                error.proton_error_code(),
++            );
 +        }
          return Err(e);
      }
  
-@@ -245,6 +259,10 @@ async fn main() -> Result<()> {
+@@ -245,6 +300,12 @@ async fn main() -> Result<()> {
  async fn run() -> Result<()> {
      logs::setup_logs();
      let cli = Cli::parse();
-+    if !crate::protonx::policy().requires_cli_eligibility && !cli.command.is_native_desktop_supported() {
++    if !crate::protonx::policy().requires_cli_eligibility
++        && !cli.command.is_native_desktop_supported()
++    {
 +        crate::utils::report_native_error("operation", None, None);
 +        anyhow::bail!("This command is not exposed by the native desktop helper");
 +    }
  
      if cli.command.is_force_logout() {
          return commands::logout::force_logout().await;
-@@ -260,7 +278,7 @@ async fn run() -> Result<()> {
+@@ -260,10 +321,12 @@ async fn run() -> Result<()> {
  
      // Check for updates in the background (non-blocking, weekly check)
      // This runs for all commands except update itself to avoid recursion
 -    if !matches!(
-+    if std::env::var("PROTONX_NATIVE").as_deref() != Ok("1") && !matches!(
-         cli.command,
-         Commands::Update { .. } | Commands::Completions { .. }
-     ) {
-@@ -375,6 +393,13 @@ async fn run() -> Result<()> {
+-        cli.command,
+-        Commands::Update { .. } | Commands::Completions { .. }
+-    ) {
++    if std::env::var("PROTONX_NATIVE").as_deref() != Ok("1")
++        && !matches!(
++            cli.command,
++            Commands::Update { .. } | Commands::Completions { .. }
++        )
++    {
+         let _ = commands::update::check_for_updates_background(&base_dir).await;
+     }
+ 
+@@ -375,6 +438,27 @@ async fn run() -> Result<()> {
          .await;
  
      match cli.command {
 +        #[cfg(feature = "protonx-desktop")]
++        Commands::NativeSnapshot => native_ui::snapshot(client).await,
++        #[cfg(feature = "protonx-desktop")]
++        Commands::NativeTotp { share_id, item_id } => {
++            native_ui::totp(client, share_id, item_id).await
++        }
++        #[cfg(feature = "protonx-desktop")]
++        Commands::NativeCreate { share_id } => native_ui::create(client, share_id).await,
++        #[cfg(feature = "protonx-desktop")]
++        Commands::NativeEdit { share_id, item_id } => {
++            native_ui::edit(client, share_id, item_id).await
++        }
++        #[cfg(feature = "protonx-desktop")]
 +        Commands::NativeCapabilities => {
-+            if protonx::policy().requires_cli_eligibility { return Err(anyhow!("Native desktop transport required")); }
++            if protonx::policy().requires_cli_eligibility {
++                return Err(anyhow!("Native desktop transport required"));
++            }
 +            let plan = client.get_user_access().await?.plan;
 +            println!("{}", serde_json::json!({"totp_limit": plan.totp_limit}));
 +            Ok(())
@@ -248,7 +323,7 @@ index 5530278..3122e77 100644
          Commands::Logout { .. } => commands::logout::run(client).await,
          Commands::Info { output } => commands::info::run(client, base_dir, output, store).await,
          Commands::Inject {
-@@ -407,3 +432,54 @@ async fn run() -> Result<()> {
+@@ -407,3 +491,170 @@ async fn run() -> Result<()> {
          _ => Ok(()),
      }
  }
@@ -259,18 +334,39 @@ index 5530278..3122e77 100644
 +    fn is_native_desktop_supported(&self) -> bool {
 +        use commands::item::{ItemCommands, create::CreateCommands};
 +        match self {
-+            Self::Login { username: None, pat: None, .. } | Self::Logout { .. } => true,
-+            Self::Vault { command: commands::vault::VaultCommands::List { .. } } => true,
++            Self::Login {
++                username: None,
++                pat: None,
++                ..
++            }
++            | Self::Logout { .. } => true,
++            Self::Vault {
++                command: commands::vault::VaultCommands::List { .. },
++            } => true,
 +            Self::Item { command } => match command {
-+                ItemCommands::List { show_secrets: false, .. }
-+                | ItemCommands::View { .. } | ItemCommands::Trash { .. }
++                ItemCommands::List {
++                    show_secrets: false,
++                    ..
++                }
++                | ItemCommands::View {
++                    uri: None,
++                    field: None,
++                    ..
++                }
++                | ItemCommands::Trash { .. }
 +                | ItemCommands::Untrash { .. } => true,
-+                ItemCommands::Create { create_command: CreateCommands::Login { .. } | CreateCommands::Note { .. } } => true,
++                ItemCommands::Create {
++                    create_command: CreateCommands::Login { .. } | CreateCommands::Note { .. },
++                } => true,
 +                ItemCommands::Update { fields, .. } => fields == &["@stdin"],
 +                _ => false,
 +            },
 +            #[cfg(feature = "protonx-desktop")]
-+            Self::NativeCapabilities => true,
++            Self::NativeCapabilities
++            | Self::NativeSnapshot
++            | Self::NativeCreate { .. }
++            | Self::NativeEdit { .. }
++            | Self::NativeTotp { .. } => true,
 +            _ => false,
 +        }
 +    }
@@ -283,24 +379,622 @@ index 5530278..3122e77 100644
 +    fn desktop_rejects_cli_automation_and_bulk_secret_output() {
 +        for args in [
 +            vec!["pass-cli", "run", "--", "env"],
-+            vec!["pass-cli", "item", "list", "--output", "json", "--show-secrets"],
-+            vec!["pass-cli", "item", "delete", "--share-id", "synthetic", "--item-id", "synthetic"],
++            vec![
++                "pass-cli",
++                "item",
++                "list",
++                "--output",
++                "json",
++                "--show-secrets",
++            ],
++            vec![
++                "pass-cli",
++                "item",
++                "delete",
++                "--share-id",
++                "synthetic",
++                "--item-id",
++                "synthetic",
++            ],
 +            vec!["pass-cli", "login", "--pat", "synthetic"],
-+            vec!["pass-cli", "item", "update", "--field", "password=synthetic"],
++            vec![
++                "pass-cli",
++                "item",
++                "view",
++                "pass://synthetic/synthetic/totp",
++            ],
++            vec![
++                "pass-cli",
++                "item",
++                "update",
++                "--field",
++                "password=synthetic",
++            ],
 +        ] {
-+            assert!(!Cli::try_parse_from(args).unwrap().command.is_native_desktop_supported());
++            assert!(
++                !Cli::try_parse_from(args)
++                    .unwrap()
++                    .command
++                    .is_native_desktop_supported()
++            );
 +        }
++    }
++    #[cfg(feature = "protonx-desktop")]
++    #[test]
++    fn native_snapshot_and_editor_commands_are_desktop_only() {
++        for args in [
++            vec!["pass-cli", "native-snapshot"],
++            vec![
++                "pass-cli",
++                "native-totp",
++                "--share-id",
++                "synthetic",
++                "--item-id",
++                "synthetic",
++            ],
++            vec!["pass-cli", "native-create", "--share-id", "synthetic"],
++            vec![
++                "pass-cli",
++                "native-edit",
++                "--share-id",
++                "synthetic",
++                "--item-id",
++                "synthetic",
++            ],
++        ] {
++            assert!(
++                Cli::try_parse_from(args)
++                    .unwrap()
++                    .command
++                    .is_native_desktop_supported()
++            );
++        }
++    }
++    #[cfg(not(feature = "protonx-desktop"))]
++    #[test]
++    fn original_cli_does_not_expose_native_commands() {
++        assert!(Cli::try_parse_from(["pass-cli", "native-snapshot"]).is_err());
++        assert!(
++            Cli::try_parse_from(["pass-cli", "native-create", "--share-id", "synthetic"]).is_err()
++        );
 +    }
 +    #[test]
 +    fn desktop_accepts_native_ui_contracts() {
 +        for args in [
-+            vec!["pass-cli", "login"], vec!["pass-cli", "login", "--interactive"],
++            vec!["pass-cli", "login"],
++            vec!["pass-cli", "login", "--interactive"],
 +            vec!["pass-cli", "vault", "list", "--output", "json"],
-+            vec!["pass-cli", "item", "list", "--share-id", "synthetic", "--output", "json"],
-+            vec!["pass-cli", "item", "update", "--share-id", "synthetic", "--item-id", "synthetic", "--field", "@stdin"],
++            vec![
++                "pass-cli",
++                "item",
++                "list",
++                "--share-id",
++                "synthetic",
++                "--output",
++                "json",
++            ],
++            vec![
++                "pass-cli",
++                "item",
++                "update",
++                "--share-id",
++                "synthetic",
++                "--item-id",
++                "synthetic",
++                "--field",
++                "@stdin",
++            ],
 +        ] {
-+            assert!(Cli::try_parse_from(args).unwrap().command.is_native_desktop_supported());
++            assert!(
++                Cli::try_parse_from(args)
++                    .unwrap()
++                    .command
++                    .is_native_desktop_supported()
++            );
 +        }
++    }
++}
+diff --git a/pass-cli/src/native_ui.rs b/pass-cli/src/native_ui.rs
+new file mode 100644
+index 0000000..0b849dc
+--- /dev/null
++++ b/pass-cli/src/native_ui.rs
+@@ -0,0 +1,497 @@
++// Copyright (c) 2026 ProtonX contributors. GPL-3.0-or-later.
++// Native presentation/transport only: all cryptography and writes use Proton's SDK.
++use crate::helpers::CliPassClient;
++use anyhow::{Result, anyhow, ensure};
++use pass::PlanType;
++use pass::domain::{
++    Item, ItemContent, ItemData, ItemExtraField, ItemExtraFieldContent, ItemId, ItemState,
++    LoginItem, NoteItem, PermissionFlag, ShareId,
++};
++use serde::{Deserialize, Serialize};
++use std::{collections::HashSet, io::Read};
++
++#[derive(Serialize)]
++struct NativeVault {
++    name: String,
++    vault_id: String,
++    share_id: String,
++    can_create: bool,
++    can_update: bool,
++    can_trash: bool,
++}
++
++pub async fn snapshot(client: CliPassClient) -> Result<()> {
++    ensure!(
++        !crate::protonx::policy().requires_cli_eligibility,
++        "Native transport required"
++    );
++    let plan = client.get_user_access().await?.plan;
++    let mut vaults = vec![];
++    let mut active = vec![];
++    let mut trashed = vec![];
++    for vault in client.list_vaults().await? {
++        let share = client.get_share(&vault.share_id).await?;
++        let admin = share.has_permission(PermissionFlag::Admin);
++        for item in client.list_items(&vault.share_id).await? {
++            let summary = crate::commands::item::list::ItemSummary::from(&item);
++            match item.state {
++                ItemState::Active => active.push(summary),
++                ItemState::Trashed => trashed.push(summary),
++            }
++        }
++        vaults.push(NativeVault {
++            name: vault.content.name,
++            vault_id: vault.id.to_string(),
++            share_id: vault.share_id.to_string(),
++            can_create: admin || share.has_permission(PermissionFlag::Create),
++            can_update: admin || share.has_permission(PermissionFlag::Update),
++            can_trash: admin
++                || (share.has_permission(PermissionFlag::Trash)
++                    && share.has_permission(PermissionFlag::Delete)),
++        });
++    }
++    println!(
++        "{}",
++        serde_json::json!({"vaults":vaults,"items":active,"trashed_items":trashed,
++        "capabilities":{"totp_limit":plan.totp_limit,"custom_fields_allowed":plan.plan_type != PlanType::Free}})
++    );
++    Ok(())
++}
++
++#[derive(Deserialize)]
++#[serde(deny_unknown_fields)]
++struct FieldEdit {
++    source_index: Option<usize>,
++    expected_name: Option<String>,
++    expected_hidden: Option<bool>,
++    name: String,
++    value: String,
++    concealed: bool,
++    #[serde(default)]
++    remove: bool,
++}
++
++#[derive(Deserialize)]
++#[serde(deny_unknown_fields)]
++struct Draft {
++    kind: String,
++    title: String,
++    note: String,
++    username: Option<String>,
++    email: Option<String>,
++    password: Option<String>,
++    urls: Option<Vec<String>>,
++    totp_uri: Option<String>,
++    #[serde(default)]
++    custom_fields: Vec<FieldEdit>,
++    expected_revision: Option<u64>,
++}
++
++fn read_draft() -> Result<Draft> {
++    let mut input = zeroize::Zeroizing::new(String::new());
++    std::io::stdin().take(262145).read_to_string(&mut input)?;
++    ensure!(
++        input.len() <= 262144,
++        "Native item input exceeds size limit"
++    );
++    let draft: Draft = serde_json::from_str(&input)?;
++    ensure!(!draft.title.trim().is_empty(), "Item title is required");
++    ensure!(
++        matches!(draft.kind.as_str(), "login" | "note"),
++        "Unsupported native item kind"
++    );
++    if let Some(uri) = &draft.totp_uri {
++        ensure!(draft.kind == "login", "Only logins can have TOTP");
++        if !uri.is_empty() {
++            ensure!(
++                uri.starts_with("otpauth://totp/"),
++                "A TOTP setup URI is required"
++            );
++            proton_pass_common::totp::TOTP::from_uri(uri)
++                .map_err(|_| anyhow!("Invalid TOTP setup URI"))?;
++        }
++    }
++    Ok(draft)
++}
++
++fn apply_draft(content: &mut ItemData, draft: &Draft) -> Result<()> {
++    ensure!(
++        matches!(
++            (&content.content, draft.kind.as_str()),
++            (ItemContent::Login(_), "login") | (ItemContent::Note(_), "note")
++        ),
++        "Item kind changed"
++    );
++    content.title = draft.title.clone();
++    content.note = draft.note.clone();
++    if let ItemContent::Login(login) = &mut content.content {
++        if let Some(value) = &draft.username {
++            login.username = value.clone();
++        }
++        if let Some(value) = &draft.email {
++            login.email = value.clone();
++        }
++        if let Some(value) = &draft.password {
++            login.password = value.clone();
++        }
++        if let Some(value) = &draft.totp_uri {
++            login.totp_uri = value.clone();
++        }
++        if let Some(urls) = &draft.urls {
++            // Keep matching modes for unchanged modern entries. New addresses use
++            // the legacy/default URL list; passkeys and other content stay intact.
++            login
++                .autofill_urls
++                .retain(|entry| urls.contains(&entry.url));
++            login.urls = urls
++                .iter()
++                .filter(|url| !login.autofill_urls.iter().any(|entry| &entry.url == *url))
++                .cloned()
++                .collect();
++        }
++    }
++    let original_field_count = content.extra_fields.len();
++    let mut seen = HashSet::new();
++    let mut removed = vec![];
++    for field in &draft.custom_fields {
++        ensure!(
++            !field.name.trim().is_empty(),
++            "Custom field name is required"
++        );
++        let value = if field.concealed {
++            ItemExtraFieldContent::Hidden(field.value.clone())
++        } else {
++            ItemExtraFieldContent::Text(field.value.clone())
++        };
++        if let Some(index) = field.source_index {
++            ensure!(
++                index < original_field_count,
++                "Custom field changed; refresh before editing"
++            );
++            ensure!(seen.insert(index), "Duplicate custom field edit");
++            let original = content
++                .extra_fields
++                .get_mut(index)
++                .ok_or_else(|| anyhow!("Custom field changed; refresh before editing"))?;
++            let hidden = match original.content {
++                ItemExtraFieldContent::Hidden(_) => true,
++                ItemExtraFieldContent::Text(_) => false,
++                _ => return Err(anyhow!("This custom field type is read-only")),
++            };
++            ensure!(
++                field.expected_name.as_deref() == Some(original.name.as_str())
++                    && field.expected_hidden == Some(hidden),
++                "Custom field changed; refresh before editing"
++            );
++            if field.remove {
++                removed.push(index);
++            } else {
++                original.name = field.name.clone();
++                original.content = value;
++            }
++        } else {
++            ensure!(!field.remove, "Cannot remove an unsaved field");
++            content.extra_fields.push(ItemExtraField {
++                name: field.name.clone(),
++                content: value,
++            });
++        }
++    }
++    removed.sort_unstable();
++    for index in removed.into_iter().rev() {
++        content.extra_fields.remove(index);
++    }
++    Ok(())
++}
++
++fn totp_allowed(limit: Option<u16>, active: &[Item], existing: Option<&Item>) -> bool {
++    let Some(limit) = limit else {
++        return true;
++    };
++    let mut configured: Vec<&Item> = active.iter().filter(|item| item.state == ItemState::Active &&
++        matches!(&item.content.content, ItemContent::Login(login) if !login.totp_uri.is_empty())).collect();
++    configured.sort_by_key(|item| item.create_time);
++    if let Some(item) = existing {
++        if matches!(&item.content.content, ItemContent::Login(login) if !login.totp_uri.is_empty())
++        {
++            return configured
++                .iter()
++                .take(limit as usize)
++                .any(|candidate| candidate.id == item.id && candidate.share_id == item.share_id);
++        }
++    }
++    configured.len() < limit as usize
++}
++
++async fn guard_features(
++    client: &CliPassClient,
++    draft: &Draft,
++    existing: Option<&Item>,
++) -> Result<()> {
++    let plan = client.get_user_access().await?.plan;
++    ensure!(
++        draft.custom_fields.is_empty() || plan.plan_type != PlanType::Free,
++        "Custom fields are unavailable for this plan"
++    );
++    if draft.totp_uri.as_ref().is_some_and(|uri| !uri.is_empty()) && plan.totp_limit.is_some() {
++        let mut active = vec![];
++        for vault in client.list_vaults().await? {
++            active.extend(client.list_items(&vault.share_id).await?);
++        }
++        ensure!(
++            totp_allowed(plan.totp_limit, &active, existing),
++            "TOTP setup limit reached"
++        );
++    }
++    Ok(())
++}
++
++pub async fn create(client: CliPassClient, share_id: String) -> Result<()> {
++    ensure!(
++        !crate::protonx::policy().requires_cli_eligibility,
++        "Native transport required"
++    );
++    let draft = read_draft()?;
++    guard_features(&client, &draft, None).await?;
++    let content = if draft.kind == "note" {
++        ItemContent::Note(NoteItem)
++    } else {
++        ItemContent::Login(LoginItem {
++            email: String::new(),
++            username: String::new(),
++            password: String::new(),
++            urls: vec![],
++            totp_uri: String::new(),
++            passkeys: vec![],
++            autofill_urls: vec![],
++        })
++    };
++    let mut item = ItemData::new(
++        draft.title.clone(),
++        String::new(),
++        ItemData::generate_uuid(),
++        content,
++        vec![],
++    )?;
++    ensure!(
++        draft
++            .custom_fields
++            .iter()
++            .all(|field| field.source_index.is_none()),
++        "New items cannot refer to existing fields"
++    );
++    apply_draft(&mut item, &draft)?;
++    let id = client
++        .create_native_item(&ShareId::new(share_id), item)
++        .await?;
++    println!("{}", serde_json::json!({"item_id": id}));
++    Ok(())
++}
++
++pub async fn edit(client: CliPassClient, share_id: String, item_id: String) -> Result<()> {
++    ensure!(
++        !crate::protonx::policy().requires_cli_eligibility,
++        "Native transport required"
++    );
++    let draft = read_draft()?;
++    let share_id = ShareId::new(share_id);
++    let item_id = ItemId::new(item_id);
++    let details = client.view_item(&share_id, &item_id).await?;
++    let expected = draft
++        .expected_revision
++        .ok_or_else(|| anyhow!("Item revision is required"))?;
++    if expected != details.revision {
++        return Err(pass::NativeRevisionConflict.into());
++    }
++    ensure!(
++        details.item.state == ItemState::Active,
++        "Restore the item before editing"
++    );
++    guard_features(&client, &draft, Some(&details.item)).await?;
++    let mut content = details.item.content;
++    apply_draft(&mut content, &draft)?;
++    client
++        .update_native_item(&share_id, &item_id, content, expected)
++        .await?;
++    println!("{}", serde_json::json!({"updated": true}));
++    Ok(())
++}
++
++pub async fn totp(client: CliPassClient, share_id: String, item_id: String) -> Result<()> {
++    ensure!(
++        !crate::protonx::policy().requires_cli_eligibility,
++        "Native transport required"
++    );
++    let details = client
++        .view_item(&ShareId::new(share_id), &ItemId::new(item_id))
++        .await?;
++    ensure!(
++        details.item.state == ItemState::Active,
++        "Restore the item before using TOTP"
++    );
++    let login = match &details.item.content.content {
++        ItemContent::Login(login) if !login.totp_uri.is_empty() => login,
++        _ => return Err(anyhow!("This item has no login TOTP setup")),
++    };
++    let plan = client.get_user_access().await?.plan;
++    if plan.totp_limit.is_some() {
++        let mut items = vec![];
++        for vault in client.list_vaults().await? {
++            items.extend(client.list_items(&vault.share_id).await?);
++        }
++        ensure!(
++            totp_allowed(plan.totp_limit, &items, Some(&details.item)),
++            "TOTP access limit reached"
++        );
++    }
++    println!(
++        "{}",
++        crate::commands::item::totp::generate_totp_token(&login.totp_uri)?
++    );
++    Ok(())
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    fn content() -> ItemData {
++        let mut item = ItemData::new(
++            "Synthetic".into(),
++            "note".into(),
++            "synthetic".into(),
++            ItemContent::Login(LoginItem {
++                email: "alex@example.com".into(),
++                username: "alex".into(),
++                password: "SYNTHETIC".into(),
++                urls: vec!["https://example.com".into()],
++                totp_uri: "otpauth://totp/Synthetic?secret=JBSWY3DPEHPK3PXP".into(),
++                passkeys: vec![],
++                autofill_urls: vec![],
++            }),
++            vec![],
++        )
++        .unwrap();
++        item.extra_fields = vec![
++            ItemExtraField {
++                name: "Timestamp".into(),
++                content: ItemExtraFieldContent::Timestamp(123),
++            },
++            ItemExtraField {
++                name: "Recovery".into(),
++                content: ItemExtraFieldContent::Hidden("OLD-SYNTHETIC".into()),
++            },
++        ];
++        item
++    }
++    #[test]
++    fn native_edit_preserves_unedited_content_and_custom_types() {
++        let mut item = content();
++        let draft: Draft = serde_json::from_str(r#"{"kind":"login","title":"Renamed","note":"new","custom_fields":[{"source_index":1,"expected_name":"Recovery","expected_hidden":true,"name":"Recovery","value":"NEW-SYNTHETIC","concealed":true}]}"#).unwrap();
++        apply_draft(&mut item, &draft).unwrap();
++        assert_eq!(item.title, "Renamed");
++        assert_eq!(
++            item.extra_fields[0].content,
++            ItemExtraFieldContent::Timestamp(123)
++        );
++        assert_eq!(
++            item.extra_fields[1].content,
++            ItemExtraFieldContent::Hidden("NEW-SYNTHETIC".into())
++        );
++        if let ItemContent::Login(login) = item.content {
++            assert_eq!(login.password, "SYNTHETIC");
++            assert_eq!(login.urls, ["https://example.com"]);
++            assert!(!login.totp_uri.is_empty());
++        } else {
++            panic!();
++        }
++    }
++    #[test]
++    fn native_edit_rejects_stale_or_readonly_custom_fields() {
++        for index in [0, 1, 5] {
++            let draft: Draft = serde_json::from_value(serde_json::json!({"kind":"login","title":"Test","note":"","custom_fields":[{"source_index":index,"expected_name":"Wrong","expected_hidden":true,"name":"New","value":"Synthetic","concealed":false}]})).unwrap();
++            assert!(apply_draft(&mut content(), &draft).is_err());
++        }
++    }
++    #[test]
++    fn native_edit_preserves_modern_url_matching_modes() {
++        let mut item = content();
++        if let ItemContent::Login(login) = &mut item.content {
++            login.autofill_urls.push(pass::domain::AutofillUrl {
++                url: "https://example.org".into(),
++                mode: pass::domain::AutofillUrlMode::Never,
++            });
++        }
++        let draft:Draft=serde_json::from_str(r#"{"kind":"login","title":"Test","note":"","urls":["https://example.org","https://new.example.com"]}"#).unwrap();
++        apply_draft(&mut item, &draft).unwrap();
++        if let ItemContent::Login(login) = item.content {
++            assert_eq!(
++                login.autofill_urls[0].mode,
++                pass::domain::AutofillUrlMode::Never
++            );
++            assert_eq!(login.urls, ["https://new.example.com"]);
++        }
++    }
++    fn synthetic_item(id: &str, created: &str, state: ItemState) -> Item {
++        Item {
++            id: ItemId::new(id.to_string()),
++            share_id: ShareId::new("synthetic-share".into()),
++            vault_id: pass::domain::VaultId::new("synthetic-vault".into()),
++            content: content(),
++            state,
++            flags: vec![],
++            create_time: created.parse().unwrap(),
++            modify_time: created.parse().unwrap(),
++            folder_id: None,
++            alias_email: None,
++        }
++    }
++    #[test]
++    fn native_totp_limits_exclude_trash_and_rank_existing_setup() {
++        let early = synthetic_item("early", "2026-01-01T00:00:00", ItemState::Active);
++        let later = synthetic_item("later", "2026-02-01T00:00:00", ItemState::Active);
++        let trash = synthetic_item("trashed", "2025-01-01T00:00:00", ItemState::Trashed);
++        let items = [later.clone(), trash, early.clone()];
++        assert!(!totp_allowed(Some(0), &items, None));
++        assert!(!totp_allowed(Some(1), &items, None));
++        assert!(totp_allowed(Some(1), &items, Some(&early)));
++        assert!(!totp_allowed(Some(1), &items, Some(&later)));
++        assert!(totp_allowed(Some(3), &items, None));
++        assert!(totp_allowed(None, &items, None));
++    }
++    #[test]
++    fn native_snapshot_summary_excludes_all_secret_content() {
++        let item = synthetic_item("synthetic", "2026-01-01T00:00:00", ItemState::Active);
++        let value =
++            serde_json::to_value(crate::commands::item::list::ItemSummary::from(&item)).unwrap();
++        let json = value.to_string();
++        assert!(value.get("has_totp").unwrap().as_bool().unwrap());
++        for secret in [
++            "SYNTHETIC",
++            "alex@example.com",
++            "OLD-SYNTHETIC",
++            "otpauth:",
++            "extra_fields",
++            "password",
++            "note",
++        ] {
++            assert!(!json.contains(secret));
++        }
++    }
++    #[test]
++    fn native_edit_cannot_target_a_newly_appended_field() {
++        let draft: Draft = serde_json::from_str(r#"{"kind":"login","title":"Test","note":"","custom_fields":[{"name":"New","value":"Synthetic","concealed":false},{"source_index":2,"expected_name":"New","expected_hidden":false,"name":"Changed","value":"Synthetic","concealed":false}]}"#).unwrap();
++        assert!(apply_draft(&mut content(), &draft).is_err());
++    }
++    #[test]
++    fn native_custom_deletion_keeps_other_original_indices_and_new_fields() {
++        let mut item = content();
++        let draft: Draft = serde_json::from_str(r#"{"kind":"login","title":"Test","note":"","custom_fields":[{"source_index":1,"expected_name":"Recovery","expected_hidden":true,"name":"Recovery","value":"","concealed":true,"remove":true},{"name":"Added","value":"Synthetic","concealed":false}]}"#).unwrap();
++        apply_draft(&mut item, &draft).unwrap();
++        assert_eq!(item.extra_fields.len(), 2);
++        assert_eq!(
++            item.extra_fields[0].content,
++            ItemExtraFieldContent::Timestamp(123)
++        );
++        assert_eq!(item.extra_fields[1].name, "Added");
 +    }
 +}
 diff --git a/pass-cli/src/protonx.rs b/pass-cli/src/protonx.rs
@@ -431,6 +1125,18 @@ index 474bb3a..7894760 100644
 +        let _ = std::io::stderr().flush();
 +    }
 +}
+diff --git a/pass/Cargo.toml b/pass/Cargo.toml
+index 4138815..0898da4 100644
+--- a/pass/Cargo.toml
++++ b/pass/Cargo.toml
+@@ -4,6 +4,7 @@ version = "2.4.2"
+ edition = "2024"
+ 
+ [features]
++protonx-native = []
+ default = []
+ tokio-runtime = ["dep:tokio", "dep:async-compat", "muon/transport-hyper"]
+ wasm = [
 diff --git a/pass/src/auth/callbacks.rs b/pass/src/auth/callbacks.rs
 index 72c33c5..316d156 100644
 --- a/pass/src/auth/callbacks.rs
@@ -611,3 +1317,420 @@ index 389475a..2510026 100644
 +        assert!(decrypt_payload(&key, "c2hvcnQ=").is_err());
 +    }
 +}
+diff --git a/pass/src/item/create/login.rs b/pass/src/item/create/login.rs
+index ea36cc9..f272454 100644
+--- a/pass/src/item/create/login.rs
++++ b/pass/src/item/create/login.rs
+@@ -178,4 +178,116 @@ mod tests {
+         assert_eq!(1, login_item.urls.len());
+         assert_eq!(ITEM_WEBSITE, login_item.urls[0]);
+     }
++    #[cfg(feature = "protonx-native")]
++    #[muon_test::test]
++    async fn test_create_native_login_with_notes_and_custom_fields(server: muon_test::Server) {
++        let (raw_client, api) = server.client::<()>();
++        const ITEM_TITLE: &str = "MyItem";
++        const ITEM_EMAIL: &str = "my@item.email.local";
++        const ITEM_USERNAME: &str = "MyUsername";
++        const ITEM_PASSWORD: &str = "MyPassword";
++        const ITEM_WEBSITE: &str = "http://example.local";
++        const SHARE_ID: &str = "MyShareID";
++        const ITEM_ID: &str = "MyItemID";
++
++        let client = make_test_pass_client_with_setup(raw_client, &api, PlanType::Plus).await;
++        setup_share_keys(&api, SHARE_ID);
++        setup_vault_share(&api, SHARE_ID);
++
++        let handled = api.handler_with_method(
++            Method::POST,
++            format!("/pass/v1/share/{SHARE_ID}/item"),
++            move |_| {
++                success(CreateItemResponse {
++                    item: ItemRevision {
++                        item_id: ITEM_ID.to_string(),
++                        revision: 0,
++                        content_format_version: 0,
++                        key_rotation: 0,
++                        content: "".to_string(),
++                        item_key: None,
++                        state: 0,
++                        flags: 0,
++                        alias_email: None,
++                        create_time: 0,
++                        modify_time: 0,
++                        folder_id: None,
++                    },
++                })
++            },
++        );
++
++        let recorder = api.new_recorder();
++        let item_id = client
++            .create_native_item(
++                &share_id!(SHARE_ID),
++                ItemData::new(
++                    ITEM_TITLE.to_string(),
++                    "Synthetic login note".to_string(),
++                    "synthetic-uuid".to_string(),
++                    crate::domain::ItemContent::Login(crate::domain::LoginItem {
++                        email: ITEM_EMAIL.to_string(),
++                        username: ITEM_USERNAME.to_string(),
++                        password: ITEM_PASSWORD.to_string(),
++                        urls: vec![ITEM_WEBSITE.to_string(), "https://example.org".to_string()],
++                        totp_uri: String::new(),
++                        passkeys: vec![],
++                        autofill_urls: vec![],
++                    }),
++                    vec![crate::domain::ItemExtraField {
++                        name: "Recovery".to_string(),
++                        content: crate::domain::ItemExtraFieldContent::Hidden(
++                            "SYNTHETIC-CUSTOM".to_string(),
++                        ),
++                    }],
++                )
++                .unwrap(),
++            )
++            .await
++            .expect("Should be able to create the item");
++
++        assert_hit!(handled);
++
++        assert_eq!(ITEM_ID, item_id.value());
++
++        let request: CreateItemRequest = last_request!(recorder);
++
++        // Check item is properly encrypted and contains the right contents
++        let decoded_encrypted_item_key = crate::utils::b64_decode(&request.item_key).unwrap();
++        let decrypted_item_key = crate::domain::crypto::decrypt(
++            &decoded_encrypted_item_key,
++            &TEST_SHARE_KEY,
++            EncryptionTag::ItemKey,
++        )
++        .expect("Should be able to decrypt item key");
++        assert_eq!(32, decrypted_item_key.len());
++
++        let decoded_item_content = crate::utils::b64_decode(&request.content).unwrap();
++        let decrypted_item_content = crate::domain::crypto::decrypt(
++            &decoded_item_content,
++            &decrypted_item_key,
++            EncryptionTag::ItemContent,
++        )
++        .expect("Should be able to decrypt item content");
++
++        let parsed_item_content = ItemData::deserialize(&decrypted_item_content)
++            .expect("Should be able to deserialize ItemData");
++        assert_eq!(ITEM_TITLE, parsed_item_content.title);
++
++        assert_eq!(parsed_item_content.note, "Synthetic login note");
++        assert_eq!(
++            parsed_item_content.extra_fields[0].content,
++            crate::domain::ItemExtraFieldContent::Hidden("SYNTHETIC-CUSTOM".to_string())
++        );
++        let login_item = match parsed_item_content.content {
++            ItemContent::Login(login_item) => login_item,
++            _ => panic!("Should be able a Login"),
++        };
++
++        assert_eq!(ITEM_EMAIL, login_item.email);
++        assert_eq!(ITEM_USERNAME, login_item.username);
++        assert_eq!(ITEM_PASSWORD, login_item.password);
++        assert_eq!(2, login_item.urls.len());
++        assert_eq!(ITEM_WEBSITE, login_item.urls[0]);
++    }
+ }
+diff --git a/pass/src/item/create/mod.rs b/pass/src/item/create/mod.rs
+index 1bd2057..b2feade 100644
+--- a/pass/src/item/create/mod.rs
++++ b/pass/src/item/create/mod.rs
+@@ -30,6 +30,48 @@ pub mod note;
+ pub mod ssh_key;
+ pub mod wifi;
+ 
++// Native forms reuse the standard single-item request/encryption path.
++#[cfg(feature = "protonx-native")]
++impl<C: crate::PassClientContext> crate::PassClient<C> {
++    pub async fn create_native_item(
++        &self,
++        share_id: &crate::domain::ShareId,
++        content: crate::domain::ItemData,
++    ) -> anyhow::Result<crate::domain::ItemId> {
++        use crate::domain::ItemContent;
++        anyhow::ensure!(
++            matches!(
++                &content.content,
++                ItemContent::Login(_) | ItemContent::Note(_)
++            ),
++            "Native creation supports logins and notes"
++        );
++        self.action_guard(crate::permission::PermissionAction::CreateItem {
++            share_id: share_id.clone(),
++        })
++        .await?;
++        let request = self
++            .create_item_request_from_data(share_id, content, None)
++            .await?;
++        self.send_create_item_request(share_id, request).await
++    }
++    pub async fn update_native_item(
++        &self,
++        share_id: &crate::domain::ShareId,
++        item_id: &crate::domain::ItemId,
++        content: crate::domain::ItemData,
++        expected_revision: u64,
++    ) -> anyhow::Result<()> {
++        self.action_guard(crate::permission::PermissionAction::UpdateItem {
++            share_id: share_id.clone(),
++            item_id: item_id.clone(),
++        })
++        .await?;
++        self.update_item_checked(share_id, item_id, content, Some(expected_revision))
++            .await
++    }
++}
++
+ #[derive(Clone, Debug)]
+ pub(crate) struct ItemCreatedEvent {
+     pub item_type: ItemType,
+@@ -46,3 +88,129 @@ impl TelemetryEvent for ItemCreatedEvent {
+         map
+     }
+ }
++
++#[cfg(all(test, feature = "protonx-native"))]
++mod native_permission_tests {
++    use crate::domain::{
++        ItemContent, ItemData, ItemId, NoteItem, PermissionFlag, ShareId, TargetType,
++    };
++    use crate::test_tools::*;
++    use crate::{PassClient, PlanType};
++
++    #[muon_test::test]
++    async fn native_create_and_update_refuse_readonly_shares_before_write(
++        server: muon_test::Server,
++    ) {
++        let (raw_client, api) = server.client::<()>();
++        let client: PassClient<_> =
++            make_test_pass_client_with_setup(raw_client, &api, PlanType::Plus).await;
++        let share = crate::share::list::ShareResponse {
++            share_id: "readonly".into(),
++            address_id: TEST_ADDRESS_ID.into(),
++            vault_id: TEST_VAULT_ID.into(),
++            target_type: TargetType::Vault.value(),
++            target_id: TEST_VAULT_ID.into(),
++            owner: false,
++            permission: PermissionFlag::Read.value(),
++            share_role_id: "3".into(),
++            content: None,
++            content_key_rotation: None,
++            content_format_version: None,
++            expiration_time: None,
++            create_time: 0,
++            group_id: None,
++        };
++        api.handler_with_method(Method::GET, "/pass/v1/share/readonly", move |_| {
++            success(share.clone())
++        });
++        let create = api.handler_with_method(Method::POST, "/pass/v1/share/readonly/item", |_| {
++            success_code()
++        });
++        let update = api.handler_with_method(
++            Method::PUT,
++            "/pass/v1/share/readonly/item/synthetic",
++            |_| success_code(),
++        );
++        let content = ItemData::new(
++            "Synthetic".into(),
++            "Demo".into(),
++            "synthetic".into(),
++            ItemContent::Note(NoteItem),
++            vec![],
++        )
++        .unwrap();
++        let share_id = ShareId::new("readonly".into());
++        assert!(
++            client
++                .create_native_item(&share_id, content.clone())
++                .await
++                .is_err()
++        );
++        assert!(
++            client
++                .update_native_item(&share_id, &ItemId::new("synthetic".into()), content, 0)
++                .await
++                .is_err()
++        );
++        assert_not_hit!(create);
++        assert_not_hit!(update);
++    }
++    #[muon_test::test]
++    async fn native_update_refuses_changed_revision_before_encryption_or_write(
++        server: muon_test::Server,
++    ) {
++        let (raw_client, api) = server.client::<()>();
++        let client = make_test_pass_client_with_setup(raw_client, &api, PlanType::Plus).await;
++        setup_vault_share(&api, "synthetic-share");
++        api.handler_with_method(
++            Method::GET,
++            "/pass/v1/share/synthetic-share/item/synthetic",
++            |_| {
++                success(crate::item::get_one::GetItemResponse {
++                    item: crate::item::list::ItemRevision {
++                        item_id: "synthetic".into(),
++                        revision: 6,
++                        content_format_version: 1,
++                        key_rotation: 0,
++                        content: "not-encrypted-on-purpose".into(),
++                        item_key: None,
++                        state: 0,
++                        flags: 0,
++                        alias_email: None,
++                        create_time: 0,
++                        modify_time: 0,
++                        folder_id: None,
++                    },
++                })
++            },
++        );
++        let update = api.handler_with_method(
++            Method::PUT,
++            "/pass/v1/share/synthetic-share/item/synthetic",
++            |_| success_code(),
++        );
++        let content = ItemData::new(
++            "Synthetic".into(),
++            "Demo".into(),
++            "synthetic".into(),
++            ItemContent::Note(NoteItem),
++            vec![],
++        )
++        .unwrap();
++        let error = client
++            .update_native_item(
++                &ShareId::new("synthetic-share".into()),
++                &ItemId::new("synthetic".into()),
++                content,
++                5,
++            )
++            .await
++            .unwrap_err();
++        assert!(
++            error
++                .downcast_ref::<crate::NativeRevisionConflict>()
++                .is_some()
++        );
++        assert_not_hit!(update);
++    }
++}
+diff --git a/pass/src/item/get_one.rs b/pass/src/item/get_one.rs
+index c26909b..bbe8a0a 100644
+--- a/pass/src/item/get_one.rs
++++ b/pass/src/item/get_one.rs
+@@ -35,6 +35,8 @@ use pass_derive::sdk_export;
+ pub struct ItemDetails {
+     pub item: Item,
+     pub attachments: Vec<ItemAttachment>,
++    #[cfg(feature = "protonx-native")]
++    pub revision: u64,
+ }
+ 
+ #[derive(Debug, serde::Deserialize, serde::Serialize)]
+@@ -93,6 +95,8 @@ impl<C: PassClientContext> PassClient<C> {
+             .await
+             .context("Error fetching item")?;
+ 
++        #[cfg(feature = "protonx-native")]
++        let revision = item_revision.revision;
+         let opened = self
+             .open_items(share_id, vec![item_revision])
+             .await
+@@ -107,7 +111,12 @@ impl<C: PassClientContext> PassClient<C> {
+             .await
+             .context("Error fetching attachments")?;
+ 
+-        Ok(ItemDetails { item, attachments })
++        Ok(ItemDetails {
++            item,
++            attachments,
++            #[cfg(feature = "protonx-native")]
++            revision,
++        })
+     }
+ 
+     async fn retrieve_attachments(
+diff --git a/pass/src/item/mod.rs b/pass/src/item/mod.rs
+index 34f94c4..bc691c3 100644
+--- a/pass/src/item/mod.rs
++++ b/pass/src/item/mod.rs
+@@ -34,3 +34,6 @@ mod revisions;
+ mod share;
+ mod trash;
+ mod update;
++
++#[cfg(feature = "protonx-native")]
++pub use update::NativeRevisionConflict;
+diff --git a/pass/src/item/update.rs b/pass/src/item/update.rs
+index 5d3c0db..4f2508a 100644
+--- a/pass/src/item/update.rs
++++ b/pass/src/item/update.rs
+@@ -60,12 +60,32 @@ impl<C: PassClientContext> PassClient<C> {
+         share_id: &ShareId,
+         item_id: &ItemId,
+         new_content: ItemData,
++    ) -> Result<()> {
++        self.update_item_checked(share_id, item_id, new_content, None)
++            .await
++    }
++
++    pub(crate) async fn update_item_checked(
++        &self,
++        share_id: &ShareId,
++        item_id: &ItemId,
++        new_content: ItemData,
++        expected_revision: Option<u64>,
+     ) -> Result<()> {
+         let item_revision = self
+             .fetch_item_revision(share_id, item_id)
+             .await
+             .context("Error fetching item revision")?;
+ 
++        #[cfg(feature = "protonx-native")]
++        if expected_revision.is_some_and(|expected| expected != item_revision.revision)
++            || (expected_revision.is_some() && item_revision.state != 0)
++        {
++            return Err(NativeRevisionConflict.into());
++        }
++        #[cfg(not(feature = "protonx-native"))]
++        let _ = expected_revision;
++
+         let item_type = ItemType::from_content(&new_content.content);
+ 
+         let item_key = self
+@@ -124,3 +144,15 @@ impl<C: PassClientContext> PassClient<C> {
+         Ok(())
+     }
+ }
++
++#[cfg(feature = "protonx-native")]
++#[derive(Debug)]
++pub struct NativeRevisionConflict;
++#[cfg(feature = "protonx-native")]
++impl std::fmt::Display for NativeRevisionConflict {
++    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
++        formatter.write_str("Item revision changed; reopen before editing")
++    }
++}
++#[cfg(feature = "protonx-native")]
++impl std::error::Error for NativeRevisionConflict {}
+diff --git a/pass/src/lib.rs b/pass/src/lib.rs
+index 5a55781..757bc9d 100644
+--- a/pass/src/lib.rs
++++ b/pass/src/lib.rs
+@@ -84,6 +84,8 @@ pub use domain::{ClientFeatures, LocalKeyProvider};
+ pub use error::{AnyhowErrorExt, SessionInvalidatedError};
+ pub use first_time_setup::FirstTimeSetupKey;
+ pub use folder::create::CreateFolderPayload;
++#[cfg(feature = "protonx-native")]
++pub use item::NativeRevisionConflict;
+ pub use item::create::{credit_card, custom, identity, login, note, ssh_key, wifi};
+ pub use item::find::FindItemQuery;
+ pub use organization::{

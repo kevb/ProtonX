@@ -4,6 +4,16 @@ See the [2026-10-06 official-client gap analysis](GAP_ANALYSIS.md) for the
 ordered Pass-first work plan and acceptance gates. Sign-in and a verified
 end-to-end workflow come before additional products.
 
+## Completed native foundations
+
+- Atomic metadata/Trash snapshot, permission-aware actions and last-success state.
+- Native selection, filters, sorting, empty states and synthetic preview isolation.
+- Login/note editing with multiple websites, notes, TOTP and text/hidden custom fields.
+- Revision conflict protection, draft retention and acknowledged-save handling.
+- Compile-only AutoFill feasibility contracts and offline storage review.
+
+These have synthetic/source validation; remote writes and recovery are still gates.
+
 ## Before a daily-use Pass release
 
 - Validate the new desktop protocol backend on non-CLI-eligible accounts,

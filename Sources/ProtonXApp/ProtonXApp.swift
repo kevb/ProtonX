@@ -13,7 +13,7 @@ struct ProtonXApp: App {
             CommandGroup(replacing: .appInfo) { Button("About ProtonX…") { NSApp.orderFrontStandardAboutPanel(options: [
                 .applicationName: "ProtonX", .applicationVersion: "0.1.0", .credits: NSAttributedString(string: "Independent native clients for Proton.\nGPL-3.0-or-later. No warranty.\nCopyright © 2026 ProtonX contributors.\nIncludes Proton Pass © Proton AG.\nSource and license: github.com/kevb/ProtonX\nNot affiliated with Proton AG.")]) } }
             CommandGroup(replacing: .newItem) {
-                Button("New Pass Item") { NotificationCenter.default.post(name: .protonXNewItem, object: nil) }.keyboardShortcut("n").disabled(pass.phase != .open || pass.busy)
+                Button("New Pass Item") { NotificationCenter.default.post(name: .protonXNewItem, object: nil) }.keyboardShortcut("n").disabled(!pass.canCreate)
             }
             CommandMenu("Products") {
                 Button("Open Pass") { SystemIntegration.shared.openPass?() }.keyboardShortcut("1")
@@ -28,7 +28,10 @@ struct ProtonXApp: App {
                 Link("Report an Issue", destination: URL(string: "https://github.com/kevb/ProtonX/issues")!)
             }
         }
-        Window("ProtonX Mail", id: "mail") { MailWindow().tint(.purple) }.defaultSize(width: 1000, height: 720)
+        Window("ProtonX Mail", id: "mail") {
+            if pass.previewOnly { ContentUnavailableView("Pass preview", systemImage: "testtube.2", description: Text("This preview uses synthetic Pass data only.")) }
+            else { MailWindow().tint(.purple) }
+        }.defaultSize(width: 1000, height: 720)
         Settings { SettingsView() }
     }
 }
