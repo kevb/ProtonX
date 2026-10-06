@@ -7516,6 +7516,7 @@ dependencies = [
  "futures",
  "html2text",
  "mail-account-uniffi",
+ "mail-html-transformer",
  "mail-issue-reporter-service",
  "mail-issue-reporter-service-uniffi",
  "mail-stash",

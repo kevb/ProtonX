@@ -165,3 +165,14 @@ private func mailFixture(_ script: String) throws -> (URL, URL) {
         #expect(!failure.localizedDescription.contains("sign in"))
     }
 }
+
+@Test func mailRichContentIsOptionalBoundedAndRequiresTextFallback() throws {
+    struct Packet: Encodable { let schema = 1; let id = 1; let result: NativeMailResult }
+    for result in [NativeMailResult(sanitizedHTML: "<p>Synthetic</p>"), NativeMailResult(body: "Synthetic", sanitizedHTML: String(repeating: "x", count: 2 * 1024 * 1024 + 1))] {
+        #expect(throws: ProtonXError.invalidResponse) { try NativeMailProcess.decode(JSONEncoder().encode(Packet(result: result)), expectedID: 1) }
+    }
+    let decoded = try NativeMailProcess.decode(JSONEncoder().encode(Packet(result: .init(id: 11, body: "Synthetic", sanitizedHTML: "<h1>Synthetic</h1>"))), expectedID: 1)
+    #expect(decoded.sanitizedHTML == "<h1>Synthetic</h1>")
+    let legacy = try NativeMailProcess.decode(Data(#"{"schema":1,"id":1,"result":{"id":11,"body":"Literal <h1>plain text</h1>"}}"#.utf8), expectedID: 1)
+    #expect(legacy.sanitizedHTML == nil)
+}

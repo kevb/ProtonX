@@ -21,6 +21,7 @@ async-trait = { workspace = true }
 protonx-mail-storage = { path = "../protonx-mail-storage", default-features = false }
 zeroize = { workspace = true, optional = true }
 mail-stash = { workspace = true }
+mail-html-transformer = { workspace = true }
 
 [features]
 # Explicit opt-in while migration/attachment storage is being validated.

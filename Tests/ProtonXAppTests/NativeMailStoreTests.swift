@@ -299,3 +299,21 @@ private let linkedDraft = NativeMailDraft(token: 3, sender: "alex.demo@gmail.com
     try? await Task.sleep(for: .milliseconds(500))
     #expect(stopped.calls == ["restore", "snapshot"]); #expect(locked.messages.isEmpty)
 }
+
+@Test @MainActor func mailRichContentClearsOnSelectionChangeAndLock() async {
+    let runner = SyntheticMailRunner([
+        .init(method: "login", result: .init(phase: .connected)),
+        .init(method: "snapshot", result: mailSnapshot),
+        .init(method: "message", result: .init(id: 11, body: "Synthetic", sanitizedHTML: "<h1>Synthetic</h1>")),
+        .init(method: "message", result: .init(id: 11, body: "Late synthetic", sanitizedHTML: "<h1>Late synthetic</h1>"), delay: .milliseconds(100))
+    ])
+    let store = mailStore(runner)
+    store.signIn(username: "demo@example.com", password: "SYNTHETIC")
+    await waitForMail { !store.busy }
+    store.selectedItem = 11; store.select()
+    await waitForMail { store.sanitizedHTML != nil }
+    store.select(); #expect(store.sanitizedHTML == nil)
+    store.lock()
+    try? await Task.sleep(for: .milliseconds(160))
+    #expect(store.body == nil); #expect(store.sanitizedHTML == nil)
+}

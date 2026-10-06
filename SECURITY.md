@@ -115,10 +115,20 @@ include passwords, tokens, real message bodies or vault exports in public issues
   New text is limited to 32 KiB, recipients to 100 distinct addresses and subjects
   to 998 bytes without control characters. Editor text is not persisted in
   preferences. Save explicitly before lock; unsaved UI text is discarded.
-- Mail renders plain text. HTML, scripts and remote images are not loaded. Native
-  HTML is converted to text without a browser; the SDK owns MIME/decryption. The Bridge MIME
-  reader is intentionally limited, with bounded recursion; it is not a complete
-  standards-compliant MIME implementation. Attachments are counted, not opened.
+- Native Mail preserves HTML structure using Proton's pinned whitelist/CSS
+  sanitizer in the helper, with depth/node/output bounds and a text fallback.
+  The selected sanitized body is displayed in an ephemeral local WKWebView, with
+  content JavaScript disabled, a deny-by-default CSP and a compiled block-all
+  resource rule installed before loading. No file base URL, account session,
+  cookies or helper API bridge is provided. Frames/forms/media and remote/embedded
+  images remain disabled. Navigation is refused except for the app's in-memory
+  document; allowed HTTP(S)/mailto links require a user-confirmed external open.
+  The reader uses fixed light paper; it does not attempt automatic dark recolouring.
+  Trusted constant layout code runs only in WebKit's isolated client content world.
+  Lock/selection change destroys the selected view and rejects late body results;
+  this is not a WebKit process-memory zeroization guarantee. The SDK owns MIME
+  and decryption. Bridge retains its limited bounded-recursion plain-text MIME
+  reader. Attachments are counted, not opened. See docs/MAIL_RENDERING.md.
 - No telemetry is added. Upstream Pass telemetry is disabled. Upstream automatic
   update checks are skipped by the patched helper in native mode. No auto-updater
   silently replaces this patched executable.

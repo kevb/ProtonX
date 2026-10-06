@@ -547,3 +547,40 @@ that the new CI run has completed.
   verification. It is staged at `build/ProtonX Mail Design Update.app`; the running
   account-capable app was not replaced. No real account was accessed for this
   design validation, and private reference screenshots were not added to Git.
+
+## Formatted native Mail reader — 2026-10-06
+
+- All 105 Swift contracts passed in the final run. New coverage bounds the
+  additive HTML reply field, preserves text-only compatibility, clears rich bodies
+  on selection/lock and rejects late results. An earlier run hit an existing
+  Pass wait contract's deadline during heavy compilation; later full runs passed
+  without changes to Pass behavior.
+- All 15 Mail helper tests passed, including four reader contracts covering styled
+  newsletter tables/headings/lists/quotes/entities, malformed markup, literal
+  plaintext, sanitizer removal of active content, disabled remote/embedded content
+  and depth/size bounds. The helper uses the already-pinned Proton transformer;
+  the lockfile adds its direct dependency without changing package versions.
+- All 55 selected upstream/developer Mail contracts passed (paging, body
+  decryption, storage boundary, constructors, recipients, sending and linked-Gmail
+  sender handling), plus eight synthetic helper storage-preflight refusals.
+  Independent native Mail identity/privacy/source contracts passed.
+- Native WebKit contracts exercised structure and content replacement, white
+  paper, disabled inline scripts/event handlers, a closed external-link policy
+  and cancelled in-view navigation. A disposable local endpoint received zero
+  requests from image, frame, script and CSS URLs in the synthetic document.
+  This tests the renderer's defenses independently of helper sanitization.
+- Dark/light previews showed a synthetic newsletter with styles, headings, a
+  table, lists and a quoted reply. The native walkthrough verified expanded-reader
+  reflow, full-body scrolling, external-link confirmation/cancellation, switching
+  between formatted/plain views, selecting a plaintext fixture and lock.
+  No account or private message was accessed; supplied reference screenshots were
+  not copied into the repository.
+- Images (including embedded images) and attachments remain unavailable. This
+  adds rich reading, not a rich editor or new sending behavior. Bridge retains
+  its existing plaintext reader. See [MAIL_RENDERING.md](MAIL_RENDERING.md).
+
+The optimized Mail helper and normal Swift app built successfully. The staged
+`build/ProtonX Mail Rendering Update.app` passed strict nested signature
+verification using the configured local certificate. No running account-capable
+bundle was replaced, and no app was installed in Applications. CI results remain
+separate from these local checks.

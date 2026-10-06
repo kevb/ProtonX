@@ -276,7 +276,7 @@ struct MailWindow: View {
                                 }.disabled(store.busy || store.body == nil || store.draft != nil)
                             }.padding(22).frame(maxWidth: .infinity, alignment: .leading)
                             Divider()
-                            if let body = store.body { MailMessagePaper(text: body) }
+                            if let body = store.body { MailMessageContent(text: body, sanitizedHTML: store.sanitizedHTML).id(message.id) }
                             else if store.error != nil { Button("Retry loading message") { store.select() }.padding(28).frame(maxWidth: .infinity) }
                             else { ProgressView("Decrypting message…").padding(28).frame(maxWidth: .infinity) }
                             if message.attachments > 0 {

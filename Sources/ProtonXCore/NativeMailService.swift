@@ -36,6 +36,7 @@ public struct NativeMailResult: Codable, Sendable {
     public var email: String?
     public var id: UInt64?
     public var body: String?
+    public var sanitizedHTML: String?
     public var attachments: Int?
     public var draft: NativeMailDraft?
     public var token: UInt64?
@@ -44,9 +45,9 @@ public struct NativeMailResult: Codable, Sendable {
     public var cacheFirst: Bool?
     public var fresh: Bool?
     public var refreshFailed: Bool?
-    public init(phase: NativeMailPhase? = nil, folders: [NativeMailFolder]? = nil, folder: UInt64? = nil, messages: [NativeMailMessage]? = nil, loading: Bool? = nil, email: String? = nil, id: UInt64? = nil, body: String? = nil, attachments: Int? = nil, draft: NativeMailDraft? = nil, token: UInt64? = nil, sendState: NativeMailSendState? = nil, closed: Bool? = nil, cacheFirst: Bool? = nil, fresh: Bool? = nil, refreshFailed: Bool? = nil) {
+    public init(phase: NativeMailPhase? = nil, folders: [NativeMailFolder]? = nil, folder: UInt64? = nil, messages: [NativeMailMessage]? = nil, loading: Bool? = nil, email: String? = nil, id: UInt64? = nil, body: String? = nil, sanitizedHTML: String? = nil, attachments: Int? = nil, draft: NativeMailDraft? = nil, token: UInt64? = nil, sendState: NativeMailSendState? = nil, closed: Bool? = nil, cacheFirst: Bool? = nil, fresh: Bool? = nil, refreshFailed: Bool? = nil) {
         self.phase = phase; self.folders = folders; self.folder = folder; self.messages = messages
-        self.loading = loading; self.email = email; self.id = id; self.body = body; self.attachments = attachments
+        self.loading = loading; self.email = email; self.id = id; self.body = body; self.sanitizedHTML = sanitizedHTML; self.attachments = attachments
         self.draft = draft; self.token = token; self.sendState = sendState; self.closed = closed
         self.cacheFirst = cacheFirst; self.fresh = fresh; self.refreshFailed = refreshFailed
     }
@@ -224,7 +225,7 @@ public final class NativeMailProcess: NativeMailRunning, @unchecked Sendable {
         let reply = try JSONDecoder().decode(Reply.self, from: data)
         guard reply.schema == 1, reply.id == expectedID, (reply.result == nil) != (reply.failure == nil) else { throw ProtonXError.invalidResponse }
         if let failure = reply.failure { throw failure }
-        guard let result = reply.result, (result.messages?.count ?? 0) <= 1000, (result.folders?.count ?? 0) <= 1024, (result.body?.utf8.count ?? 0) <= 2 * 1024 * 1024 else { throw ProtonXError.invalidResponse }
+        guard let result = reply.result, (result.messages?.count ?? 0) <= 1000, (result.folders?.count ?? 0) <= 1024, (result.body?.utf8.count ?? 0) <= 2 * 1024 * 1024, (result.sanitizedHTML?.utf8.count ?? 0) <= 2 * 1024 * 1024, result.sanitizedHTML == nil || result.body != nil else { throw ProtonXError.invalidResponse }
         guard result.fresh != true || (result.loading != true && result.refreshFailed != true) else { throw ProtonXError.invalidResponse }
         if let messages = result.messages { guard Set(messages.map(\.id)).count == messages.count else { throw ProtonXError.invalidResponse } }
         if let draft = result.draft {

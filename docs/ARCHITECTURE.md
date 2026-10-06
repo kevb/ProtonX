@@ -123,8 +123,11 @@ serial private helper. It runs while Mail is unlocked, with its own separate
 profile and `org.kevb.ProtonX.Mail.Native` Keychain service. Native forms drive
 credentials/TOTP/second-password states. Saved-session restore follows local
 Mac authentication. The SDK owns SRP, account/address keys, local databases,
-API transport, sync and selected-message decryption. Native HTML-to-text rendering
-has no browser, remote-resource loader or script execution.
+API transport, sync and selected-message decryption. The helper uses Proton's pinned HTML sanitizer and returns both sanitized markup
+and bounded text. The selected body is rendered in a nonpersistent local WebKit
+view with content scripts and automatic resource loading blocked. Links require
+an explicit external-open confirmation. Plain text remains literal; a text view
+is always available. See [Mail rendering](MAIL_RENDERING.md).
 
 The session encryption key protects tokens/key secrets, not the entire Mail data
 database. The pinned SDK persists decoded message bodies and metadata in ordinary

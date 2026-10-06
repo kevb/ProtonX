@@ -9,6 +9,7 @@ final class NativeMailStore: ObservableObject {
     @Published private(set) var folders: [NativeMailFolder] = []
     @Published private(set) var messages: [NativeMailMessage] = []
     @Published private(set) var body: String?
+    @Published private(set) var sanitizedHTML: String?
     @Published private(set) var email = ""
     @Published private(set) var busy = false
     @Published private(set) var loading = false
@@ -35,6 +36,7 @@ final class NativeMailStore: ObservableObject {
     private var loadedFolder: UInt64?
     private var cacheFirstActive = false
     private var demoMessages: [NativeMailMessage] = []
+    private var demoHTML: [UInt64: String] = [:]
     private var demoBodies: [UInt64: String] = [:]
     init(runner: (any NativeMailRunning)? = nil, defaults: UserDefaults = .standard, previewOnly: Bool = false, localUnlock: (@MainActor @Sendable () async throws -> Bool)? = nil) {
         self.defaults = defaults; self.previewOnly = previewOnly; self.localUnlock = localUnlock
@@ -134,7 +136,7 @@ final class NativeMailStore: ObservableObject {
     }
     func changeFolder() {
         guard selectedFolder != loadedFolder else { return }
-        body = nil; selectedItem = nil; selectionEpoch.invalidate(); selection?.cancel()
+        body = nil; sanitizedHTML = nil; selectedItem = nil; selectionEpoch.invalidate(); selection?.cancel()
         messages = []
         if demo { messages = selectedFolder == 1 ? demoMessages : []; loadedFolder = selectedFolder; return }
         if cacheFirstActive {
@@ -143,13 +145,13 @@ final class NativeMailStore: ObservableObject {
     }
     func reconcileSelection() {
         if let selectedItem, !visibleMessages.contains(where: { $0.id == selectedItem }) {
-            self.selectedItem = nil; body = nil; selectionEpoch.invalidate(); selection?.cancel()
+            self.selectedItem = nil; body = nil; sanitizedHTML = nil; selectionEpoch.invalidate(); selection?.cancel()
         }
     }
     func select() {
-        body = nil; error = nil; selectionEpoch.invalidate(); selection?.cancel()
+        body = nil; sanitizedHTML = nil; error = nil; selectionEpoch.invalidate(); selection?.cancel()
         guard let item = selectedMessage?.id else { return }
-        if demo { body = demoBodies[item]; return }
+        if demo { body = demoBodies[item]; sanitizedHTML = demoHTML[item]; return }
         guard let folder = selectedFolder, phase == .open else { return }
         let captured = epoch.value, selectedGeneration = selectionEpoch.value
         selection = Task { [self] in
@@ -158,7 +160,7 @@ final class NativeMailStore: ObservableObject {
                 try check(captured)
                 guard selectionEpoch.accepts(selectedGeneration), selectedItem == item, selectedFolder == folder else { return }
                 guard result.id == item, let next = result.body else { throw ProtonXError.invalidResponse }
-                body = next
+                body = next; sanitizedHTML = result.sanitizedHTML
             } catch {
                 if !Task.isCancelled && epoch.accepts(captured) && selectionEpoch.accepts(selectedGeneration) {
                     if (error as? NativeMailFailure) == .sessionExpired { expireSession() }
@@ -312,9 +314,9 @@ final class NativeMailStore: ObservableObject {
     }
     func lock() {
         epoch.invalidate(); selectionEpoch.invalidate(); operation?.cancel(); selection?.cancel(); polling?.cancel(); sendPolling?.cancel(); auth?.invalidate(); auth = nil; runner.cancelAll()
-        folders = []; messages = []; body = nil; selectedItem = nil; selectedFolder = nil; query = ""; email = ""; error = nil
+        folders = []; messages = []; body = nil; sanitizedHTML = nil; selectedItem = nil; selectedFolder = nil; query = ""; email = ""; error = nil
         draft = nil; composeStatus = nil; notice = nil
-        loading = false; lastSynced = nil; busy = false; demoBodies = [:]; demoMessages = []; loadedFolder = nil
+        loading = false; lastSynced = nil; busy = false; demoBodies = [:]; demoHTML = [:]; demoMessages = []; loadedFolder = nil
         cacheFirstActive = false; showingSavedContent = false; cacheRefreshFailed = false
         phase = hasSession ? .locked : .welcome
     }
@@ -325,7 +327,12 @@ final class NativeMailStore: ObservableObject {
         messages = [NativeMailMessage(id: 11, subject: "Welcome to your native inbox", sender: "hello@example.com", senderName: "ProtonX", recipient: "alex@example.com", date: 1791288000, unread: true), NativeMailMessage(id: 12, subject: "Coffee this weekend?", sender: "sam@example.com", senderName: "Sam", recipient: "alex.demo@gmail.com", date: 1791201600)]
         demoMessages = messages
         demoBodies = [11: "A native Mail window, with one shared menu-bar icon and Mac keyboard shortcuts.\n\nThis inbox is synthetic. No account has been accessed.\n\nThe direct Mail client uses Proton’s existing authentication and encryption core.", 12: "Hi Alex,\n\nCoffee on Saturday?\n\nSam"]
-        selectedItem = 11; body = demoBodies[11]
+        demoHTML = [11: """
+        <style>.demo-card { max-width:600px; margin:0 auto; padding:24px; background:#f6f5f9; border-radius:16px } .demo-card h1 {font-size:26px; line-height:1.25} .demo-card td,.demo-card th {padding:10px; text-align:left; border-bottom:1px solid #ddd} </style>
+        <div class="demo-card"><h1>Welcome to your native inbox</h1><p>Hello <strong>Alex</strong>,</p><p>This newsletter is synthetic. No account has been accessed.</p><table style="width:100%"><tr><th>Product</th><th>Window</th></tr><tr><td>Mail</td><td>⌘2</td></tr><tr><td>Pass</td><td>⌘1</td></tr></table><h2>A comfortable place to read</h2><ul><li>Headings, lists and tables keep their structure.</li><li>The message stays light in dark appearance.</li></ul><p><a href="https://example.com/help">A synthetic help link</a></p><blockquote>Earlier reply: thanks for the update.</blockquote></div>
+        """]
+        demoBodies[11] = "Welcome to your native inbox\n\nHello Alex,\n\nThis newsletter is synthetic. No account has been accessed.\n\nProduct / Window\nMail / ⌘2\nPass / ⌘1\n\nA comfortable place to read\n• Headings, lists and tables keep their structure.\n• The message stays light in dark appearance.\n\nA synthetic help link: https://example.com/help\n\nEarlier reply: thanks for the update."
+        selectedItem = 11; body = demoBodies[11]; sanitizedHTML = demoHTML[11]
     }
     private func expireSession() {
         hasSession = false; defaults.set(false, forKey: "nativeMailConnected")

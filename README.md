@@ -127,8 +127,10 @@ The direct client reads, composes, replies and saves drafts. The composer displa
 the core’s available From addresses, including connected Gmail where enabled.
 See [composer behavior and delivery acceptance tests](docs/MAIL_COMPOSER.md).
 Read/unread controls, archive, file upload/viewing and conversations remain next. Refresh updates the
-loaded view; search filters loaded subjects and senders. No remote images/scripts
-are executed. **Explore demo inbox** uses synthetic data with no account access.
+loaded view; search filters loaded subjects and senders. HTML messages retain
+headings, tables and styles on light paper through Proton's sanitizer and a local
+WebKit reader. Remote images and message scripts stay blocked; links open externally
+after confirmation. Plain text remains available. See [reader boundaries](docs/MAIL_RENDERING.md). **Explore demo inbox** uses synthetic data with no account access.
 
 **Connect using Bridge…** is an optional compatibility prototype under sign-in.
 It retains the existing local TLS reader and confirmed plain-text compose/send.

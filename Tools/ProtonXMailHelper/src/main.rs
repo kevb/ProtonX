@@ -2,6 +2,7 @@
 // Account authentication and message decryption remain in Proton's pinned SDK.
 #![recursion_limit = "256"]
 mod protocol;
+mod reader;
 #[cfg(feature = "secure-storage")]
 mod secure_storage;
 
@@ -663,16 +664,10 @@ impl Backend {
                 if raw.len() > 2 * 1024 * 1024 {
                     return Err("message_too_large");
                 }
-                // Pure text conversion: no WebView, network requests, CSS or JavaScript execution.
-                let body = if matches!(message.mime_type(), MimeType::TextPlain) {
-                    raw
-                } else {
-                    html2text::from_read(raw.as_bytes(), 100).map_err(|_| "message_failed")?
-                };
-                if body.len() > 2 * 1024 * 1024 {
-                    return Err("message_too_large");
-                }
-                Ok(json!({"id":item,"body":body,"attachments":message.attachments().len()}))
+                let (body, sanitized_html) = reader::prepare(&raw, message.mime_type())?;
+                Ok(
+                    json!({"id":item,"body":body,"sanitizedHTML":sanitized_html,"attachments":message.attachments().len()}),
+                )
             }
             Command::Compose { mode, folder, item } => self.compose(&mode, folder, item),
             Command::SaveDraft { token, content } => {

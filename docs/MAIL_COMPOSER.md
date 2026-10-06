@@ -101,3 +101,8 @@ reader use the same light paper policy. The surrounding shell still follows macO
 appearance. This is a surface/contrast adjustment to the existing plain-text reader,
 not HTML recolouring or a new rich-message renderer. Remote images remain unloaded.
 No authentication, sender-choice, draft or sending protocol was changed.
+
+
+The later [formatted-reader milestone](MAIL_RENDERING.md) supersedes this
+plain-text-only reader limitation for native HTML mail. The composer remains a
+native plain-text editor with core-managed rich quotes/signatures.
