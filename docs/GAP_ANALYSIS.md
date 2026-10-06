@@ -30,6 +30,11 @@ belong in this document, screenshots, tests, or public issues.
   ProtonX extension is installed and no credential disclosure is implemented.
   Safari filling can use the separate official extension; its installed wrapper
   was confirmed on this Mac. See the updated integration decision.
+- Recovery follow-up adds command-path reconnect/conflict/restore contracts, fresh
+  child-process recovery and synthetic saved-session/local-unlock checks. Unknown
+  Trash/restore outcomes now block duplicate attempts until refresh; expiry on
+  detail/write/post-write refresh clears the workspace and returns to sign-in.
+  Real SDK session restoration and cross-client interoperability remain gates.
 - The visual pass adds adaptive lavender/indigo surfaces, grouped rounded detail
   cards and clearer Edit/Create actions. Native selection and keyboard controls
   remain. The user reported successfully creating, syncing and deleting a live

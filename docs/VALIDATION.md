@@ -5,6 +5,37 @@ Rust 1.99.0. Automated test content is synthetic. User-driven live sign-in and
 local unlock reached a vault workspace in the morning follow-up. Only fixed UI
 states were inspected; no live vault contents were returned to the model.
 
+## Pass recovery follow-up, 2026-10-06
+
+- Added regression cases that failed before the fix: uncertain Trash/restore could
+  reach the helper twice, while detail/edit/Trash/restore/post-write expiry retained
+  workspace data or returned to local unlock for a rejected session.
+- Fixed unknown Trash/restore outcomes to require authoritative refresh before
+  another write. Snapshot/detail/write expiry now clears visible data and returns
+  to sign-in; an acknowledged save remains distinguished from refresh failure.
+  Busy/locked action guards and authentication generation checks prevent late
+  recovery from reopening the workspace or interfering with a newer sign-in.
+- `swift test` passed 91 tests (58 core, 33 app), including 14 added test functions
+  covering 24 recovery cases. Fixtures cover initial/reconnect failures, refreshed
+  permissions, conflicts, uncertain writes, Trash restoration, session invalidation,
+  denied/late unlock and responses after lock. Real disposable child processes
+  exercise partial output/nonzero exit, fresh commands and pending prompt cleanup.
+- Saved-session tests use an isolated dummy `.session/session.json` hint and
+  scripted responses, with injected local unlock. They never decode a real Proton
+  session or call the user's Keychain. They prove the app's boundary and state
+  transitions, not SDK restoration, real server expiry or prompt-free signing.
+- `scripts/test-helper.sh` passed CLI policy suites with 115 and 122 tests, plus
+  228 public SDK tests and 24 field-update integration tests. Two upstream SDK
+  tests remain ignored. Desktop identity verification passed against the pinned
+  `macos-pass@1.42.0` protocol; no dependency/source pins or helper crypto changed.
+- Release app build and strict nested app/helper signature verification passed for
+  `build/ProtonX Pass Recovery.app`, using existing helpers and the configured local
+  certificate. No running app was replaced, no app was installed in Applications,
+  no account was accessed and no binary was publicly distributed.
+- Durable encrypted offline browsing is still absent. Designated-account SDK
+  restart and official Safari create/edit/Trash/restore acceptance remain separate
+  gates. See [the coverage matrix](PASS_RELIABILITY.md).
+
 ## Startup and local storage review, 2026-10-06
 
 - 73 Swift tests passed, including delayed first-load, failed-load/retry and

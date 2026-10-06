@@ -107,3 +107,52 @@ private func fixture(_ script: String) throws -> (URL, URL) {
         "https://account.proton.me/desktop/login?app=pass",
     ] { #expect(URLPolicy.authenticationURL(value) == nil) }
 }
+
+@Test(arguments: [false, true]) func failedHelperCommandAllowsFreshProcessWithoutAutomaticWriteRetry(_ write: Bool) async throws {
+    let snapshot = #"{"vaults":[],"items":[],"trashed_items":[],"capabilities":{"totp_limit":null}}"#
+    let script = """
+    if [ ! -f "$PROTON_PASS_SESSION_DIR/attempted" ]; then
+        /usr/bin/touch "$PROTON_PASS_SESSION_DIR/attempted"
+        if [ "$1" = native-create ]; then /bin/cat >/dev/null; fi
+        printf '{"partial":'
+        exit 7
+    fi
+    if [ "$1" != native-snapshot ]; then exit 8; fi
+    printf '%s' '\(snapshot)'
+    """
+    let (root, executable) = try fixture(script)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let service = PassService(runner: NativeProcess(executable: executable, directory: root))
+    do {
+        if write {
+            var draft = NativeItemDraft(); draft.kind = "note"; draft.title = "Synthetic"
+            _ = try await service.create(draft, vault: Vault(name: "Synthetic", vaultID: "v", shareID: "s", canCreate: true))
+        } else { _ = try await service.snapshot() }
+        Issue.record("The first child process must fail")
+    } catch { #expect(error as? ProtonXError == .helperFailed(7)) }
+    let snapshotResult = try await service.snapshot()
+    #expect(snapshotResult.items.isEmpty); #expect(snapshotResult.vaults.isEmpty)
+}
+
+@Test func exitedHelperCancelsPendingPromptBeforeFreshRequest() async throws {
+    let script = """
+    if [ "$1" = login ]; then
+        printf 'PROTONX:{"prompt":"Enter password: ","secure":true}\\n' >&2
+        /bin/sleep 0.1
+        exit 7
+    fi
+    printf 'fresh'
+    """
+    let (root, executable) = try fixture(script)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let runner = NativeProcess(executable: executable, directory: root)
+    let start = ContinuousClock.now
+    await #expect(throws: Error.self) {
+        try await runner.run(HelperCommand(["login"])) { _ in
+            try await Task.sleep(for: .seconds(30))
+            return "UNREACHABLE"
+        }
+    }
+    #expect(start.duration(to: .now) < .seconds(5))
+    #expect(try await runner.run(HelperCommand(["fresh"]), challenge: nil) == Data("fresh".utf8))
+}

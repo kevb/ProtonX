@@ -34,6 +34,8 @@ final class PassStore: ObservableObject {
     let service: PassService
     let sessionDirectory: URL
     private var authContext: LAContext?
+    private let localUnlock: (@MainActor @Sendable () async throws -> Bool)?
+    private var requiresSignIn = false
     private let webAuthentication = NativeWebAuthentication()
     var filteredItems: [PassItem] { ItemSearch.filter(showingTrash ? trashedItems : items, query: query, vaultID: selectedVault, kind: kind, sort: sort) }
     var isLoadingInitialSnapshot: Bool { phase == .open && !isDemo && busy && lastSyncedAt == nil }
@@ -45,23 +47,25 @@ final class PassStore: ObservableObject {
     }
     var writableVaults: [Vault] { vaults.filter { $0.canCreate == true } }
     var canCreate: Bool { !mustRefreshBeforeWriting && phase == .open && !busy && !showingTrash && !writableVaults.isEmpty }
-    var canEdit: Bool { !mustRefreshBeforeWriting && !showingTrash && currentItem.map { ["login", "note"].contains($0.kind) } == true && currentVault?.canUpdate == true && (isDemo || detail?.revision != nil) }
+    var canEdit: Bool { phase == .open && !busy && !mustRefreshBeforeWriting && !showingTrash && currentItem.map { ["login", "note"].contains($0.kind) } == true && currentVault?.canUpdate == true && (isDemo || detail?.revision != nil) }
     var currentVault: Vault? { guard let item = currentItem else { return nil }; return vaults.first { $0.id == item.shareID } }
-    var canTrash: Bool { !mustRefreshBeforeWriting && currentVault?.canTrash == true }
+    var canTrash: Bool { phase == .open && !busy && !mustRefreshBeforeWriting && currentVault?.canTrash == true }
     var customFieldsAllowed: Bool { capabilities?.customFieldsAllowed == true }
     func canSetupTOTP(for item: PassItem?) -> Bool { capabilities?.allowsTOTPSetup(itemID: item?.id, items: items) == true }
     private func reconcileSelection() {
         if selectedItem != nil && currentItem == nil { self.selectedItem = nil }
     }
     var canCopyTOTP: Bool {
+        guard phase == .open, !busy else { return false }
         if isDemo { return !showingTrash }
         guard !mustRefreshBeforeWriting, !showingTrash, let selectedItem, let capabilities else { return false }
         return capabilities.allowsTOTP(itemID: selectedItem, items: items)
     }
     var hasSession: Bool { !previewOnly && FileManager.default.fileExists(atPath: sessionDirectory.appendingPathComponent(".session/session.json").path) }
 
-    init(service: PassService? = nil, sessionDirectory: URL? = nil, previewOnly: Bool = Bundle.main.bundleIdentifier == "org.kevb.ProtonX.Preview") {
+    init(service: PassService? = nil, sessionDirectory: URL? = nil, previewOnly: Bool = Bundle.main.bundleIdentifier == "org.kevb.ProtonX.Preview", localUnlock: (@MainActor @Sendable () async throws -> Bool)? = nil) {
         self.previewOnly = previewOnly
+        self.localUnlock = localUnlock
         self.sessionDirectory = sessionDirectory ?? FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(previewOnly ? "Library/Application Support/ProtonX/Preview" : "Library/Application Support/ProtonX/Pass", isDirectory: true)
         let helper = Bundle.main.url(forAuxiliaryExecutable: "protonx-pass") ??
@@ -72,26 +76,30 @@ final class PassStore: ObservableObject {
     func login(interactive: Bool = false) {
         guard !busy, !previewOnly else { return }
         isDemo = false
+        let captured = epoch.value
         perform { [self] in
-            defer { webAuthentication.cancel() }
+            defer { if epoch.accepts(captured) { webAuthentication.cancel() } }
             try await service.login(interactive: interactive) { [weak self] prompt in
                 guard let self else { throw ProtonXError.cancelled }
-                if let url = prompt.url { return try await self.beginWebAuthentication(url) }
-                return try await self.requestCredential(prompt)
+                if let url = prompt.url { return try await self.beginWebAuthentication(url, captured: captured) }
+                return try await self.requestCredential(prompt, captured: captured)
             }
+            try check(captured)
+            requiresSignIn = false
             phase = .open
             try await loadSnapshot()
         }
     }
-    private func beginWebAuthentication(_ value: String) throws -> String {
+    private func beginWebAuthentication(_ value: String, captured: UInt64) throws -> String {
+        try check(captured)
         guard let url = URLPolicy.authenticationURL(value) else { throw ProtonXError.invalidResponse }
         try webAuthentication.start(url: url) { [weak self] in self?.cancelLogin() }
         return "started"
     }
-    private func requestCredential(_ prompt: AuthChallenge) async throws -> String {
+    private func requestCredential(_ prompt: AuthChallenge, captured: UInt64) async throws -> String {
         let id = UUID()
         return try await withTaskCancellationHandler {
-            try Task.checkCancellation()
+            try check(captured)
             return try await withCheckedThrowingContinuation { continuation in
                 credentialRequestID = id; credentialContinuation = continuation; challenge = prompt
             }
@@ -108,15 +116,19 @@ final class PassStore: ObservableObject {
         let continuation = credentialContinuation; credentialContinuation = nil; credentialRequestID = nil; challenge = nil
         continuation?.resume(returning: answer)
     }
-    func cancelLogin() { lock(); phase = hasSession ? .locked : .welcome }
+    func cancelLogin() { lock() }
     func unlock() {
-        guard !busy else { return }
+        guard !busy, !previewOnly, phase == .locked else { return }
         if isDemo { enterDemo(); return }
+        guard !requiresSignIn else { return }
         let context = LAContext(); authContext = context
+        let captured = epoch.value
         perform { [self] in
-            let success = try await context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: "Unlock ProtonX on this Mac")
+            let success: Bool
+            if let localUnlock { success = try await localUnlock() }
+            else { success = try await context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: "Unlock ProtonX on this Mac") }
             guard success else { throw ProtonXError.cancelled }
-            try Task.checkCancellation()
+            try check(captured)
             phase = .open
             try await loadSnapshot()
         }
@@ -131,9 +143,10 @@ final class PassStore: ObservableObject {
         ClipboardController.shared.clearOwned()
         vaults = []; items = []; trashedItems = []; lastSyncedAt = nil; mustRefreshBeforeWriting = false; detail = nil; demoDetails = [:]; capabilities = nil
         selectedItem = nil; selectedVault = nil; query = ""; busy = false; error = nil
-        phase = hasSession || isDemo ? .locked : .welcome
+        phase = isDemo || (!requiresSignIn && hasSession) ? .locked : .welcome
     }
     func refresh() {
+        guard phase == .open else { return }
         perform { [self] in
             do { try await loadSnapshot(); selectItem() }
             catch {
@@ -169,7 +182,11 @@ final class PassStore: ObservableObject {
                 try Task.checkCancellation()
                 guard epoch.accepts(captured), selectionEpoch.accepts(selection), phase == .open else { return }
                 detail = value
-            } catch { if !Task.isCancelled && epoch.accepts(captured) && selectionEpoch.accepts(selection) { self.error = error.localizedDescription } }
+            } catch {
+                if !Task.isCancelled && epoch.accepts(captured) && selectionEpoch.accepts(selection) {
+                    if !handleSessionFailure(error, captured: captured) { self.error = error.localizedDescription }
+                }
+            }
         }
     }
     /// Returns only after the write is acknowledged. A later refresh failure must not invite duplicate creation.
@@ -210,7 +227,7 @@ final class PassStore: ObservableObject {
                 if let item { try await service.edit(draft, item: item, vault: vault); savedID = item.id }
                 else { savedID = vault.id + ":" + (try await service.create(draft, vault: vault)) }
             } catch {
-                if epoch.accepts(captured), phase == .open { mustRefreshBeforeWriting = true }
+                if !handleSessionFailure(error, captured: captured), epoch.accepts(captured), phase == .open { mustRefreshBeforeWriting = true }
                 throw error
             }
             // A committed write and a successful refresh are distinct outcomes.
@@ -218,6 +235,7 @@ final class PassStore: ObservableObject {
             do { try await loadSnapshot() }
             catch {
                 guard epoch.accepts(captured), phase == .open else { return }
+                if handleSessionFailure(error, captured: captured, acknowledgement: "Item saved.") { return }
                 mustRefreshBeforeWriting = true
                 self.error = "Item saved. Refresh failed; refresh your vault before making further changes."
                 selectedItem = nil
@@ -231,16 +249,30 @@ final class PassStore: ObservableObject {
     func trashCurrent() {
         guard !busy, canTrash, let item = currentItem else { return }
         let restore = showingTrash
+        let captured = epoch.value
         perform { [self] in
             if isDemo {
                 if restore { trashedItems.removeAll { $0.id == item.id }; items.append(item) }
                 else { items.removeAll { $0.id == item.id }; trashedItems.append(item) }
                 lastSyncedAt = Date()
             } else {
-                try await service.trash(item, restore: restore)
+                do { try await service.trash(item, restore: restore) }
+                catch {
+                    if !handleSessionFailure(error, captured: captured), epoch.accepts(captured), phase == .open {
+                        mustRefreshBeforeWriting = true
+                        self.error = "Could not confirm whether the item was \(restore ? "restored" : "moved to Trash"). Refresh your vault before trying again. " + error.localizedDescription
+                    }
+                    return
+                }
                 do { try await loadSnapshot() }
-                catch { if phase == .open { mustRefreshBeforeWriting = true; self.error = "Item \(restore ? "restored" : "moved to Trash"). Refresh failed; refresh to see the latest state." } }
+                catch {
+                    guard epoch.accepts(captured), phase == .open else { return }
+                    if handleSessionFailure(error, captured: captured, acknowledgement: "Item \(restore ? "restored" : "moved to Trash").") { return }
+                    mustRefreshBeforeWriting = true
+                    self.error = "Item \(restore ? "restored" : "moved to Trash"). Refresh failed; refresh to see the latest state."
+                }
             }
+            guard epoch.accepts(captured), phase == .open else { return }
             selectedItem = nil; detail = nil
         }
     }
@@ -256,10 +288,22 @@ final class PassStore: ObservableObject {
     }
     func signOut() {
         guard !busy else { return }
-        if isDemo { lock(); isDemo = false; phase = hasSession ? .locked : .welcome; return }
+        if isDemo { lock(); isDemo = false; phase = !requiresSignIn && hasSession ? .locked : .welcome; return }
         // Clear visible data immediately; preserve credentials if remote logout fails so users can retry.
         lock()
-        perform { [self] in try await service.logout(); phase = .welcome }
+        perform { [self] in try await service.logout(); requiresSignIn = false; phase = .welcome }
+    }
+    private func check(_ captured: UInt64) throws {
+        try Task.checkCancellation()
+        guard epoch.accepts(captured) else { throw ProtonXError.cancelled }
+    }
+    /// Leave saved-session cleanup to the SDK; stop offering unlock for a rejected session.
+    @discardableResult private func handleSessionFailure(_ error: Error, captured: UInt64, acknowledgement: String? = nil) -> Bool {
+        guard epoch.accepts(captured), case ProtonXError.helperDiagnostic(let diagnostic) = error,
+              diagnostic.failure == .sessionInvalidated else { return false }
+        lock(); requiresSignIn = true; phase = .welcome
+        self.error = [acknowledgement, diagnostic.message].compactMap { $0 }.joined(separator: " ")
+        return true
     }
     private func perform(_ action: @escaping @MainActor () async throws -> Void) {
         guard !busy else { return }
@@ -269,9 +313,7 @@ final class PassStore: ObservableObject {
             do { try await action() }
             catch {
                 if !Task.isCancelled && epoch.accepts(captured) {
-                    if case ProtonXError.helperDiagnostic(let diagnostic) = error, diagnostic.failure == .sessionInvalidated {
-                        lock(); self.error = diagnostic.message
-                    } else { self.error = error.localizedDescription }
+                    if !handleSessionFailure(error, captured: captured) { self.error = error.localizedDescription }
                 }
             }
             if epoch.accepts(captured) { busy = false }

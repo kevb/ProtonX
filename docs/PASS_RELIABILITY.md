@@ -9,11 +9,11 @@ Existing tests are evidence of local contracts, not full Proton interoperability
 
 | Area | Existing evidence | Next automated checks |
 | --- | --- | --- |
-| Helper failure | `ProcessTests.swift` covers process deadlines, cancellation, private challenges and sanitised failures | Exit/EOF during reads and writes, then successful fresh-helper recovery; no leaked pending prompts |
-| Refresh/reconnect | `PassStoreTests.swift` distinguishes initial loading, failure and confirmed empty; acknowledged writes retain failed-refresh warnings across navigation | Fail then reconnect; preserve last-success data, clear uncertainty only after successful sync, restore permissions atomically |
-| Edits/conflicts | `PassTests.swift` requires a revision and forwards it; existing native guards refuse stale revisions | Concurrent synthetic revision changes, draft retention, unsupported-field preservation and uncertain acknowledgement without automatic retry |
-| Trash restoration | Synthetic preview create/edit/Trash/restore lifecycle clears secrets on lock; permission-aware commands are implemented | Command-path restoration with server-shaped fixtures, denied writes, interrupted restore, stale selection and authoritative refresh |
-| Restart/session recovery | Private authentication handoff and process cancellation have contracts | Isolated synthetic saved-session lifecycle, expired/revoked-session failures, cancellation, local unlock and fresh helper after restart |
+| Helper failure | `ProcessTests.swift` covers process deadlines/cancellation, sanitised failures, partial-output exits for reads/writes, fresh-process recovery and exited-helper prompt cancellation | SDK saved-session/key recovery and upgrade fixtures; never replay an unconfirmed write |
+| Refresh/reconnect | `PassRecoveryTests.swift` covers first-load retry, retaining last-success data through failure, successful reconnect, atomic permission/capability replacement and no repeated sign-in | Independent-client event reconciliation and larger synthetic workloads |
+| Edits/conflicts | Revision required/forwarded; native stale-revision guards; scripted conflict/unconfirmed edit blocks another write until refresh, then loads the newer revision | Real concurrent-client revision changes; broader unsupported-field round trips |
+| Trash restoration | Synthetic demo lifecycle plus command-path restore/denial, lost acknowledgement, acknowledged restore with failed refresh and authoritative reconciliation | Designated-account round trip verified through the official extension |
+| Restart/session recovery | Two new stores over an isolated synthetic session hint require local unlock; denied/late unlock does not start the helper; expired read/write/restore sessions clear data and require sign-in | Real SDK encrypted-session restore, Keychain continuity and server expiry/revocation interoperability |
 | Encrypted offline browse | [Storage review](OFFLINE_DESIGN.md) exists; a durable item cache is not implemented | Add read-only persistence through Proton's existing encryption/storage layer; test wrong/missing keys, corruption, rotations, account isolation, policy expiry and lock races |
 
 Some process fixtures execute a real disposable child process; preview lifecycle
@@ -23,9 +23,14 @@ test transport or helper fixture rather than disconnecting the user's machine.
 Synthetic policy fixtures cover expiry/revocation; do not revoke real sessions
 or change subscriptions to manufacture test conditions.
 
-The first implementation slice is refresh/reconnect and fresh-helper recovery,
-then command-path conflict/restore failures. Durable offline browsing follows
-session recovery and its separate storage/policy gates. Do not turn a failed
+The first implementation slice now covers refresh/reconnect, fresh-helper
+recovery and command-path conflict/restore failures. Its saved-session fixture is
+a file-presence hint with scripted helper responses, not a decrypted Proton session.
+Local unlock is injected only in these tests; normal builds use macOS user presence.
+Invalidation is remembered in the current store; the UI adds no saved-file deletion.
+Proton's SDK invalidation/cleanup remains unchanged. If a session hint remains, a
+new app process must unlock and ask the SDK to restore again. Durable offline
+browsing follows real session recovery and its separate storage/policy gates. Do not turn a failed
 operation into an automatic write retry or queue: a lost acknowledgement can
 mean the server accepted it. Keep editor drafts and require authoritative refresh
 before further writes. Offline browsing starts read-only and respects authenticated
