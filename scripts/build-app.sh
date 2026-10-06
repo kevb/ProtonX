@@ -85,5 +85,5 @@ fi
 echo "$PROTONX_FINAL"
 if $PROTONX_INSTALL; then
   scripts/build-launchers.sh
-  python3 scripts/install-app.py "$PROTONX_FINAL" --launchers "$PROTONX_ROOT/build/Launchers"
+  python3 scripts/install-app.py "$PROTONX_FINAL" --launchers "$PROTONX_ROOT/.tools/product-launchers"
 fi

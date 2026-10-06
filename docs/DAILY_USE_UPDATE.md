@@ -42,6 +42,8 @@ before launching the installed app; the launcher explains this if necessary.
 
 For a user-owned install directory, call the installer directly with
 `--destination "$HOME/Applications"`. All three bundles must be adjacent.
+Generated launcher bundles stay in `.tools/product-launchers` so the installed
+Applications copies are the discoverable launchers.
 
 The installer verifies all source and destination identities/signatures before
 publishing, refuses a running installed app/helper, and uses macOS same-volume

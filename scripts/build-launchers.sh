@@ -27,13 +27,13 @@ PY
   codesign --force --sign "$PROTONX_LAUNCH_IDENTITY" --timestamp=none --options runtime "$PROTONX_LAUNCH_APP"
   codesign --verify --strict "$PROTONX_LAUNCH_APP"
 done
-mkdir -p build/Launchers
+mkdir -p .tools/product-launchers
 for PROTONX_PRODUCT in Mail Pass; do
-  PROTONX_LAUNCH_FINAL="$PROTONX_ROOT/build/Launchers/ProtonX $PROTONX_PRODUCT.app"
+  PROTONX_LAUNCH_FINAL="$PROTONX_ROOT/.tools/product-launchers/ProtonX $PROTONX_PRODUCT.app"
   if [[ -e "$PROTONX_LAUNCH_FINAL" ]]; then
     if lsof -t "$PROTONX_LAUNCH_FINAL/Contents/MacOS/ProductLauncher" >/dev/null 2>&1; then echo 'Close the launcher before rebuilding.' >&2; exit 1; fi
     mv "$PROTONX_LAUNCH_FINAL" "$PROTONX_LAUNCH_STAGE/Previous $PROTONX_PRODUCT.app"
   fi
   mv "$PROTONX_LAUNCH_STAGE/ProtonX $PROTONX_PRODUCT.app" "$PROTONX_LAUNCH_FINAL"
 done
-echo "$PROTONX_ROOT/build/Launchers"
+echo "$PROTONX_ROOT/.tools/product-launchers"
