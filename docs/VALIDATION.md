@@ -112,13 +112,18 @@ coverage; system-level interaction is not fully automated.
   login with notes/multiple websites/hidden custom field, editing websites, invalid
   URL rejection with draft retention, corrected save, Trash, restore and account
   actions. Keyboard Find focused search, repeated Find replaced the old query,
-  and search cleared hidden selected details. Automatic inactivity lock was also
+  and search cleared hidden selected details. Website removal retained the remaining
+  address, and saving a new revision concealed a previously revealed password.
+  Automatic inactivity lock was also
   observed in the preview. No primary-account contents were inspected or changed
   by these checks; the supplied official screenshot was a layout reference only.
 - The compile-only credential-provider probe passed Swift 6 typechecking with
   warnings treated as errors and 20 synthetic origin candidate cases. It is not
   embedded, installed, registered or capable of returning credentials. The offline
   source review found no persisted complete item cache in this pinned helper.
+- Local corresponding-source generation passed: every tracked patched helper
+  input matched the source archive byte-for-byte. No vendor archive or binary
+  was published; dependency licensing remains a distribution gate.
 - Rust formatting used the repository-local Rustup toolchain under `.tools`; the
   formatter component was installed there. No global dependency was installed.
 

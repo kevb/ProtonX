@@ -115,7 +115,7 @@ struct PassWindow: View {
         } detail: {
             if let item = store.currentItem {
                 if let detail = store.detail {
-                    ItemDetailView(detail: detail).id(item.id)
+                    ItemDetailView(detail: detail).id(item.id + ":" + String(detail.revision ?? 0))
                         .toolbar {
                             ToolbarItemGroup {
                                 Button { showingEdit = true } label: { Label("Edit", systemImage: "square.and.pencil") }.disabled(store.busy || !store.canEdit)
@@ -225,7 +225,7 @@ struct ItemDetailView: View {
                             if field.concealed {
                                 Button { if !revealed.insert(String(index)).inserted { revealed.remove(String(index)) } } label: { Image(systemName: revealed.contains(String(index)) ? "eye.slash" : "eye") }.accessibilityLabel(revealed.contains(String(index)) ? "Hide \(field.label)" : "Reveal \(field.label)")
                             }
-                            Button { ClipboardController.shared.copy(field.value); copied = field.label } label: { Image(systemName: copied == field.label ? "checkmark" : "doc.on.doc") }.accessibilityLabel("Copy \(field.label)")
+                            Button { ClipboardController.shared.copy(field.value); copied = String(index) } label: { Image(systemName: copied == String(index) ? "checkmark" : "doc.on.doc") }.accessibilityLabel("Copy \(field.label)")
                         }.buttonStyle(.borderless).padding(12).background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
                     }
                 }

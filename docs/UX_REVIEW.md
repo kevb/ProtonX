@@ -65,3 +65,6 @@ rejection without draft loss, corrected save, Trash, restore and account menu.
 The preview is isolated from accounts, Mail credentials, menu-bar slots and global
 shortcut registration. Full VoiceOver, minimum-OS, high-contrast and multi-display
 coverage remain follow-ups.
+
+Detail reveal/copy state resets when the selected item revision changes. Copy
+feedback identifies the individual row even when custom field labels repeat.
