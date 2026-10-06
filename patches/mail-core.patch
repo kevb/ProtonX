@@ -11,6 +11,15 @@
  # Works in both debug and release builds
 --- a/project/mail/rust/mail/mail-uniffi/src/mail.rs
 +++ b/project/mail/rust/mail/mail-uniffi/src/mail.rs
+@@ -8,7 +8,7 @@
+ pub mod datatypes;
+ mod device;
+-mod draft;
++pub mod draft;
+ mod images;
+ mod ios_share_ext;
+ pub mod labels;
+ mod logging;
 @@ -20,7 +20,7 @@
  mod search_results;
  mod session;
@@ -52,3 +61,26 @@
          let tether = self.stash.connection();
  
          let telemetry_enabled = tether
+--- a/project/mail/rust/mail/mail-uniffi/src/mail/draft.rs
++++ b/project/mail/rust/mail/mail-uniffi/src/mail/draft.rs
+@@ -1,6 +1,6 @@
+-mod attachments;
++pub mod attachments;
+-mod observer;
+-mod recipients;
++pub mod observer;
++pub mod recipients;
+ 
+ use crate::core::datatypes::{Id, UnixTimestamp};
+ use crate::errors::unexpected::UnexpectedError;
+@@ -976,8 +976,9 @@
+ fn draft_options() -> DraftActorOptions {
+     DraftActorOptions {
+         address_validation_enabled: true,
+         // Auto save is set to 0 to mimic old behavior where setting the body would trigger an immediate save.
+         // to be reverted after release.
+-        auto_save_every: Some(Duration::from_secs(0)),
++        // ProtonX applies a validated envelope/body batch before explicit save/send.
++        auto_save_every: if cfg!(feature = "protonx-native") { None } else { Some(Duration::from_secs(0)) },
+     }
+ }

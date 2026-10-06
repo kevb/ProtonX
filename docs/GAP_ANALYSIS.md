@@ -130,11 +130,14 @@ Proton's [official Mail desktop app](https://proton.me/support/mail-desktop-app)
 provides the Mail/Calendar experience. ProtonX now packages a direct native Mail
 core with credentials/TOTP/second-password states, separate session restoration,
 folders, bounded paging and selected-message decryption. The normal experience
-has no Bridge/server settings. This is a synthetically tested read-only slice;
-real-account interoperability remains unverified. Human verification and
-FIDO-only states are unsupported; threading, sending/reply, read/unread,
-archive/trash, attachment handling and push UI remain gaps. See
-[the native Mail decision](MAIL_NATIVE_SIGN_IN.md).
+has no Bridge/server settings. The user reported real sign-in and reading.
+A native composer now supports new/reply/reply-all, available From identities,
+draft saving and queued/confirmed/failed/unknown send states. Linked-Gmail
+sender selection has synthetic coverage; real delivery and recovery remain
+unverified. Human verification and FIDO-only states are unsupported; threading,
+read/unread, archive/trash, file upload/viewing and push UI remain gaps. See
+[the native Mail decision](MAIL_NATIVE_SIGN_IN.md) and
+[composer references and Gmail acceptance tests](MAIL_COMPOSER.md).
 The advanced Bridge compatibility path retains its separate
 [paid-plan requirement](https://proton.me/mail/bridge).
 

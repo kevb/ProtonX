@@ -28,6 +28,9 @@ struct MailWindow: View {
                 }.padding(12).background(.orange.opacity(0.12))
             }
         }
+        .sheet(isPresented: Binding(get: { store.draft != nil }, set: { _ in })) {
+            if let draft = store.draft { MailComposer(store: store, draft: draft) }
+        }
         .sheet(isPresented: $bridge) { BridgeMailWindow().frame(width: 1050, height: 740) }
         .confirmationDialog("Sign out of ProtonX Mail?", isPresented: $confirmSignOut) {
             Button("Sign Out", role: .destructive) { clearCredentials(); store.signOut() }
@@ -106,6 +109,10 @@ struct MailWindow: View {
     private var workspace: some View {
         NavigationSplitView {
             List(selection: $store.selectedFolder) {
+                Section {
+                    Button { store.compose() } label: { Label("New message", systemImage: "square.and.pencil").frame(maxWidth: .infinity) }
+                        .buttonStyle(PassPillStyle(primary: true)).disabled(store.busy || store.draft != nil)
+                }
                 Section("Mail") {
                     ForEach(store.folders) { folder in
                         HStack(spacing: 12) {
@@ -121,6 +128,7 @@ struct MailWindow: View {
                 .onChange(of: store.selectedFolder) { _, _ in store.changeFolder() }
                 .safeAreaInset(edge: .bottom) {
                     VStack(alignment: .leading, spacing: 14) {
+                        if let notice = store.notice { Text(notice).font(.caption).foregroundStyle(PassTheme.accent) }
                         if store.demo { Label("Synthetic preview", systemImage: "testtube.2").font(.caption).foregroundStyle(.secondary) }
                         else { Text(store.email).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
                         Button("Lock Mail", systemImage: "lock") { store.lock() }
@@ -160,6 +168,14 @@ struct MailWindow: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 22) {
                         Text(message.subject.isEmpty ? "(No subject)" : message.subject).font(.system(size: 25, weight: .semibold))
+                        HStack(spacing: 10) {
+                            if message.isDraft == true && message.isScheduled != true {
+                                Button("Edit draft", systemImage: "pencil") { store.compose("open") }.buttonStyle(PassPillStyle())
+                            } else if message.canReply != false {
+                                Button("Reply", systemImage: "arrowshape.turn.up.left") { store.compose("reply") }.buttonStyle(PassPillStyle())
+                                Button("Reply all", systemImage: "arrowshape.turn.up.left.2") { store.compose("reply_all") }.buttonStyle(PassPillStyle())
+                            }
+                        }.disabled(store.busy || store.body == nil || store.draft != nil)
                         VStack(alignment: .leading, spacing: 9) {
                             Label(message.sender, systemImage: "person")
                             Text("To: \(message.recipient)").foregroundStyle(.secondary)
@@ -176,7 +192,8 @@ struct MailWindow: View {
         .navigationTitle("ProtonX Mail")
         .toolbar {
             ToolbarItem { if store.busy { ProgressView().controlSize(.small) } }
-            ToolbarItem { Button { store.refresh() } label: { Label("Refresh Mail", systemImage: "arrow.clockwise") }.disabled(store.busy || store.demo) }
+            ToolbarItem { Button { store.compose() } label: { Label("New message", systemImage: "square.and.pencil") }.disabled(store.busy || store.draft != nil).keyboardShortcut("n", modifiers: [.command]) }
+            ToolbarItem { Button { store.refresh() } label: { Label("Refresh Mail", systemImage: "arrow.clockwise") }.disabled(store.busy || store.demo).keyboardShortcut("r", modifiers: [.command, .shift]) }
         }
     }
     private func signIn() { let supplied = password; password = ""; store.signIn(username: username, password: supplied) }

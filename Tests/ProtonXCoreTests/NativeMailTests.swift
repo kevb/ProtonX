@@ -103,3 +103,47 @@ private func mailFixture(_ script: String) throws -> (URL, URL) {
     await #expect(throws: CancellationError.self) { try await old.value }
     #expect(try await current.value.body == "SYNTHETIC second")
 }
+
+@Test func nativeMailComposerValidatesTheAuthoritativeSenderAndEnvelope() throws {
+    let senders = ["alex@example.com", "alex.demo@gmail.com"]
+    var content = NativeMailComposeContent(sender: senders[1], to: ["sam@example.com"], cc: ["team@example.com"], subject: "Synthetic café", text: "First line\n.second line")
+    try content.validate(senders: senders, sending: true)
+    content.sender = "unconnected@gmail.com"
+    #expect(throws: NativeMailFailure.invalidInput) { try content.validate(senders: senders, sending: true) }
+    content.sender = senders[1]; content.bcc = ["SAM@example.com"]
+    #expect(throws: NativeMailFailure.invalidInput) { try content.validate(senders: senders, sending: true) }
+    content.bcc = []; content.subject = "Hello\r\nBcc: hidden@example.com"
+    #expect(throws: NativeMailFailure.invalidInput) { try content.validate(senders: senders, sending: true) }
+    content.subject = "Synthetic"; content.to = []; content.cc = []
+    try content.validate(senders: senders, sending: false)
+    #expect(throws: NativeMailFailure.invalidInput) { try content.validate(senders: senders, sending: true) }
+    content.text = String(repeating: "\u{0001}", count: 32 * 1024)
+    #expect(throws: NativeMailFailure.invalidInput) { try content.validate(senders: senders, sending: false) }
+    #expect(NativeMailComposeContent.parseRecipients("sam@example.com; team@example.com, ") == ["sam@example.com", "team@example.com"])
+}
+
+@Test func nativeMailComposerRejectsUntrustedHelperSenderAndSendState() throws {
+    struct Packet: Encodable { let schema = 1; let id = 1; let result: NativeMailResult }
+    let draft = NativeMailDraft(token: 1, sender: "unconnected@gmail.com", senders: ["alex@example.com"])
+    #expect(throws: Error.self) { try NativeMailProcess.decode(JSONEncoder().encode(Packet(result: .init(draft: draft))), expectedID: 1) }
+    #expect(throws: Error.self) { try NativeMailProcess.decode(Data(#"{"schema":1,"id":1,"result":{"token":1,"sendState":"SYNTHETIC-raw-error"}}"#.utf8), expectedID: 1) }
+}
+
+@Test func nativeMailSendPayloadIsPrivateStdinWithNoRecipientOrBodyArguments() async throws {
+    let (root, executable) = try mailFixture("""
+    [ "$#" = 0 ] || exit 9
+    [ -z "$PROTONX_PASSWORD" ] || exit 10
+    IFS= read -r request
+    case "$request" in *alex.demo@gmail.com*) ;; *) exit 12 ;; esac
+    case "$request" in *SYNTHETIC-private-body*) ;; *) exit 13 ;; esac
+    printf '%s\n' '{"schema":1,"id":1,"result":{"token":3,"sendState":"queued"}}'
+    IFS= read -r request
+    printf '%s\n' '{"schema":1,"id":2,"result":{"token":3,"sendState":"sent"}}'
+    """)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let runner = NativeMailProcess(executable: executable, directory: root)
+    defer { runner.cancelAll() }
+    let content = NativeMailComposeContent(sender: "alex.demo@gmail.com", to: ["sam@example.com"], text: "SYNTHETIC-private-body")
+    #expect(try await runner.request(.init("send_draft", token: 3, content: content)).sendState == .queued)
+    #expect(try await runner.request(.init("draft_status", token: 3)).sendState == .sent)
+}

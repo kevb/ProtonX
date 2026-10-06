@@ -4,6 +4,7 @@ source "$(dirname "$0")/env.sh"
 cd "$PROTONX_ROOT"
 PROTONX_PREVIEW=false
 PROTONX_STAGE_UPDATE=false
+PROTONX_UPDATE_NAME="ProtonX Update"
 PROTONX_SKIP_HELPER=false
 PROTONX_SWIFT_OPTIONS=()
 for PROTONX_OPTION in "$@"; do
@@ -11,6 +12,11 @@ for PROTONX_OPTION in "$@"; do
     --preview) PROTONX_PREVIEW=true ;;
     --preview-light) PROTONX_PREVIEW=true; PROTONX_SWIFT_OPTIONS=(-Xswiftc -DPROTONX_DESIGN_LIGHT) ;;
     --stage-update) PROTONX_STAGE_UPDATE=true ;;
+    --stage-update=*)
+      PROTONX_STAGE_UPDATE=true
+      PROTONX_UPDATE_NAME="${PROTONX_OPTION#--stage-update=}"
+      if [[ -z "$PROTONX_UPDATE_NAME" || "$PROTONX_UPDATE_NAME" == */* || "$PROTONX_UPDATE_NAME" == .* ]]; then echo 'Use a simple app name for the staged update.' >&2; exit 1; fi
+      ;;
     --skip-helper) PROTONX_SKIP_HELPER=true ;;
     *) echo "Unknown build option." >&2; exit 1 ;;
   esac
@@ -19,7 +25,7 @@ PROTONX_APP_NAME=ProtonX
 PROTONX_EXECUTABLE=ProtonX
 if $PROTONX_PREVIEW; then PROTONX_APP_NAME='ProtonX Preview'; PROTONX_EXECUTABLE=ProtonXPreview; fi
 if $PROTONX_PREVIEW && $PROTONX_STAGE_UPDATE; then echo 'Choose preview or staged update.' >&2; exit 1; fi
-if $PROTONX_STAGE_UPDATE; then PROTONX_APP_NAME='ProtonX Update'; fi
+if $PROTONX_STAGE_UPDATE; then PROTONX_APP_NAME="$PROTONX_UPDATE_NAME"; fi
 PROTONX_FINAL="$PROTONX_ROOT/build/$PROTONX_APP_NAME.app"
 PROTONX_TARGET_RUNNING=false
 # Check the exact bundle: another staged bundle may share its executable name.

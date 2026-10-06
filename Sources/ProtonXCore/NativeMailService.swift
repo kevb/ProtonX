@@ -19,9 +19,12 @@ public struct NativeMailMessage: Codable, Identifiable, Equatable, Sendable {
     public let date: UInt64
     public let unread: Bool
     public let attachments: Int
-    public init(id: UInt64, subject: String, sender: String, senderName: String = "", recipient: String = "", date: UInt64 = 0, unread: Bool = false, attachments: Int = 0) {
+    public let isDraft: Bool?
+    public let canReply: Bool?
+    public let isScheduled: Bool?
+    public init(id: UInt64, subject: String, sender: String, senderName: String = "", recipient: String = "", date: UInt64 = 0, unread: Bool = false, attachments: Int = 0, isDraft: Bool = false, canReply: Bool = true, isScheduled: Bool = false) {
         self.id = id; self.subject = subject; self.sender = sender; self.senderName = senderName
-        self.recipient = recipient; self.date = date; self.unread = unread; self.attachments = attachments
+        self.recipient = recipient; self.date = date; self.unread = unread; self.attachments = attachments; self.isDraft = isDraft; self.canReply = canReply; self.isScheduled = isScheduled
     }
 }
 public struct NativeMailResult: Codable, Sendable {
@@ -34,9 +37,14 @@ public struct NativeMailResult: Codable, Sendable {
     public var id: UInt64?
     public var body: String?
     public var attachments: Int?
-    public init(phase: NativeMailPhase? = nil, folders: [NativeMailFolder]? = nil, folder: UInt64? = nil, messages: [NativeMailMessage]? = nil, loading: Bool? = nil, email: String? = nil, id: UInt64? = nil, body: String? = nil, attachments: Int? = nil) {
+    public var draft: NativeMailDraft?
+    public var token: UInt64?
+    public var sendState: NativeMailSendState?
+    public var closed: Bool?
+    public init(phase: NativeMailPhase? = nil, folders: [NativeMailFolder]? = nil, folder: UInt64? = nil, messages: [NativeMailMessage]? = nil, loading: Bool? = nil, email: String? = nil, id: UInt64? = nil, body: String? = nil, attachments: Int? = nil, draft: NativeMailDraft? = nil, token: UInt64? = nil, sendState: NativeMailSendState? = nil, closed: Bool? = nil) {
         self.phase = phase; self.folders = folders; self.folder = folder; self.messages = messages
         self.loading = loading; self.email = email; self.id = id; self.body = body; self.attachments = attachments
+        self.draft = draft; self.token = token; self.sendState = sendState; self.closed = closed
     }
 }
 public enum NativeMailFailure: String, Codable, Error, LocalizedError, Sendable {
@@ -47,8 +55,15 @@ public enum NativeMailFailure: String, Codable, Error, LocalizedError, Sendable 
     case sessionFailed = "session_failed", sessionExpired = "session_expired", signOutFailed = "sign_out_failed"
     case invalidSelection = "invalid_selection", messageFailed = "message_failed", decryptionFailed = "decryption_failed"
     case messageTooLarge = "message_too_large", snapshotFailed = "snapshot_failed", pageLimit = "page_limit"
+    case draftFailed = "draft_failed", draftUnsupported = "draft_unsupported", senderUnavailable = "sender_unavailable"
+    case sendUncertain = "send_uncertain", sendRejected = "send_rejected"
     public var errorDescription: String? {
         switch self {
+        case .draftFailed: "Your draft could not complete this operation. Your text is still in the composer."
+        case .draftUnsupported: "This draft contains content this composer cannot safely edit. Use the official client."
+        case .senderUnavailable: "That sending address is unavailable. Check your Gmail connection or select an enabled address."
+        case .sendRejected: "Proton could not queue this message. Check your sender and recipients before trying again."
+        case .sendUncertain: "Sending could not be confirmed. Check Sent and Drafts before sending again; ProtonX will not retry automatically."
         case .initializationFailed: "Mail could not open its secure local session. Check Keychain access and try again."
         case .incorrectCode: "That verification code was rejected. Try a fresh code."
         case .mailboxPasswordRejected: "Mail could not unlock your account keys with that mailbox password."
@@ -79,9 +94,13 @@ public struct NativeMailCommand: Encodable, Sendable {
     public var folder: UInt64?
     public var item: UInt64?
     public var more: Bool?
-    public init(_ method: String, username: String? = nil, password: String? = nil, code: String? = nil, folder: UInt64? = nil, item: UInt64? = nil, more: Bool? = nil) {
+    public var mode: String?
+    public var token: UInt64?
+    public var content: NativeMailComposeContent?
+    public init(_ method: String, username: String? = nil, password: String? = nil, code: String? = nil, folder: UInt64? = nil, item: UInt64? = nil, more: Bool? = nil, mode: String? = nil, token: UInt64? = nil, content: NativeMailComposeContent? = nil) {
         self.method = method; self.username = username; self.password = password; self.code = code
         self.folder = folder; self.item = item; self.more = more
+        self.mode = mode; self.token = token; self.content = content
     }
 }
 public protocol NativeMailRunning: Sendable {
@@ -196,6 +215,12 @@ public final class NativeMailProcess: NativeMailRunning, @unchecked Sendable {
         if let failure = reply.failure { throw failure }
         guard let result = reply.result, (result.messages?.count ?? 0) <= 1000, (result.folders?.count ?? 0) <= 1024, (result.body?.utf8.count ?? 0) <= 2 * 1024 * 1024 else { throw ProtonXError.invalidResponse }
         if let messages = result.messages { guard Set(messages.map(\.id)).count == messages.count else { throw ProtonXError.invalidResponse } }
+        if let draft = result.draft {
+            guard draft.token > 0, draft.senders.count <= 256, Set(draft.senders).count == draft.senders.count,
+                  draft.senders.contains(draft.sender), draft.quote.utf8.count <= 2 * 1024 * 1024,
+                  draft.attachments >= 0 else { throw ProtonXError.invalidResponse }
+            try draft.content.validate(senders: draft.senders, sending: false)
+        }
         return result
     }
 }

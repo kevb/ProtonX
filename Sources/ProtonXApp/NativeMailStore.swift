@@ -18,6 +18,10 @@ final class NativeMailStore: ObservableObject {
     @Published var selectedItem: UInt64?
     @Published var query = ""
     @Published var error: String?
+    @Published private(set) var draft: NativeMailDraft?
+    @Published private(set) var composeStatus: String?
+    @Published private(set) var notice: String?
+    private var sendPolling: Task<Void, Never>?
     let previewOnly: Bool
     private let runner: any NativeMailRunning
     private let defaults: UserDefaults
@@ -144,16 +148,153 @@ final class NativeMailStore: ObservableObject {
             }
         }
     }
+    func compose(_ mode: String = "new") {
+        guard phase == .open, !busy, draft == nil else { return }
+        guard mode == "new" || selectedMessage != nil else { return }
+        if mode == "open" { guard selectedMessage?.isDraft == true, selectedMessage?.isScheduled != true else { return } }
+        if mode == "reply" || mode == "reply_all" { guard selectedMessage?.canReply != false else { return } }
+        notice = nil; composeStatus = nil
+        if demo {
+            let reply = mode != "new" ? selectedMessage : nil
+            let sender = reply?.recipient == "alex.demo@gmail.com" ? "alex.demo@gmail.com" : email
+            draft = NativeMailDraft(token: 1, sender: sender, senders: [email, "alex.demo@gmail.com"], to: reply.map { [$0.sender] } ?? [], subject: reply.map { "Re: " + $0.subject } ?? "", quote: reply == nil ? "Alex" : "\n\nOn Tuesday, Sam wrote:\n> Coffee on Saturday?", state: .editing)
+            return
+        }
+        perform { [self] captured in
+            let result = try await runner.request(NativeMailCommand("compose", folder: mode == "new" ? nil : selectedFolder, item: mode == "new" ? nil : selectedItem, mode: mode))
+            try check(captured)
+            guard let next = result.draft else { throw ProtonXError.invalidResponse }
+            draft = next
+        }
+    }
+    func markDraftEdited() {
+        if draft?.state == .editing { composeStatus = nil }
+    }
+    func saveDraft(_ content: NativeMailComposeContent, close: Bool = false) {
+        guard phase == .open, !busy, let draft, draft.state == .editing else { return }
+        do { try content.validate(senders: draft.senders, sending: false) } catch { self.error = safeError(error); return }
+        if demo { composeStatus = "Demo draft saved · no account accessed"; if close { self.draft = nil }; return }
+        perform { [self] captured in
+            let result = try await runner.request(NativeMailCommand("save_draft", token: draft.token, content: content))
+            try check(captured)
+            guard result.draft?.token == draft.token else { throw ProtonXError.invalidResponse }
+            self.draft = result.draft; composeStatus = "Draft saved locally · syncing with Proton"
+            if close {
+                let closed = try await runner.request(NativeMailCommand("close_draft", token: draft.token))
+                try check(captured); guard closed.closed == true else { throw ProtonXError.invalidResponse }
+                self.draft = nil; notice = "Draft saved"; try await load(captured: captured)
+            }
+        }
+    }
+    func closePendingDraft() {
+        guard phase == .open, !busy, let draft, draft.state != .editing else { return }
+        sendPolling?.cancel()
+        perform { [self] captured in
+            do {
+                let result = try await runner.request(NativeMailCommand("close_draft", token: draft.token))
+                try check(captured); guard result.closed == true else { throw ProtonXError.invalidResponse }
+            } catch {
+                try check(captured)
+                // A lost connection cannot cancel a queued send. Closing this local
+                // composer never deletes a draft or creates another send action.
+                self.error = safeError(error)
+            }
+            self.draft = nil; composeStatus = nil; notice = "Check Sent and Drafts · delivery was not confirmed"
+        }
+    }
+    func discardDraft() {
+        guard phase == .open, !busy, let draft, draft.state == .editing else { return }
+        if demo { self.draft = nil; return }
+        perform { [self] captured in
+            let result = try await runner.request(NativeMailCommand("discard_draft", token: draft.token))
+            try check(captured); guard result.closed == true else { throw ProtonXError.invalidResponse }
+            self.draft = nil; composeStatus = nil; try await load(captured: captured)
+        }
+    }
+    func sendDraft(_ content: NativeMailComposeContent) {
+        guard phase == .open, !busy, let draft, draft.state == .editing else { return }
+        do { try content.validate(senders: draft.senders, sending: true) } catch { self.error = safeError(error); return }
+        if demo { self.draft = nil; notice = "Demo message sent · nothing was delivered"; return }
+        perform { [self] captured in
+            // Sending is a deliberate user action. Once the IPC request starts,
+            // an ambiguous outcome never becomes another send action automatically.
+            self.draft?.state = .unknown; composeStatus = "Sending…"
+            do {
+                let result = try await runner.request(NativeMailCommand("send_draft", token: draft.token, content: content))
+                try check(captured); try applySendResult(result, token: draft.token)
+                if self.draft?.state == .queued { pollSend(token: draft.token, captured: captured) }
+                if self.draft?.state == .sent { try await finishSent(token: draft.token, captured: captured) }
+            } catch {
+                if epoch.accepts(captured), !Task.isCancelled {
+                    if (error as? NativeMailFailure) == .sendRejected {
+                        self.draft?.state = .editing; composeStatus = "Message was not queued. Correct the sender or recipients and try again."
+                    } else {
+                        composeStatus = "Sending could not be confirmed. Check Sent and Drafts before sending again."
+                    }
+                }
+                throw error
+            }
+        }
+    }
+    private func applySendResult(_ result: NativeMailResult, token: UInt64) throws {
+        guard result.token == token, let state = result.sendState, state != .editing, draft?.token == token else { throw ProtonXError.invalidResponse }
+        draft?.state = state
+        switch state {
+        case .queued: composeStatus = "Sending · awaiting Proton’s confirmation"
+        case .sent: composeStatus = "Sent"
+        case .failed: composeStatus = "Proton reported a sending failure. Check the draft in the official client before trying again."
+        case .unknown: composeStatus = "Sending could not be confirmed. Check Sent and Drafts before sending again."
+        case .editing: break
+        }
+    }
+    private func finishSent(token: UInt64, captured: UInt64) async throws {
+        let result = try await runner.request(NativeMailCommand("close_draft", token: token))
+        try check(captured); guard result.closed == true else { throw ProtonXError.invalidResponse }
+        draft = nil; notice = "Message sent"; composeStatus = nil
+        try await load(captured: captured)
+    }
+    private func pollSend(token: UInt64, captured: UInt64) {
+        sendPolling?.cancel()
+        sendPolling = Task { [weak self] in
+            for _ in 0..<60 {
+                try? await Task.sleep(for: .seconds(2))
+                guard let self, !Task.isCancelled, self.epoch.accepts(captured), self.draft?.token == token else { return }
+                do {
+                    let result = try await self.runner.request(NativeMailCommand("draft_status", token: token))
+                    try self.check(captured); try self.applySendResult(result, token: token)
+                    if self.draft?.state == .sent { try await self.finishSent(token: token, captured: captured); return }
+                    if self.draft?.state == .failed { return }
+                } catch {
+                    guard self.epoch.accepts(captured), !Task.isCancelled else { return }
+                    self.draft?.state = .unknown; self.composeStatus = NativeMailFailure.sendUncertain.localizedDescription
+                    if (error as? NativeMailFailure) == .sessionExpired { self.expireSession() }
+                    return
+                }
+            }
+            guard let self, self.epoch.accepts(captured), self.draft?.token == token else { return }
+            self.draft?.state = .unknown; self.composeStatus = NativeMailFailure.sendUncertain.localizedDescription
+        }
+    }
+    func checkSendStatus() {
+        sendPolling?.cancel()
+        guard phase == .open, !busy, let draft, draft.state != .editing else { return }
+        perform { [self] captured in
+            let result = try await runner.request(NativeMailCommand("draft_status", token: draft.token))
+            try check(captured); try applySendResult(result, token: draft.token)
+            if self.draft?.state == .sent { try await finishSent(token: draft.token, captured: captured) }
+        }
+    }
     func signOut() {
-        guard !previewOnly, !demo, !busy else { return }
+        guard !previewOnly, !demo, !busy, draft == nil else { return }
         perform { [self] captured in
             _ = try await runner.request(NativeMailCommand("sign_out")); try check(captured)
             hasSession = false; defaults.set(false, forKey: "nativeMailConnected"); lock(); phase = .welcome
         }
     }
     func lock() {
-        epoch.invalidate(); selectionEpoch.invalidate(); operation?.cancel(); selection?.cancel(); polling?.cancel(); auth?.invalidate(); auth = nil; runner.cancelAll()
+        epoch.invalidate(); selectionEpoch.invalidate(); operation?.cancel(); selection?.cancel(); polling?.cancel(); sendPolling?.cancel(); auth?.invalidate(); auth = nil; runner.cancelAll()
         folders = []; messages = []; body = nil; selectedItem = nil; selectedFolder = nil; query = ""; email = ""; error = nil
+        draft = nil; composeStatus = nil; notice = nil
         loading = false; lastSynced = nil; busy = false; demoBodies = [:]; demoMessages = []; loadedFolder = nil
         phase = hasSession ? .locked : .welcome
     }
@@ -161,7 +302,7 @@ final class NativeMailStore: ObservableObject {
     func enterDemo() {
         lock(); demo = true; phase = .open; email = "alex@example.com"
         folders = [NativeMailFolder(id: 1, name: "Inbox", count: 2), NativeMailFolder(id: 2, name: "Sent")]; selectedFolder = 1; loadedFolder = 1
-        messages = [NativeMailMessage(id: 11, subject: "Welcome to your native inbox", sender: "hello@example.com", senderName: "ProtonX", recipient: "alex@example.com", date: 1791288000, unread: true), NativeMailMessage(id: 12, subject: "Coffee this weekend?", sender: "sam@example.com", senderName: "Sam", recipient: "alex@example.com", date: 1791201600)]
+        messages = [NativeMailMessage(id: 11, subject: "Welcome to your native inbox", sender: "hello@example.com", senderName: "ProtonX", recipient: "alex@example.com", date: 1791288000, unread: true), NativeMailMessage(id: 12, subject: "Coffee this weekend?", sender: "sam@example.com", senderName: "Sam", recipient: "alex.demo@gmail.com", date: 1791201600)]
         demoMessages = messages
         demoBodies = [11: "A native Mail window, with one shared menu-bar icon and Mac keyboard shortcuts.\n\nThis inbox is synthetic. No account has been accessed.\n\nThe direct Mail client uses Proton’s existing authentication and encryption core.", 12: "Hi Alex,\n\nCoffee on Saturday?\n\nSam"]
         selectedItem = 11; body = demoBodies[11]

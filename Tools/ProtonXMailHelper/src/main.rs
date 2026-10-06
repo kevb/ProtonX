@@ -14,6 +14,12 @@ use mail_uniffi::core::verification::{
 use mail_uniffi::core::{OSKeyChain, OSKeyChainEntryKind, OSKeyChainError, StoredSessionState};
 use mail_uniffi::errors::{ActionError, MailScrollerError, ProtonError, UserSessionError};
 use mail_uniffi::mail::datatypes::{Message, MimeType};
+use mail_uniffi::mail::draft::observer::{DraftSendResultOrigin, DraftSendStatus};
+use mail_uniffi::mail::draft::recipients::{
+    AddSingleRecipientError, ComposerRecipient, ComposerRecipientList, RemoveRecipientError,
+    SingleRecipientEntry,
+};
+use mail_uniffi::mail::draft::{self, Draft, DraftCreateMode};
 use mail_uniffi::mail::mail_scroller::{
     MessageScroller, MessageScrollerListUpdate, MessageScrollerLiveQueryCallback,
     MessageScrollerStatusUpdate, MessageScrollerUpdate,
@@ -73,12 +79,168 @@ struct Request {
 enum Command {
     Initialize,
     Restore,
-    Login { username: String, password: String },
-    Totp { code: String },
-    MailboxPassword { password: String },
-    Snapshot { folder: Option<u64>, more: bool },
-    Message { folder: u64, item: u64 },
+    Login {
+        username: String,
+        password: String,
+    },
+    Totp {
+        code: String,
+    },
+    MailboxPassword {
+        password: String,
+    },
+    Snapshot {
+        folder: Option<u64>,
+        more: bool,
+    },
+    Message {
+        folder: u64,
+        item: u64,
+    },
+    Compose {
+        mode: String,
+        folder: Option<u64>,
+        item: Option<u64>,
+    },
+    SaveDraft {
+        token: u64,
+        content: ComposeInput,
+    },
+    SendDraft {
+        token: u64,
+        content: ComposeInput,
+    },
+    DraftStatus {
+        token: u64,
+    },
+    CloseDraft {
+        token: u64,
+    },
+    DiscardDraft {
+        token: u64,
+    },
     SignOut,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ComposeInput {
+    sender: String,
+    to: Vec<String>,
+    cc: Vec<String>,
+    bcc: Vec<String>,
+    subject: String,
+    text: String,
+}
+fn valid_address(value: &str) -> bool {
+    value.len() <= 254
+        && !value
+            .chars()
+            .any(|c| c.is_whitespace() || c.is_control() || "<>\"(),;:".contains(c))
+        && value.split_once('@').is_some_and(|(local, domain)| {
+            !local.is_empty()
+                && !domain.contains('@')
+                && domain.contains('.')
+                && !domain.starts_with('.')
+                && !domain.ends_with('.')
+        })
+}
+impl ComposeInput {
+    fn validate(&self, sending: bool) -> Result<(), &'static str> {
+        let recipients = self
+            .to
+            .iter()
+            .chain(&self.cc)
+            .chain(&self.bcc)
+            .collect::<Vec<_>>();
+        if !valid_address(&self.sender)
+            || recipients.len() > 100
+            || (sending && recipients.is_empty())
+            || recipients.iter().any(|r| !valid_address(r))
+            || self.subject.len() > 998
+            || self.subject.chars().any(|c| c.is_control())
+            || self.text.len() > 32 * 1024
+        {
+            return Err("invalid_input");
+        }
+        let mut unique = std::collections::HashSet::new();
+        if recipients.iter().any(|r| !unique.insert(r.to_lowercase())) {
+            return Err("invalid_input");
+        }
+        Ok(())
+    }
+}
+fn terminal_send_state(
+    result: draft::observer::DraftSendResult,
+    expected: Option<Id>,
+) -> Option<&'static str> {
+    if expected != Some(result.message_id) {
+        return None;
+    }
+    match (result.origin, result.error) {
+        (DraftSendResultOrigin::Send, DraftSendStatus::Success { .. }) => Some("sent"),
+        (
+            DraftSendResultOrigin::Send | DraftSendResultOrigin::SaveBeforeSend,
+            DraftSendStatus::Failure(_),
+        ) => Some("failed"),
+        _ => None,
+    }
+}
+struct Composer {
+    token: u64,
+    draft: Arc<Draft>,
+    suffix: String,
+    text: String,
+    state: &'static str,
+    message_id: Option<Id>,
+    warning: Option<&'static str>,
+}
+fn text_body(text: &str, mime: MimeType, suffix: &str) -> String {
+    if matches!(mime, MimeType::TextPlain) {
+        format!("{text}{suffix}")
+    } else {
+        let escaped = text
+            .replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+            .replace('\"', "&quot;")
+            .replace("\r\n", "\n")
+            .replace('\r', "\n")
+            .replace('\n', "<br>");
+        format!("<div>{escaped}</div><br>{suffix}")
+    }
+}
+fn recipient_addresses(list: &ComposerRecipientList) -> Result<Vec<String>, &'static str> {
+    list.recipients()
+        .into_iter()
+        .map(|r| match r {
+            ComposerRecipient::Single(r) => Ok(r.address),
+            _ => Err("draft_unsupported"),
+        })
+        .collect()
+}
+fn replace_recipients(list: &ComposerRecipientList, values: &[String]) -> Result<(), &'static str> {
+    let current = recipient_addresses(list)?;
+    for old in &current {
+        if !values.iter().any(|v| v.eq_ignore_ascii_case(old)) {
+            if !matches!(list.remove_single_recipient(old), RemoveRecipientError::Ok) {
+                return Err("draft_failed");
+            }
+        }
+    }
+    for value in values {
+        if !current.iter().any(|v| v.eq_ignore_ascii_case(value)) {
+            if !matches!(
+                list.add_single_recipient(SingleRecipientEntry {
+                    name: None,
+                    email: value.clone()
+                }),
+                AddSingleRecipientError::Ok
+            ) {
+                return Err("draft_failed");
+            }
+        }
+    }
+    Ok(())
 }
 #[derive(Serialize)]
 struct Response {
@@ -153,6 +315,18 @@ fn session_failure(error: UserSessionError, fallback: &'static str) -> &'static 
     match error {
         UserSessionError::Other(error) => proton_failure(&error, fallback),
         _ => fallback,
+    }
+}
+fn draft_open_failure(error: mail_uniffi::errors::DraftOpenError) -> &'static str {
+    match error {
+        mail_uniffi::errors::DraftOpenError::Other(error) => proton_failure(&error, "draft_failed"),
+        _ => "draft_failed",
+    }
+}
+fn draft_save_failure(error: mail_uniffi::errors::DraftSaveError) -> &'static str {
+    match error {
+        mail_uniffi::errors::DraftSaveError::Other(error) => proton_failure(&error, "draft_failed"),
+        _ => "draft_failed",
     }
 }
 fn scroller_failure(error: MailScrollerError) -> &'static str {
@@ -235,6 +409,8 @@ struct Backend {
     scroller: Option<Arc<MessageScroller>>,
     listing: Arc<(Mutex<ListState>, Condvar)>,
     folder: Option<u64>,
+    composer: Option<Composer>,
+    next_composer: u64,
 }
 impl Backend {
     fn new(directory: PathBuf) -> Result<Self, &'static str> {
@@ -284,6 +460,8 @@ impl Backend {
             scroller: None,
             listing: Arc::new((Mutex::new(ListState::default()), Condvar::new())),
             folder: None,
+            composer: None,
+            next_composer: 0,
         })
     }
     fn login_failure(&self, error: LoginError) -> &'static str {
@@ -464,6 +642,72 @@ impl Backend {
                 }
                 Ok(json!({"id":item,"body":body,"attachments":message.attachments().len()}))
             }
+            Command::Compose { mode, folder, item } => self.compose(&mode, folder, item),
+            Command::SaveDraft { token, content } => {
+                self.update_draft(token, content, false)?;
+                let draft = self.composer.as_ref().ok_or("invalid_state")?.draft.clone();
+                sdk_void!(
+                    mail_uniffi::errors::VoidDraftSaveResult,
+                    block_on(draft.save())
+                )
+                .map_err(draft_save_failure)?;
+                self.composer_value()
+            }
+            Command::SendDraft { token, content } => {
+                self.update_draft(token, content, true)?;
+                let composer = self.composer.as_mut().ok_or("invalid_state")?;
+                // Commit the no-retry guard before crossing the SDK queue boundary.
+                composer.state = "unknown";
+                if let Err(error) = sdk_void!(
+                    mail_uniffi::errors::VoidDraftSendResult,
+                    block_on(composer.draft.clone().send())
+                ) {
+                    use mail_uniffi::errors::{DraftSendError, DraftSendErrorReason};
+                    if matches!(
+                        error,
+                        DraftSendError::Reason(
+                            DraftSendErrorReason::NoRecipients
+                                | DraftSendErrorReason::RecipientEmailInvalid(_)
+                                | DraftSendErrorReason::ProtonRecipientDoesNotExist(_)
+                                | DraftSendErrorReason::AddressDisabled(_)
+                                | DraftSendErrorReason::AddressDoesNotHavePrimaryKey(_)
+                        )
+                    ) {
+                        composer.state = "editing";
+                        return Err("send_rejected");
+                    }
+                    return Err("send_uncertain");
+                }
+                composer.message_id = sdk_result!(
+                    draft::DraftMessageIdResult,
+                    block_on(composer.draft.clone().message_id())
+                )
+                .map_err(|_| "send_uncertain")?;
+                composer.state = "queued";
+                self.draft_status(token)
+            }
+            Command::DraftStatus { token } => self.draft_status(token),
+            Command::CloseDraft { token } => {
+                let composer = self.composer.as_ref().ok_or("invalid_state")?;
+                if composer.token != token {
+                    return Err("invalid_state");
+                }
+                self.composer = None;
+                Ok(json!({"closed":true}))
+            }
+            Command::DiscardDraft { token } => {
+                let composer = self.composer.as_ref().ok_or("invalid_state")?;
+                if composer.token != token || composer.state != "editing" {
+                    return Err("invalid_state");
+                }
+                sdk_void!(
+                    mail_uniffi::errors::VoidDraftDiscardResult,
+                    block_on(composer.draft.clone().discard())
+                )
+                .map_err(|_| "draft_failed")?;
+                self.composer = None;
+                Ok(json!({"closed":true}))
+            }
             Command::SignOut => {
                 let user = self.user.as_ref().ok_or("invalid_state")?;
                 let id = sdk_result!(
@@ -480,10 +724,204 @@ impl Backend {
                 self.mailbox = None;
                 self.scroller = None;
                 self.flow = None;
+                self.composer = None;
                 self.listing.0.lock().unwrap().items.clear();
                 Ok(json!({"phase":"welcome"}))
             }
         }
+    }
+    fn compose(
+        &mut self,
+        mode: &str,
+        folder: Option<u64>,
+        item: Option<u64>,
+    ) -> Result<Value, &'static str> {
+        if self.composer.is_some() {
+            return Err("invalid_state");
+        }
+        if !matches!(mode, "new" | "open" | "reply" | "reply_all") {
+            return Err("invalid_input");
+        }
+        let user = self.user.clone().ok_or("invalid_state")?;
+        if mode != "new" {
+            let item = item.ok_or("invalid_selection")?;
+            if self.folder != folder {
+                return Err("invalid_selection");
+            }
+            let original = self
+                .listing
+                .0
+                .lock()
+                .unwrap()
+                .items
+                .iter()
+                .find(|m| m.id.as_u64() == item)
+                .cloned()
+                .ok_or("invalid_selection")?;
+            if mode == "open" {
+                if !original.is_draft || original.is_scheduled {
+                    return Err("draft_unsupported");
+                }
+            } else if !original.can_reply {
+                return Err("draft_unsupported");
+            }
+        }
+        let draft = if mode == "open" {
+            sdk_result!(
+                draft::OpenDraftResult,
+                block_on(draft::open_draft(&user, Id::from(item.unwrap())))
+            )
+            .map_err(draft_open_failure)?
+            .draft
+        } else {
+            let mode = match mode {
+                "new" => DraftCreateMode::Empty,
+                "reply" => DraftCreateMode::Reply(Id::from(item.unwrap())),
+                "reply_all" => DraftCreateMode::ReplyAll(Id::from(item.unwrap())),
+                _ => return Err("invalid_input"),
+            };
+            sdk_result!(
+                draft::NewDraftResult,
+                block_on(draft::new_draft(&user, mode))
+            )
+            .map_err(draft_open_failure)?
+        };
+        let warning = if draft.address_validation_result().is_some() {
+            Some("sender_changed")
+        } else {
+            None
+        };
+        let raw = draft.body();
+        if raw.len() > 2 * 1024 * 1024 {
+            return Err("message_too_large");
+        }
+        let (text, suffix) = if mode == "open" {
+            let text = if matches!(draft.mime_type(), MimeType::TextPlain) {
+                raw
+            } else {
+                html2text::from_read(raw.as_bytes(), 100).map_err(|_| "draft_failed")?
+            };
+            if text.len() > 32 * 1024 {
+                return Err("message_too_large");
+            }
+            (text, String::new())
+        } else {
+            (String::new(), raw)
+        };
+        self.next_composer += 1;
+        self.composer = Some(Composer {
+            token: self.next_composer,
+            draft,
+            suffix,
+            text,
+            state: "editing",
+            message_id: None,
+            warning,
+        });
+        let result = self.composer_value();
+        if result.is_err() {
+            self.composer = None;
+        }
+        result
+    }
+    fn composer_value(&self) -> Result<Value, &'static str> {
+        let c = self.composer.as_ref().ok_or("invalid_state")?;
+        let senders = sdk_result!(
+            draft::DraftListSenderAddressesResult,
+            block_on(c.draft.clone().list_sender_addresses())
+        )
+        .map_err(|e| proton_failure(&e, "draft_failed"))?;
+        if !senders.available.contains(&senders.active) {
+            return Err("sender_unavailable");
+        }
+        let quote = if matches!(c.draft.mime_type(), MimeType::TextPlain) {
+            c.suffix.clone()
+        } else {
+            html2text::from_read(c.suffix.as_bytes(), 100).map_err(|_| "draft_failed")?
+        };
+        Ok(
+            json!({"draft":{"token":c.token,"sender":senders.active,"senders":senders.available,"to":recipient_addresses(&c.draft.to_recipients())?,"cc":recipient_addresses(&c.draft.cc_recipients())?,"bcc":recipient_addresses(&c.draft.bcc_recipients())?,"subject":c.draft.subject(),"text":c.text,"quote":quote,"state":c.state,"warning":c.warning,"attachments":sdk_result!(draft::attachments::AttachmentListAttachmentsResult, block_on(c.draft.attachment_list().attachments())).map_err(|_| "draft_failed")?.len()}}),
+        )
+    }
+    fn update_draft(
+        &mut self,
+        token: u64,
+        content: ComposeInput,
+        sending: bool,
+    ) -> Result<(), &'static str> {
+        content.validate(sending)?;
+        let c = self.composer.as_mut().ok_or("invalid_state")?;
+        if c.token != token || c.state != "editing" {
+            return Err("invalid_state");
+        }
+        let senders = sdk_result!(
+            draft::DraftListSenderAddressesResult,
+            block_on(c.draft.clone().list_sender_addresses())
+        )
+        .map_err(|_| "draft_failed")?;
+        if !senders.available.contains(&content.sender) {
+            return Err("sender_unavailable");
+        }
+        if senders.active != content.sender {
+            // Native batches save explicitly. Let the core update only its own
+            // signature/quote; user text is preserved separately until the full
+            // validated body is applied below. No HTML string surgery is needed.
+            sdk_void!(
+                mail_uniffi::errors::VoidDraftSaveResult,
+                c.draft.set_body(c.suffix.clone())
+            )
+            .map_err(draft_save_failure)?;
+            sdk_void!(
+                draft::DraftChangeSenderAddressResult,
+                block_on(c.draft.clone().change_sender_address(content.sender))
+            )
+            .map_err(|_| "sender_unavailable")?;
+            c.suffix = c.draft.body();
+            c.warning = None;
+        }
+        replace_recipients(&c.draft.to_recipients(), &content.to)?;
+        replace_recipients(&c.draft.cc_recipients(), &content.cc)?;
+        replace_recipients(&c.draft.bcc_recipients(), &content.bcc)?;
+        sdk_void!(
+            mail_uniffi::errors::VoidDraftSaveResult,
+            c.draft.set_subject(content.subject)
+        )
+        .map_err(draft_save_failure)?;
+        sdk_void!(
+            mail_uniffi::errors::VoidDraftSaveResult,
+            c.draft
+                .set_body(text_body(&content.text, c.draft.mime_type(), &c.suffix))
+        )
+        .map_err(draft_save_failure)?;
+        c.text = content.text;
+        Ok(())
+    }
+    fn draft_status(&mut self, token: u64) -> Result<Value, &'static str> {
+        let user = self.user.clone().ok_or("invalid_state")?;
+        let c = self.composer.as_mut().ok_or("invalid_state")?;
+        if c.token != token {
+            return Err("invalid_state");
+        }
+        if matches!(c.state, "queued" | "unknown") {
+            if c.message_id.is_none() {
+                c.message_id = sdk_result!(
+                    draft::DraftMessageIdResult,
+                    block_on(c.draft.clone().message_id())
+                )
+                .map_err(|e| proton_failure(&e, "send_uncertain"))?;
+            }
+            let records = sdk_result!(
+                draft::observer::DraftSendResultUnseenResult,
+                block_on(draft::observer::draft_send_result_unseen(&user))
+            )
+            .map_err(|e| proton_failure(&e, "send_uncertain"))?;
+            for result in records {
+                if let Some(state) = terminal_send_state(result, c.message_id) {
+                    c.state = state;
+                }
+            }
+        }
+        Ok(json!({"token":token,"sendState":c.state}))
     }
     fn snapshot(&mut self, folder: Option<u64>, more: bool) -> Result<Value, &'static str> {
         let user = self.user.clone().ok_or("invalid_state")?;
@@ -549,7 +987,11 @@ impl Backend {
             );
         }
         let scroller = self.scroller.as_ref().ok_or("invalid_state")?.clone();
-        let previous = self.listing.0.lock().unwrap().generation;
+        let previous = {
+            let mut state = self.listing.0.lock().unwrap();
+            state.failed = None;
+            state.generation
+        };
         if more {
             if self.listing.0.lock().unwrap().items.len() >= 1000 {
                 return Err("page_limit");
@@ -579,7 +1021,7 @@ impl Backend {
         if let Some(failure) = state.failed {
             return Err(failure);
         }
-        let messages:Vec<Value>=state.items.iter().take(1000).map(|m|json!({"id":m.id.as_u64(),"subject":m.subject,"sender":m.sender.address,"senderName":m.sender.name,"recipient":m.to_list.iter().map(|r|r.address.as_str()).collect::<Vec<_>>().join(", "),"date":m.time.0,"unread":m.unread,"attachments":m.num_attachments})).collect();
+        let messages:Vec<Value>=state.items.iter().take(1000).map(|m|json!({"id":m.id.as_u64(),"subject":m.subject,"sender":m.sender.address,"senderName":m.sender.name,"recipient":m.to_list.iter().map(|r|r.address.as_str()).collect::<Vec<_>>().join(", "),"date":m.time.0,"unread":m.unread,"attachments":m.num_attachments,"isDraft":m.is_draft,"canReply":m.can_reply,"isScheduled":m.is_scheduled})).collect();
         let loading = state.loading;
         drop(state); // Never hold a callback mutex across SDK I/O.
         let details = sdk_result!(
@@ -744,6 +1186,105 @@ mod tests {
             },
         ));
         assert_eq!(listing.0.lock().unwrap().failed, Some("snapshot_failed"));
+    }
+    #[test]
+    fn a_save_acknowledgement_or_another_message_never_confirms_delivery() {
+        use draft::observer::{DraftSendFailure, DraftSendResult};
+        use mail_uniffi::core::datatypes::UnixTimestamp;
+        let record = |origin, error| DraftSendResult {
+            message_id: Id::from(3_u64),
+            timestamp: UnixTimestamp(0),
+            origin,
+            error,
+        };
+        let success = || DraftSendStatus::Success {
+            seconds_until_cancel: 0,
+            delivery_time: UnixTimestamp(0),
+        };
+        let failure = || DraftSendStatus::Failure(DraftSendFailure::Other(ProtonError::Network));
+        assert_eq!(
+            terminal_send_state(
+                record(DraftSendResultOrigin::SaveBeforeSend, success()),
+                Some(Id::from(3_u64))
+            ),
+            None
+        );
+        assert_eq!(
+            terminal_send_state(
+                record(DraftSendResultOrigin::Send, success()),
+                Some(Id::from(4_u64))
+            ),
+            None
+        );
+        assert_eq!(
+            terminal_send_state(
+                record(DraftSendResultOrigin::Send, success()),
+                Some(Id::from(3_u64))
+            ),
+            Some("sent")
+        );
+        assert_eq!(
+            terminal_send_state(
+                record(DraftSendResultOrigin::SaveBeforeSend, failure()),
+                Some(Id::from(3_u64))
+            ),
+            Some("failed")
+        );
+        assert_eq!(
+            terminal_send_state(
+                record(DraftSendResultOrigin::Save, failure()),
+                Some(Id::from(3_u64))
+            ),
+            None
+        );
+    }
+    #[test]
+    fn composer_refuses_header_injection_duplicate_addresses_and_empty_send() {
+        let mut content = ComposeInput {
+            sender: "alex.demo@gmail.com".into(),
+            to: vec!["sam@example.com".into()],
+            cc: vec![],
+            bcc: vec![],
+            subject: "Synthetic".into(),
+            text: "Hi".into(),
+        };
+        assert!(content.validate(true).is_ok());
+        content.subject = "Subject\r\nBcc: other@example.com".into();
+        assert!(content.validate(true).is_err());
+        content.subject = "Synthetic".into();
+        content.cc.push("SAM@example.com".into());
+        assert!(content.validate(true).is_err());
+        content.cc.clear();
+        content.to.clear();
+        assert!(content.validate(true).is_err());
+        assert!(content.validate(false).is_ok());
+        content.text = "x".repeat(32 * 1024 + 1);
+        assert!(content.validate(false).is_err());
+        assert!(!valid_address("alex@example.com\r\nBcc: other@example.com"));
+    }
+    #[test]
+    fn composer_escapes_user_text_and_preserves_core_signature_and_quote() {
+        let suffix = "<blockquote>Encrypted upstream quote</blockquote>";
+        assert_eq!(
+            text_body(
+                "<img src=\"https://example.invalid\">\n&",
+                MimeType::TextHtml,
+                suffix
+            ),
+            "<div>&lt;img src=&quot;https://example.invalid&quot;&gt;<br>&amp;</div><br><blockquote>Encrypted upstream quote</blockquote>"
+        );
+        assert_eq!(
+            text_body("SYNTHETIC\n", MimeType::TextPlain, "Original quote"),
+            "SYNTHETIC\nOriginal quote"
+        );
+    }
+    #[test]
+    fn composer_protocol_keeps_address_and_content_in_closed_private_payload() {
+        let request = json!({"schema":1,"id":1,"command":{"method":"send_draft","token":3,"content":{"sender":"alex.demo@gmail.com","to":["sam@example.com"],"cc":[],"bcc":[],"subject":"Synthetic","text":"SYNTHETIC body"}}});
+        assert!(serde_json::from_value::<Request>(request.clone()).is_ok());
+        let mut injected = request;
+        injected["command"]["content"]["allow_spoofing"] = json!(true);
+        assert!(serde_json::from_value::<Request>(injected).is_err());
     }
     #[test]
     fn renderer_never_loads_remote_resources() {

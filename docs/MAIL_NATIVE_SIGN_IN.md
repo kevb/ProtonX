@@ -4,8 +4,8 @@ Review date: 2026-10-06. The required product experience is **open Mail → ente
 Proton username/password → complete any account challenge → inbox**. On restart,
 restore Mail's own session with local unlock as appropriate. No separate Bridge
 installation, generated mail-client password, ports or certificate import should
-be required in the normal experience. The direct sign-in-to-reader slice is now implemented in local builds. Real-account
-interoperability remains an acceptance gate.
+be required in the normal experience. The direct sign-in-to-reader slice is now implemented in local builds. The user has reported real sign-in and reading. Delivery and recovery remain
+acceptance gates. See [the native composer and linked Gmail review](MAIL_COMPOSER.md).
 
 ## Decision
 
@@ -96,7 +96,7 @@ password-change states are explicit unsupported outcomes; no bypass is added.
 
 The reproducible production build materializes clean pinned source using
 `scripts/prepare-mail-helper.py`, removes unpublished workspace members and applies
-`patches/mail-core.patch`. It exposes the existing sidebar module and disables
+`patches/mail-core.patch`. It exposes the existing sidebar/draft modules and disables
 logging/telemetry through an opt-in feature. Automatic issue reports are discarded.
 The committed native lock adds only the helper's own workspace package to the
 candidate core lock; no registry/Git package records change. AGPL text is copied
@@ -114,11 +114,13 @@ challenge transitions, private IPC, typed error retries, lock/late replies, expi
 failed logout retention and preview isolation. Proton's public message-body tests
 exercise actual decryption and MIME fixtures; its paging tests exercise local
 mock servers. Synthetic preview selection/search/folder/lock checks passed.
-Neither these tests nor a successful build establishes real-account sign-in.
+The user subsequently reported successful real sign-in and reading. No private
+account data was inspected by the agent; delivery and recovery remain unverified.
 
 Next: user-driven designated-account sign-in/read/restart validation, human
 verification and security-key support, expired/revoked-session recovery, then
-read/unread, archive/trash, compose/reply, threads, attachments and search.
+read/unread, archive/trash, threads, attachments and search. Compose/reply is now
+implemented with synthetic contracts; delivery still needs a user-driven test.
 
 ## Acceptance gates
 

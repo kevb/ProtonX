@@ -13,11 +13,13 @@ private final class SyntheticMailRunner: NativeMailRunning, @unchecked Sendable 
     private let lock = NSLock()
     private var steps: [Step]
     private var methods: [String] = []
+    private var commands: [NativeMailCommand] = []
     init(_ steps: [Step]) { self.steps = steps }
     var calls: [String] { lock.withLock { methods } }
+    var payloads: [NativeMailCommand] { lock.withLock { commands } }
     func cancelAll() {}
     func request(_ command: NativeMailCommand) async throws -> NativeMailResult {
-        let step: Step? = lock.withLock { methods.append(command.method); return steps.isEmpty ? nil : steps.removeFirst() }
+        let step: Step? = lock.withLock { methods.append(command.method); commands.append(command); return steps.isEmpty ? nil : steps.removeFirst() }
         guard let step else { throw ProtonXError.invalidResponse }
         #expect(command.method == step.method)
         // Simulate a network reply arriving after the caller has cancelled/locked.
@@ -114,4 +116,110 @@ private let mailSnapshot = NativeMailResult(folders: [NativeMailFolder(id: 1, na
     store.selectedFolder = 2; store.changeFolder(); #expect(store.messages.isEmpty); #expect(store.body == nil)
     store.selectedFolder = 1; store.changeFolder(); #expect(store.messages.count == 2)
     store.lock(); #expect(store.body == nil); #expect(runner.calls.isEmpty)
+}
+
+private let linkedDraft = NativeMailDraft(token: 3, sender: "alex.demo@gmail.com", senders: ["alex@example.com", "alex.demo@gmail.com"], to: ["sam@example.com"], subject: "Re: Synthetic", quote: "SYNTHETIC original quote")
+
+@Test @MainActor func nativeMailReplyKeepsCoreGmailSenderAndWaitsForConfirmedDelivery() async {
+    let runner = SyntheticMailRunner([
+        .init(method: "restore", result: .init(phase: .connected)), .init(method: "snapshot", result: mailSnapshot),
+        .init(method: "compose", result: .init(draft: linkedDraft)),
+        .init(method: "send_draft", result: .init(token: 3, sendState: .queued)),
+        .init(method: "draft_status", result: .init(token: 3, sendState: .sent)),
+        .init(method: "close_draft", result: .init(closed: true)), .init(method: "snapshot", result: mailSnapshot)
+    ])
+    let store = mailStore(runner, saved: true)
+    store.unlock(); await waitForMail { !store.busy }
+    store.selectedItem = 11; store.compose("reply")
+    await waitForMail { !store.busy }
+    #expect(store.draft?.sender == "alex.demo@gmail.com")
+    #expect(runner.payloads[2].item == 11); #expect(runner.payloads[2].folder == 1)
+    var content = linkedDraft.content; content.text = "SYNTHETIC response"
+    store.sendDraft(content); await waitForMail { !store.busy }
+    #expect(store.draft?.state == .queued); #expect(store.notice == nil)
+    store.sendDraft(content) // A second click cannot send the same draft twice.
+    await waitForMail { store.draft == nil }
+    #expect(store.notice == "Message sent")
+    #expect(runner.calls.filter { $0 == "send_draft" }.count == 1)
+    #expect(runner.payloads[3].content?.sender == "alex.demo@gmail.com")
+    #expect(runner.payloads[3].content?.to == ["sam@example.com"])
+    store.lock()
+}
+
+@Test @MainActor func nativeMailAmbiguousSendNeverRetriesOrDiscardsDraft() async {
+    let runner = SyntheticMailRunner([
+        .init(method: "restore", result: .init(phase: .connected)), .init(method: "snapshot", result: mailSnapshot),
+        .init(method: "compose", result: .init(draft: linkedDraft)),
+        .init(method: "send_draft", result: .init(), failure: .sendUncertain)
+    ])
+    let store = mailStore(runner, saved: true)
+    store.unlock(); await waitForMail { !store.busy }; store.compose(); await waitForMail { !store.busy }
+    store.sendDraft(linkedDraft.content); await waitForMail { !store.busy }
+    #expect(store.draft?.state == .unknown); #expect(store.notice == nil)
+    store.sendDraft(linkedDraft.content); store.discardDraft(); store.saveDraft(linkedDraft.content)
+    #expect(runner.calls == ["restore", "snapshot", "compose", "send_draft"])
+    store.lock(); #expect(store.draft == nil); #expect(store.composeStatus == nil)
+}
+
+@Test @MainActor func nativeMailUnconnectedSenderAndLateComposerCannotSend() async {
+    let runner = SyntheticMailRunner([
+        .init(method: "restore", result: .init(phase: .connected)), .init(method: "snapshot", result: mailSnapshot),
+        .init(method: "compose", result: .init(draft: linkedDraft))
+    ])
+    let store = mailStore(runner, saved: true)
+    store.unlock(); await waitForMail { !store.busy }; store.compose(); await waitForMail { !store.busy }
+    var spoofed = linkedDraft.content; spoofed.sender = "unconnected@gmail.com"
+    store.sendDraft(spoofed)
+    #expect(store.draft?.state == .editing); #expect(runner.calls.count == 3); #expect(store.error != nil)
+    store.lock()
+    let lateRunner = SyntheticMailRunner([
+        .init(method: "restore", result: .init(phase: .connected)), .init(method: "snapshot", result: mailSnapshot),
+        .init(method: "compose", result: .init(draft: linkedDraft), delay: .milliseconds(80))
+    ])
+    let late = mailStore(lateRunner, saved: true)
+    late.unlock(); await waitForMail { !late.busy }; late.compose(); await waitForMail { lateRunner.calls.count == 3 }
+    late.lock(); try? await Task.sleep(for: .milliseconds(150))
+    #expect(late.draft == nil); #expect(late.phase == .locked)
+}
+
+@Test @MainActor func nativeMailFailedDraftSaveRetainsComposerAndSuccessfulSaveCanClose() async {
+    let runner = SyntheticMailRunner([
+        .init(method: "restore", result: .init(phase: .connected)), .init(method: "snapshot", result: mailSnapshot),
+        .init(method: "compose", result: .init(draft: linkedDraft)),
+        .init(method: "save_draft", result: .init(), failure: .draftFailed),
+        .init(method: "save_draft", result: .init(draft: linkedDraft)),
+        .init(method: "close_draft", result: .init(closed: true)), .init(method: "snapshot", result: mailSnapshot)
+    ])
+    let store = mailStore(runner, saved: true)
+    store.unlock(); await waitForMail { !store.busy }; store.compose(); await waitForMail { !store.busy }
+    store.saveDraft(linkedDraft.content, close: true); await waitForMail { !store.busy }
+    #expect(store.draft != nil); #expect(runner.calls.last == "save_draft")
+    store.saveDraft(linkedDraft.content, close: true); await waitForMail { !store.busy }
+    #expect(store.draft == nil); #expect(store.notice == "Draft saved")
+    store.lock()
+}
+
+@Test @MainActor func nativeMailPreviewComposeSaveAndSendAreSynthetic() async {
+    let runner = SyntheticMailRunner([]), store = mailStore(runner, preview: true)
+    store.selectedItem = 12; store.compose("reply")
+    #expect(store.draft?.sender == "alex.demo@gmail.com")
+    let content = store.draft!.content
+    store.saveDraft(content); store.sendDraft(content)
+    #expect(store.draft == nil); #expect(store.notice == "Demo message sent · nothing was delivered")
+    #expect(runner.calls.isEmpty)
+}
+
+@Test @MainActor func nativeMailPreflightRejectionAllowsCorrectionButNeverRetriesAutomatically() async {
+    let runner = SyntheticMailRunner([
+        .init(method: "restore", result: .init(phase: .connected)), .init(method: "snapshot", result: mailSnapshot),
+        .init(method: "compose", result: .init(draft: linkedDraft)),
+        .init(method: "send_draft", result: .init(), failure: .sendRejected)
+    ])
+    let store = mailStore(runner, saved: true)
+    store.unlock(); await waitForMail { !store.busy }; store.compose(); await waitForMail { !store.busy }
+    store.sendDraft(linkedDraft.content); await waitForMail { !store.busy }
+    #expect(store.draft?.state == .editing)
+    #expect(runner.calls.filter { $0 == "send_draft" }.count == 1)
+    store.markDraftEdited(); #expect(store.composeStatus == nil)
+    store.lock()
 }

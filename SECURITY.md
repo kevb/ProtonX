@@ -70,6 +70,18 @@ include passwords, tokens, real message bodies or vault exports in public issues
   helper stderr or credentials are logged. Its opt-in SDK feature disables the
   logger and telemetry; automatic issue reports are discarded. Production API
   transport, authentication, account limits and decryption remain in Proton's core.
+- Native Mail composer operations use the core's draft constructors, sender
+  validation, Reply-To handling, encrypted save and send queue. The native feature
+  disables immediate per-field auto-save in the SDK wrapper; an explicit complete
+  batch is validated before save/send. Signatures and new reply quotes remain
+  core-managed. Only core-offered From addresses are permitted, with a visible
+  warning when the receiving identity is unavailable. Delivery success comes
+  from the core's stored send result, not its initial queue acknowledgement.
+  Unknown delivery never triggers another app-level send; the underlying core's
+  queue can continue on restore. Lock/close does not cancel remote delivery.
+  New text is limited to 32 KiB, recipients to 100 distinct addresses and subjects
+  to 998 bytes without control characters. Editor text is not persisted in
+  preferences. Save explicitly before lock; unsaved UI text is discarded.
 - Mail renders plain text. HTML, scripts and remote images are not loaded. Native
   HTML is converted to text without a browser; the SDK owns MIME/decryption. The Bridge MIME
   reader is intentionally limited, with bounded recursion; it is not a complete

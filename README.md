@@ -9,7 +9,7 @@ client built on Proton's open-source Rust Pass and Mail cores with separate
 desktop product protocols and sessions. It is not a full replacement for all official apps.
 Initial user-driven sign-in, local unlock and vault loading have been observed.
 The user reported a successful create/sync/delete test login. Editing and session
-recovery still need validation; direct Mail account interoperability is unverified. Use a disposable test
+recovery still need validation. The user reported native Mail sign-in and reading; sending and Mail recovery remain unverified. Use a disposable test
 account before trusting this alpha with your vault.
 Builds are available locally; binary publication also awaits the recorded
 [dependency license review](docs/LICENSE_REVIEW.md).
@@ -21,7 +21,7 @@ ProtonX is independent of Proton AG. GPL-3.0-or-later.
 | Product | Implemented | Current limits |
 | --- | --- | --- |
 | Pass | macOS authentication window and experimental native password prompts; atomic vault/Trash loading, title search and sorting; on-demand item details; password copy and reveal; TOTP copy/setup/edit; create/edit logins and notes with multiple websites and text/hidden custom fields; revision conflict protection; trash/restore; remote sign-out | no browser autofill, passkey operations, attachments, sharing UI, account switching, or offline UI |
-| Mail | Direct native username/password, TOTP and second-password flow; separate Keychain-backed session restoration; folders, paged message list and selected-message decryption through Proton’s Mail SDK; safe text reader | Read-only direct client; account interoperability unverified; no human verification/FIDO-only login, threading, attachments, sending or push UI. Search covers loaded metadata, capped at 1,000 messages. Bridge compose remains an advanced prototype |
+| Mail | Direct native username/password, TOTP and second-password flow; separate Keychain-backed session restoration; folders, paged message list and selected-message decryption through Proton’s Mail SDK; safe text reader; native compose/reply/reply-all, From selection, draft saving and confirmed-send state | Sending and linked-Gmail delivery unverified; no human verification/FIDO-only login, threading, file upload/viewing, rich-text editing or push UI. Search covers loaded metadata, capped at 1,000 messages. Bridge compose remains an advanced prototype |
 | Drive | Architecture decision and planned integration boundary | No Drive client implemented |
 
 Native behavior: standard windows and toolbars, keyboard commands, light/dark
@@ -97,8 +97,8 @@ remote logout and removes this app's local session after it succeeds.
 Choose **Products → Open Mail** (⌘2) and enter your Proton username/password.
 If required, enter an authenticator code or your second mailbox password in the
 native form. There are no ports, generated passwords or certificates in the
-normal onboarding. The direct Mail core is now packaged; live server acceptance
-and end-to-end account recovery still need designated-account validation.
+normal onboarding. Native sign-in and reading have user-reported validation;
+sending and end-to-end account recovery still need designated-account validation.
 See [the native Mail integration and acceptance gates](docs/MAIL_NATIVE_SIGN_IN.md).
 
 Mail keeps its own encrypted session and Keychain entries. On restart, **Unlock
@@ -108,8 +108,10 @@ Pass and Mail do not share authentication. Accounts requiring human verification
 a security-key-only challenge or a password change currently receive an explicit
 unsupported state; use Proton’s official client for those flows.
 
-This first direct client reads mail. It does not send, reply, mark read/unread,
-archive, manage attachments or display conversations yet. Refresh updates the
+The direct client reads, composes, replies and saves drafts. The composer displays
+the core’s available From addresses, including connected Gmail where enabled.
+See [composer behavior and delivery acceptance tests](docs/MAIL_COMPOSER.md).
+Read/unread controls, archive, file upload/viewing and conversations remain next. Refresh updates the
 loaded view; search filters loaded subjects and senders. No remote images/scripts
 are executed. **Explore demo inbox** uses synthetic data with no account access.
 
@@ -122,6 +124,7 @@ and remains subject to Bridge’s product limits. No automatic send retry is add
 ## Keyboard and menu bar
 
 - ⌘1 / ⌘2: open Pass / Mail.
+- In Mail: ⌘N compose, ⇧⌘R refresh, ⌘Return review sender/recipients before sending.
 - ⌘N: new Pass item. ⌘F: search Pass. ⌘R: refresh Pass.
 - ⌘L: lock both products. ⌘,: settings. ⌘Q: quit.
 - Optional ⌃⌥P: bring Pass forward; focus search.
@@ -135,7 +138,7 @@ swift test
 ./scripts/test-bridge.sh        # Synthetic IMAP/SMTP servers, verified TLS
 ./scripts/test-bridge.sh --starttls # Same round trip with STARTTLS
 ./scripts/test-helper.sh        # Public SDK/CLI tests plus native transport contracts
-./scripts/test-mail-helper.sh   # Native Mail IPC, public synthetic decryption and paging
+./scripts/test-mail-helper.sh   # Native Mail IPC, synthetic decryption/paging/compose/send
 ./scripts/test-credential-provider.sh # Compile-only API probe and synthetic origin cases
 ```
 
@@ -161,3 +164,7 @@ For unattended **experimental direct password** validation, run `prepare`, then
 readiness; `run` consumes the saved test credential and removes it after the
 attempt, including failure; `clear` removes it without testing. The tool is
 separate from the app bundle. See [security](SECURITY.md).
+
+Use `./scripts/build-app.sh --skip-helper "--stage-update=ProtonX Mail Update"`
+to package a named update alongside an app that is currently running. Quit the
+current real ProtonX before launching another real bundle with the same identity.

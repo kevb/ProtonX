@@ -11,3 +11,7 @@ cargo test --locked -p protonx-mail-helper --profile mail-macos-debug
 cargo test --locked -p mail-common --test message_mail_scroller --profile mail-macos-debug
 
 cargo test --locked -p mail-common --test message_body --profile mail-macos-debug
+
+# Composer, sender selection (including BYOE), recipient validation and delivery
+# use upstream local mock servers and public synthetic keys only.
+cargo test --locked -p mail-common --test draft_change_sender --test draft_constructors --test draft_recipients --test draft_send --test protonx_linked_sender --profile mail-macos-debug

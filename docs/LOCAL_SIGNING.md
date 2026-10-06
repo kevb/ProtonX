@@ -37,6 +37,10 @@ The probe restores the original executable and deletes its own synthetic item.
 It returns nonzero if update continuity is unproven; this is an optional local
 release diagnostic, not a required account-free CI test.
 
+The user subsequently reported another Keychain authorization prompt when
+opening the updated Mail build. This is consistent with the failing continuity
+probe, not evidence of a prompt-free fix.
+
 Therefore **prompt-free helper updates are not established on this host**.
 Retain the same build between launches and choose **Always Allow**, rather than
 one-time Allow, when intentionally authorizing ProtonX's Keychain item. Existing

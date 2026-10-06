@@ -5,6 +5,43 @@ Rust 1.99.0. Automated test content is synthetic. User-driven live sign-in and
 local unlock reached a vault workspace in the morning follow-up. Only fixed UI
 states were inspected; no live vault contents were returned to the model.
 
+## Native Mail composer follow-up, 2026-10-06
+
+- The user reported native account sign-in and successful message reading. No
+  private mailbox contents, addresses or messages were inspected or recorded by
+  the agent. This does not establish send/Gmail delivery, restart or recovery.
+- Implemented a native plain-text composer with From/To/Cc/Bcc, new/reply/reply-all,
+  ordinary draft reopening, explicit Save/Save & Close and separate send states.
+  The SDK chooses the reply identity and quote, validates sending addresses and
+  handles encryption/queueing. Pending/unknown send does not become another send
+  automatically. Scheduled drafts and unsupported recipient groups are refused.
+- 70 Swift tests passed, including original contracts plus linked-sender payloads,
+  header/envelope bounds, queue acknowledgement versus delivery, duplicate-send
+  prevention, ambiguous outcome retention, explicit preflight correction,
+  failed-save retention, late-composer rejection and synthetic preview isolation.
+- 63 Rust tests passed: nine private-helper tests, 53 public Proton fixture/mock
+  tests, and one added linked-Gmail sender/BYOE contract. Public coverage includes
+  encrypted bodies, paging, draft construction, sender/signature changes,
+  recipient validation, send results/failures and duplicate/already-sent behavior.
+  No test reads the user's Keychain or reaches a real mailbox/recipient.
+- Independent Pass/Mail protocol checks and Mail privacy/batched-save checks
+  passed. The Mail source pin, crypto implementations and dependency lock remain
+  unchanged; the patch exposes existing draft modules and opts only the native
+  wrapper into explicit batch saving.
+- Native dark/light walkthrough: synthetic Gmail reply keeps Gmail From;
+  body/recipient editing, Cc/Bcc, quote disclosure, save feedback, edited-after-save
+  feedback and sender/recipient confirmation work. A dialog newline display bug
+  found visually was fixed and the final light-mode dialog was rechecked.
+- Optimized Mail helper and release Swift app built. The separately named
+  `ProtonX Mail Update.app` and both helpers passed strict signature verification;
+  the already-running real app was not replaced. Materialized helper/test source
+  matches the checked-in inputs byte for byte. No binary was publicly released.
+- Public official composer screenshots and pinned desktop source were used as
+  references. No account screenshots are committed. See [MAIL_COMPOSER.md](MAIL_COMPOSER.md).
+- Keychain authorization prompted again for the user's updated build. Only the
+  self-signed local certificate is available. No credential workaround or ACL
+  relaxation was added; the prior failed rebuild-continuity result still applies.
+
 ## Native Mail implementation and local signing, 2026-10-06
 
 - Direct Mail credentials/TOTP/second-password states, isolated saved-session
