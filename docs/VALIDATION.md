@@ -288,3 +288,50 @@ in outlined cards. A synthetic note retained two lines typed with Return; a new
 login retained its website, note and concealed custom field. Title focus, type
 selection, scrolling, concealed input and explicit save were checked through native
 controls. The existing Swift contracts and release/signature checks passed again.
+
+## Encrypted Mail storage candidate, 2026-10-06
+
+All fixtures and profiles in this work are synthetic. No account profile was read,
+converted or installed; no account Keychain key was requested. The default app
+continues to use its existing helper/storage mode.
+
+The opt-in SQLCipher engine covers database/WAL plaintext-marker absence, keyed
+restart, missing/wrong-key rejection, corruption/truncation, schema/application
+version preservation, a generic pending-send row, busy conversion refusal,
+profile locking and symlink refusal. An actual SDK pool stores/reloads a decoded
+message body locally and reopens it with the key without a server.
+
+A repeated SDK test exposed a graceful-exit crash after successful reads. The
+candidate now joins database worker threads before pool teardown completes;
+ten repeated synthetic encrypted SDK read/shutdown runs passed after the fix.
+Default pool behaviour stays detached as upstream. This does not establish
+complete authenticated helper runtime teardown or disconnected session restore.
+
+Synthetic Swift store coverage verifies local → refresh → poll commands, saved
+content without a false server-sync timestamp, selected body retention, failed
+refresh retention and lock cancelling queued refresh. Protocol checks reject
+freshness contradicting loading/failure. Candidate helper preflight tests use
+only nonempty synthetic legacy/damaged/linked/locked profiles; each refuses before
+SDK/Keychain initialization and preserves existing file contents.
+
+Full-profile migration, interrupted conversion recovery, actual SDK send-queue
+replay, attachment/embedded-MIME file encryption, measured startup performance,
+Keychain integration with an isolated account and real-account interoperability
+remain gates. The low-level export primitive is not exposed to users or invoked
+by either helper mode. See [scope and build options](LOCAL_STORAGE.md).
+
+The final Swift run passed 76 contracts. Default Mail tests passed 66 contracts
+(11 helper, 53 public SDK, the plaintext baseline and linked-Gmail fixture).
+Candidate tests passed 11 helper contracts, seven encrypted engine/SDK fixtures
+and four actual-helper startup refusal cases. The first default scroller run
+failed only its strict mock request count (expected three, received two) despite
+returning the expected item. A full rerun passed without source/test changes;
+this timing-sensitive upstream failure remains recorded rather than relaxing its
+assertion. Local success is not a report that new GitHub CI has passed.
+
+Both default and opt-in encrypted helper optimized builds passed. The optimized
+candidate also passed the four synthetic startup refusal cases. The native
+release app built and passed strict nested signature verification, staged at
+`build/ProtonX Storage Preparation.app`. It packages the default helper, was not
+launched and was not installed in Applications. No existing account profile was
+converted. The candidate helper remains separate in `.tools/mail-helper-secure`.

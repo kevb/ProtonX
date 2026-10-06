@@ -147,3 +147,12 @@ private func mailFixture(_ script: String) throws -> (URL, URL) {
     #expect(try await runner.request(.init("send_draft", token: 3, content: content)).sendState == .queued)
     #expect(try await runner.request(.init("draft_status", token: 3)).sendState == .sent)
 }
+
+@Test func mailFreshnessCannotContradictLoadingOrFailedRefresh() throws {
+    for flags in [#""fresh":true,"loading":true"#, #""fresh":true,"refreshFailed":true"#] {
+        let reply = "{\"schema\":1,\"id\":1,\"result\":{\(flags)}}"
+        #expect(throws: ProtonXError.invalidResponse) { try NativeMailProcess.decode(Data(reply.utf8), expectedID: 1) }
+    }
+    let saved = try NativeMailProcess.decode(Data(#"{"schema":1,"id":1,"result":{"fresh":false,"refreshFailed":true}}"#.utf8), expectedID: 1)
+    #expect(saved.fresh == false); #expect(saved.refreshFailed == true)
+}

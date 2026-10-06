@@ -84,3 +84,149 @@
 +        auto_save_every: if cfg!(feature = "protonx-native") { None } else { Some(Duration::from_secs(0)) },
      }
  }
+--- a/project/mail/rust/shared/stash/Cargo.toml
++++ b/project/mail/rust/shared/stash/Cargo.toml
+@@ -6,6 +6,7 @@
+ license = "AGPL-3.0-only"
+ 
+ [dependencies]
++protonx-mail-storage = { path = "../../../../../protonx-mail-storage", optional = true }
+ anyhow = { workspace = true }
+ derivative = { workspace = true }
+ flume = { workspace = true }
+@@ -29,4 +30,5 @@
+ 
+ [features]
+ default = []
++protonx-encrypted = ["dep:protonx-mail-storage"]
+ stats_log = []
+--- a/project/mail/rust/shared/stash/src/connection_manager.rs
++++ b/project/mail/rust/shared/stash/src/connection_manager.rs
+@@ -35,12 +35,16 @@
+     pub(crate) write_worker: WriteWorker,
+     /// Keeps the temp directory alive for the lifetime of the pool
+     _source: Source,
++    #[cfg(feature = "protonx-encrypted")]
++    read_workers: Vec<std::thread::JoinHandle<()>>,
+ }
+ 
+ impl Drop for StashConnectionPool {
+     fn drop(&mut self) {
+         let _entered = self.span.enter();
+ 
++        #[cfg(feature = "protonx-encrypted")]
++        crate::stash::stop_read_workers(&self.ro_sender, &mut self.read_workers);
+         debug!("Connection pool dropped");
+     }
+ }
+@@ -98,9 +102,15 @@
+ 
+         let (ro_sender, ro_receiver) = flume::bounded(READ_CHANNEL_CAPACITY);
+ 
++        #[cfg(feature = "protonx-encrypted")]
++        let mut read_workers = Vec::new();
+         for i in 0..read_worker_count {
+             let conn = Self::create_connection(&source, &init_fns.ro, RO_OPEN_FLAGS)?;
+-            spawn_read_worker(conn, ro_receiver.clone(), i);
++            let worker = spawn_read_worker(conn, ro_receiver.clone(), i);
++            #[cfg(feature = "protonx-encrypted")]
++            read_workers.push(worker);
++            #[cfg(not(feature = "protonx-encrypted"))]
++            drop(worker);
+         }
+ 
+         Ok(Arc::new(Self {
+@@ -108,6 +118,8 @@
+             ro_sender,
+             span: Span::current(),
+             write_worker,
++            #[cfg(feature = "protonx-encrypted")]
++            read_workers,
+         }))
+     }
+ 
+@@ -121,6 +133,8 @@
+             Source::TmpFile(tmp) => Connection::open_with_flags(tmp.path().join("test"), flags),
+         }
+         .and_then(|mut c| {
++            #[cfg(feature = "protonx-encrypted")]
++            protonx_mail_storage::initialize_sdk_connection(&c)?;
+             (init_fn)(&mut c)?;
+             State::set_pragmas().execute(&c)?;
+             State::start_tracking().execute(&c)?;
+--- a/project/mail/rust/shared/stash/src/stash.rs
++++ b/project/mail/rust/shared/stash/src/stash.rs
+@@ -527,10 +527,11 @@
+                 // connection, so they belong on the write conn only.
+                 c.execute_batch(&formatdoc!(
+                     "
+-                        PRAGMA page_size = 8192;
++                        PRAGMA page_size = {};
+                         PRAGMA journal_mode = WAL;         -- Better write-concurrency
+                         {}
+                     ",
++                    if cfg!(feature = "protonx-encrypted") { 4096 } else { 8192 },
+                     common_pragmas
+                 ))?;
+                 ios_set_no_ckpt_on_close(c)
+@@ -1168,20 +1169,24 @@
+ 
+ pub(crate) struct WriteWorker {
+     pub(crate) sender: flume::Sender<TracedOperation>,
++    #[cfg(feature = "protonx-encrypted")]
++    worker: Option<thread::JoinHandle<()>>,
+ }
+ impl WriteWorker {
+     pub(crate) fn new(connection: Connection, watcher: &Arc<Watcher>) -> Self {
+         let (sender, receiver) = flume::bounded(2);
+         let watcher_cloned = watcher.clone();
+ 
+-        thread::Builder::new()
++        let worker = thread::Builder::new()
+             .name("Write Worker".into())
+             .spawn(move || {
+                 Self::thread_loop(connection, receiver, watcher_cloned.as_ref());
+             })
+             .unwrap();
+ 
+-        Self { sender }
++        #[cfg(not(feature = "protonx-encrypted"))]
++        drop(worker);
++        Self { sender, #[cfg(feature = "protonx-encrypted")] worker: Some(worker) }
+     }
+ 
+     fn thread_loop(
+@@ -1210,20 +1215,30 @@
+ impl Drop for WriteWorker {
+     fn drop(&mut self) {
+         let _ = self.sender.send(Operation::Quit.into());
+-    }
++        #[cfg(feature = "protonx-encrypted")]
++        if let Some(worker) = self.worker.take() { let _ = worker.join(); }
++    }
++}
++
++// Join encrypted connections before process/crypto-library teardown. The upstream
++// detached workers can otherwise race OpenSSL cleanup on a clean process exit.
++#[cfg(feature = "protonx-encrypted")]
++pub(crate) fn stop_read_workers(sender: &flume::Sender<TracedOperation>, workers: &mut Vec<thread::JoinHandle<()>>) {
++    for _ in 0..workers.len() { let _ = sender.send(Operation::Quit.into()); }
++    for worker in workers.drain(..) { let _ = worker.join(); }
+ }
+ 
+ pub(crate) fn spawn_read_worker(
+     connection: Connection,
+     receiver: flume::Receiver<TracedOperation>,
+     number: usize,
+-) {
++) -> thread::JoinHandle<()> {
+     thread::Builder::new()
+         .name(format!("Read Worker {number:02}"))
+         .spawn(move || {
+             read_worker_loop(connection, receiver);
+         })
+-        .unwrap();
++        .unwrap()
+ }
+ 
+ fn handle_read_exec(connection: &Connection, operation: OperationExec) {

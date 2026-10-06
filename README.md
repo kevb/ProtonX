@@ -104,6 +104,11 @@ normal onboarding. Native sign-in and reading have user-reported validation;
 sending and end-to-end account recovery still need designated-account validation.
 See [the native Mail integration and acceptance gates](docs/MAIL_NATIVE_SIGN_IN.md).
 
+Mail database encryption and faster saved-first loading are implemented as an
+opt-in developer candidate, disabled in ordinary app builds. It refuses existing
+plaintext profiles; migration and attachment protection are still required. See
+[local storage scope and tests](docs/LOCAL_STORAGE.md).
+
 Mail keeps its own encrypted session and Keychain entries. On restart, **Unlock
 Mail** uses Touch ID or your Mac password before restoring that session. Locking
 clears the UI and stops Mail’s helper. Sign Out ends its SDK account session.

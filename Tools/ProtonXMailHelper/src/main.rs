@@ -2,6 +2,8 @@
 // Account authentication and message decryption remain in Proton's pinned SDK.
 #![recursion_limit = "256"]
 mod protocol;
+#[cfg(feature = "secure-storage")]
+mod secure_storage;
 
 use futures::executor::block_on;
 use mail_account_uniffi::login::{LoginError, LoginFlow, TfaMethods};
@@ -92,6 +94,8 @@ enum Command {
     Snapshot {
         folder: Option<u64>,
         more: bool,
+        #[serde(default)]
+        mode: SnapshotMode,
     },
     Message {
         folder: u64,
@@ -120,6 +124,15 @@ enum Command {
         token: u64,
     },
     SignOut,
+}
+#[derive(Clone, Copy, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum SnapshotMode {
+    #[default]
+    Legacy,
+    Local,
+    Refresh,
+    Poll,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -342,6 +355,11 @@ struct ListState {
     generation: u64,
     loading: bool,
     failed: Option<&'static str>,
+    received_list: bool,
+    list_generation: u64,
+    fresh: bool,
+    invalid_list: bool,
+    fetching_more: bool,
 }
 struct ListCallback(Arc<(Mutex<ListState>, Condvar)>);
 impl MessageScrollerLiveQueryCallback for ListCallback {
@@ -350,6 +368,12 @@ impl MessageScrollerLiveQueryCallback for ListCallback {
         let mut state = lock.lock().unwrap();
         match update {
             MessageScrollerUpdate::List(update) => {
+                state.received_list = true;
+                state.list_generation += 1;
+                if state.fetching_more {
+                    state.loading = false;
+                    state.fetching_more = false;
+                }
                 match update {
                     MessageScrollerListUpdate::None { .. } => {}
                     MessageScrollerListUpdate::Append { items, .. } => state.items.extend(items),
@@ -359,6 +383,7 @@ impl MessageScrollerLiveQueryCallback for ListCallback {
                             state.items.extend(items);
                         } else {
                             state.failed = Some("snapshot_failed");
+                            state.invalid_list = true;
                         }
                     }
                     MessageScrollerListUpdate::ReplaceBefore { idx, items, .. } => {
@@ -366,6 +391,7 @@ impl MessageScrollerLiveQueryCallback for ListCallback {
                             state.items.splice(..idx as usize, items);
                         } else {
                             state.failed = Some("snapshot_failed");
+                            state.invalid_list = true;
                         }
                     }
                     MessageScrollerListUpdate::ReplaceRange {
@@ -375,23 +401,29 @@ impl MessageScrollerLiveQueryCallback for ListCallback {
                             state.items.splice(from as usize..to as usize, items);
                         } else {
                             state.failed = Some("snapshot_failed");
+                            state.invalid_list = true;
                         }
                     }
                 }
                 if state.items.len() > 1000 {
                     state.failed = Some("snapshot_failed");
+                    state.invalid_list = true;
                     state.items.clear();
                 }
             }
             MessageScrollerUpdate::Status(MessageScrollerStatusUpdate::FetchNewStart) => {
-                state.loading = true
+                state.loading = true;
+                state.fresh = false;
             }
             MessageScrollerUpdate::Status(MessageScrollerStatusUpdate::FetchNewEnd) => {
-                state.loading = false
+                state.loading = false;
+                state.fresh = state.failed.is_none();
             }
             MessageScrollerUpdate::Error { error } => {
                 state.failed = Some(scroller_failure(error));
                 state.loading = false;
+                state.fetching_more = false;
+                state.fresh = false;
             }
             MessageScrollerUpdate::CategoryViewChanged { .. } => {}
         }
@@ -516,7 +548,7 @@ impl Backend {
         .map_err(|_| "session_failed")?;
         self.user = Some(user);
         self.flow = None;
-        Ok(json!({"phase":"connected"}))
+        Ok(json!({"phase":"connected", "cacheFirst":cfg!(feature = "secure-storage")}))
     }
     fn handle(&mut self, command: Command) -> Result<Value, &'static str> {
         match command {
@@ -550,7 +582,7 @@ impl Backend {
                     )
                     .map_err(|e| session_failure(e, "session_failed"))?,
                 );
-                Ok(json!({"phase":"connected"}))
+                Ok(json!({"phase":"connected", "cacheFirst":cfg!(feature = "secure-storage")}))
             }
             Command::Login { username, password } => {
                 if self.user.is_some() {
@@ -601,7 +633,7 @@ impl Backend {
                 .map_err(|e| self.login_failure(e))?;
                 self.finish_login()
             }
-            Command::Snapshot { folder, more } => self.snapshot(folder, more),
+            Command::Snapshot { folder, more, mode } => self.snapshot(folder, more, mode),
             Command::Message { folder, item } => {
                 if self.folder != Some(folder) {
                     return Err("invalid_selection");
@@ -923,7 +955,18 @@ impl Backend {
         }
         Ok(json!({"token":token,"sendState":c.state}))
     }
-    fn snapshot(&mut self, folder: Option<u64>, more: bool) -> Result<Value, &'static str> {
+    fn snapshot(
+        &mut self,
+        folder: Option<u64>,
+        more: bool,
+        mode: SnapshotMode,
+    ) -> Result<Value, &'static str> {
+        if mode != SnapshotMode::Legacy && !cfg!(feature = "secure-storage") {
+            return Err("invalid_input");
+        }
+        if more && matches!(mode, SnapshotMode::Local | SnapshotMode::Poll) {
+            return Err("invalid_input");
+        }
         let user = self.user.clone().ok_or("invalid_state")?;
         let sidebar = Sidebar::new(&user);
         let systems = sdk_result!(
@@ -969,7 +1012,7 @@ impl Backend {
             self.folder = Some(selected);
             self.listing = Arc::new((
                 Mutex::new(ListState {
-                    loading: true,
+                    loading: mode == SnapshotMode::Legacy,
                     ..Default::default()
                 }),
                 Condvar::new(),
@@ -987,42 +1030,79 @@ impl Backend {
             );
         }
         let scroller = self.scroller.as_ref().ok_or("invalid_state")?.clone();
-        let previous = {
+        let (previous, previous_list) = {
             let mut state = self.listing.0.lock().unwrap();
-            state.failed = None;
-            state.generation
+            if matches!(mode, SnapshotMode::Legacy | SnapshotMode::Refresh) {
+                state.failed = None;
+            }
+            (state.generation, state.list_generation)
         };
-        if more {
+        if mode == SnapshotMode::Local {
+            // SDK refresh reads the local database. Its paginator can independently
+            // sync in the background; do not put a remote fetch ahead of this read.
+            sdk_void!(
+                mail_uniffi::mail::mail_scroller::MessageScrollerForceRefreshResult,
+                scroller.force_refresh()
+            )
+            .map_err(scroller_failure)?;
+        } else if mode == SnapshotMode::Poll {
+            // Read callback state only. Status polling must not queue more requests.
+        } else if more {
             if self.listing.0.lock().unwrap().items.len() >= 1000 {
                 return Err("page_limit");
+            }
+            if mode != SnapshotMode::Legacy {
+                let mut state = self.listing.0.lock().unwrap();
+                state.fetching_more = true;
+                state.loading = true;
             }
             sdk_void!(
                 mail_uniffi::mail::mail_scroller::MessageScrollerFetchMoreResult,
                 scroller.fetch_more()
             )
             .map_err(scroller_failure)?;
-        } else {
+        } else if !self.listing.0.lock().unwrap().loading || mode == SnapshotMode::Legacy {
+            {
+                let mut state = self.listing.0.lock().unwrap();
+                state.loading = true;
+                state.fresh = false;
+            }
             sdk_void!(
                 mail_uniffi::mail::mail_scroller::MessageScrollerFetchNewResult,
                 scroller.fetch_new()
             )
             .map_err(scroller_failure)?;
         }
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now()
+            + if mode == SnapshotMode::Legacy {
+                Duration::from_secs(5)
+            } else {
+                Duration::from_millis(150)
+            };
         let (lock, wake) = &*self.listing;
         let mut state = lock.lock().unwrap();
-        while (state.generation == previous || state.loading)
-            && state.failed.is_none()
+        while (if mode == SnapshotMode::Legacy {
+            state.generation == previous || state.loading
+        } else if mode == SnapshotMode::Local {
+            state.list_generation == previous_list
+        } else {
+            !state.received_list
+        }) && state.failed.is_none()
             && Instant::now() < deadline
         {
             let remaining = deadline.saturating_duration_since(Instant::now());
             state = wake.wait_timeout(state, remaining).unwrap().0;
         }
         if let Some(failure) = state.failed {
-            return Err(failure);
+            if mode == SnapshotMode::Legacy || failure != "snapshot_failed" || state.invalid_list {
+                return Err(failure);
+            }
         }
         let messages:Vec<Value>=state.items.iter().take(1000).map(|m|json!({"id":m.id.as_u64(),"subject":m.subject,"sender":m.sender.address,"senderName":m.sender.name,"recipient":m.to_list.iter().map(|r|r.address.as_str()).collect::<Vec<_>>().join(", "),"date":m.time.0,"unread":m.unread,"attachments":m.num_attachments,"isDraft":m.is_draft,"canReply":m.can_reply,"isScheduled":m.is_scheduled})).collect();
-        let loading = state.loading;
+        let loading = state.loading || (!state.received_list && state.failed.is_none());
+        let fresh =
+            mode != SnapshotMode::Local && state.fresh && !loading && state.failed.is_none();
+        let refresh_failed = state.failed.is_some();
         drop(state); // Never hold a callback mutex across SDK I/O.
         let details = sdk_result!(
             mail_uniffi::mail::MailUserSessionAccountDetailsResult,
@@ -1030,7 +1110,7 @@ impl Backend {
         )
         .map_err(|e| session_failure(e, "session_failed"))?;
         Ok(
-            json!({"folders":folders,"folder":selected,"messages":messages,"loading":loading,"email":details.email}),
+            json!({"folders":folders,"folder":selected,"messages":messages,"loading":loading,"email":details.email,"fresh":fresh,"refreshFailed":refresh_failed}),
         )
     }
 }
@@ -1076,6 +1156,8 @@ fn main() {
     let stdout = io::stdout();
     let mut writer = stdout.lock();
     let mut backend: Option<Backend> = None;
+    #[cfg(feature = "secure-storage")]
+    let mut storage_guard = None;
     while let Ok(Some(packet)) = read_packet(&mut reader) {
         let Ok(request) = serde_json::from_slice::<Request>(&packet) else {
             break;
@@ -1083,14 +1165,27 @@ fn main() {
         if request.schema != 1 || request.id == 0 {
             break;
         }
-        let result = if backend.is_none() {
-            Backend::new(directory.clone()).map(|created| {
-                backend = Some(created);
+        #[cfg(feature = "secure-storage")]
+        let storage_ready = if storage_guard.is_none() {
+            secure_storage::prepare(&directory).map(|guard| {
+                storage_guard = Some(guard);
             })
         } else {
             Ok(())
-        }
-        .and_then(|_| backend.as_mut().unwrap().handle(request.command));
+        };
+        #[cfg(not(feature = "secure-storage"))]
+        let storage_ready: Result<(), &'static str> = Ok(());
+        let result = storage_ready
+            .and_then(|_| {
+                if backend.is_none() {
+                    Backend::new(directory.clone()).map(|created| {
+                        backend = Some(created);
+                    })
+                } else {
+                    Ok(())
+                }
+            })
+            .and_then(|_| backend.as_mut().unwrap().handle(request.command));
         let response = match result {
             Ok(value) => Response {
                 schema: 1,
@@ -1120,7 +1215,10 @@ fn main() {
             break;
         }
     }
-    // Exiting on EOF/lock tears down the runtime, pending requests and decrypted memory.
+    drop(backend);
+    #[cfg(feature = "secure-storage")]
+    drop(storage_guard);
+    // Exiting on EOF/lock ends pending requests and the helper process.
 }
 unsafe fn libc_umask() {
     unsafe extern "C" {
@@ -1143,6 +1241,51 @@ mod tests {
             )
             .is_err()
         );
+    }
+    #[test]
+    fn snapshot_modes_are_closed_and_old_requests_default_to_legacy() {
+        let parse = |mode: Option<&str>| {
+            let mut command = json!({"method":"snapshot", "more":false});
+            if let Some(mode) = mode {
+                command["mode"] = json!(mode);
+            }
+            serde_json::from_value::<Command>(command)
+        };
+        assert!(matches!(
+            parse(None).unwrap(),
+            Command::Snapshot {
+                mode: SnapshotMode::Legacy,
+                ..
+            }
+        ));
+        assert!(matches!(
+            parse(Some("poll")).unwrap(),
+            Command::Snapshot {
+                mode: SnapshotMode::Poll,
+                ..
+            }
+        ));
+        assert!(parse(Some("export")).is_err());
+    }
+    #[test]
+    fn network_failure_preserves_list_but_cannot_claim_freshness() {
+        let listing = Arc::new((Mutex::new(ListState::default()), Condvar::new()));
+        let callback = ListCallback(listing.clone());
+        callback.on_update(MessageScrollerUpdate::Status(
+            MessageScrollerStatusUpdate::FetchNewStart,
+        ));
+        assert!(listing.0.lock().unwrap().loading);
+        callback.on_update(MessageScrollerUpdate::Error {
+            error: MailScrollerError::Other(ProtonError::Network),
+        });
+        callback.on_update(MessageScrollerUpdate::Status(
+            MessageScrollerStatusUpdate::FetchNewEnd,
+        ));
+        let state = listing.0.lock().unwrap();
+        assert!(!state.loading);
+        assert!(!state.fresh);
+        assert!(!state.invalid_list);
+        assert_eq!(state.failed, Some("snapshot_failed"));
     }
     #[test]
     fn framing_refuses_oversized_or_partial_credentials() {

@@ -25,12 +25,14 @@ with tempfile.TemporaryDirectory(prefix="ProtonX-mail-source-") as stage:
     manifest = (upstream / "Cargo.toml").read_text()
     members = [m for m in tomllib.loads(manifest)["workspace"]["members"] if (upstream / m / "Cargo.toml").is_file()]
     members.append("protonx-mail-helper")
+    members.append("protonx-mail-storage")
     manifest = re.sub(r"members = \[.*?\]", "members = [\n" + "".join(f'    "{m}",\n' for m in members) + "]", manifest, count=1, flags=re.S)
     (prepared / "Cargo.toml").write_text(manifest)
     (prepared / ".cargo").mkdir()
     (prepared / ".cargo/config.toml").write_text('[net]\ngit-fetch-with-cli = true\n[registries.proton]\nindex = "sparse+https://rust-registry.proton.me/index/"\n')
     shutil.copy2(root / "Resources/MailHelper.lock", prepared / "Cargo.lock")
     shutil.copytree(root / "Tools/ProtonXMailHelper", prepared / "protonx-mail-helper")
+    shutil.copytree(root / "Tools/MailStorage", prepared / "protonx-mail-storage")
     # A temporary directory outside the checkout avoids enclosing Git path filters.
     subprocess.run(["git", "apply", "--check", str(root / "patches/mail-core.patch")], cwd=prepared, check=True)
     subprocess.run(["git", "apply", str(root / "patches/mail-core.patch")], cwd=prepared, check=True)

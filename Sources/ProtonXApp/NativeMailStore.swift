@@ -12,6 +12,8 @@ final class NativeMailStore: ObservableObject {
     @Published private(set) var email = ""
     @Published private(set) var busy = false
     @Published private(set) var loading = false
+    @Published private(set) var showingSavedContent = false
+    @Published private(set) var cacheRefreshFailed = false
     @Published private(set) var lastSynced: Date?
     @Published private(set) var demo = false
     @Published var selectedFolder: UInt64?
@@ -31,6 +33,7 @@ final class NativeMailStore: ObservableObject {
     private var auth: LAContext?
     private var hasSession: Bool
     private var loadedFolder: UInt64?
+    private var cacheFirstActive = false
     private var demoMessages: [NativeMailMessage] = []
     private var demoBodies: [UInt64: String] = [:]
     init(runner: (any NativeMailRunning)? = nil, defaults: UserDefaults = .standard, previewOnly: Bool = false, localUnlock: (@MainActor @Sendable () async throws -> Bool)? = nil) {
@@ -89,31 +92,43 @@ final class NativeMailStore: ObservableObject {
         case .securityKey: phase = .securityKey
         case .connected:
             hasSession = true; defaults.set(true, forKey: "nativeMailConnected"); phase = .open
-            try await load(captured: captured)
+            cacheFirstActive = result.cacheFirst == true
+            try await load(captured: captured, mode: cacheFirstActive ? "local" : nil)
         default: throw ProtonXError.invalidResponse
         }
     }
     func refresh(more: Bool = false) {
         guard phase == .open, !demo, !busy else { return }
-        perform { [self] captured in try await load(captured: captured, more: more) }
+        perform { [self] captured in try await load(captured: captured, more: more, mode: cacheFirstActive ? "refresh" : nil) }
     }
-    private func load(captured: UInt64, more: Bool = false) async throws {
+    private func load(captured: UInt64, more: Bool = false, mode: String? = nil) async throws {
         let folder = selectedFolder
-        let result = try await runner.request(NativeMailCommand("snapshot", folder: folder, more: more))
+        let mode = mode ?? (cacheFirstActive ? "refresh" : nil)
+        let result = try await runner.request(NativeMailCommand("snapshot", folder: folder, more: more, mode: mode))
         try check(captured)
         guard selectedFolder == folder else { return }
         guard let nextFolders = result.folders, let nextMessages = result.messages, let nextFolder = result.folder, nextFolders.contains(where: { $0.id == nextFolder }) else { throw ProtonXError.invalidResponse }
         folders = nextFolders; messages = nextMessages; selectedFolder = nextFolder; loadedFolder = nextFolder
         email = result.email ?? ""; loading = result.loading ?? false
-        if !loading { lastSynced = Date() }
+        showingSavedContent = cacheFirstActive && result.fresh != true
+        cacheRefreshFailed = result.refreshFailed == true
+        if cacheRefreshFailed { error = "Could not refresh. Showing saved Mail content; retry when connected." }
+        if cacheFirstActive ? result.fresh == true : !loading { lastSynced = Date() }
         reconcileSelection()
-        // Only incomplete initial sync is polled. No polling when the window is locked/closed.
+        // Read saved rows first, then refresh once. Later polls read status only.
+        // Lock and folder changes invalidate any scheduled work.
         polling?.cancel()
-        if loading {
+        if loading || (cacheFirstActive && mode == "local") {
+            let nextMode: String? = cacheFirstActive ? (mode == "local" ? "refresh" : "poll") : nil
+            let expectedFolder = nextFolder
             polling = Task { [weak self] in
-                try? await Task.sleep(for: .seconds(3))
+                try? await Task.sleep(for: self?.cacheFirstActive == true ? (mode == "local" ? .milliseconds(300) : .seconds(1)) : .seconds(3))
+                while self?.busy == true && !Task.isCancelled {
+                    try? await Task.sleep(for: .milliseconds(300))
+                }
                 guard let self, !Task.isCancelled, self.epoch.accepts(captured), self.phase == .open else { return }
-                self.refresh()
+                guard self.selectedFolder == expectedFolder else { return }
+                self.perform { [self] current in try await load(captured: current, mode: nextMode) }
             }
         }
     }
@@ -122,7 +137,9 @@ final class NativeMailStore: ObservableObject {
         body = nil; selectedItem = nil; selectionEpoch.invalidate(); selection?.cancel()
         messages = []
         if demo { messages = selectedFolder == 1 ? demoMessages : []; loadedFolder = selectedFolder; return }
-        refresh()
+        if cacheFirstActive {
+            perform { [self] captured in try await load(captured: captured, mode: "local") }
+        } else { refresh() }
     }
     func reconcileSelection() {
         if let selectedItem, !visibleMessages.contains(where: { $0.id == selectedItem }) {
@@ -298,6 +315,7 @@ final class NativeMailStore: ObservableObject {
         folders = []; messages = []; body = nil; selectedItem = nil; selectedFolder = nil; query = ""; email = ""; error = nil
         draft = nil; composeStatus = nil; notice = nil
         loading = false; lastSynced = nil; busy = false; demoBodies = [:]; demoMessages = []; loadedFolder = nil
+        cacheFirstActive = false; showingSavedContent = false; cacheRefreshFailed = false
         phase = hasSession ? .locked : .welcome
     }
     func cancelSignIn() { lock() }

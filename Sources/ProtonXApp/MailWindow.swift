@@ -171,6 +171,7 @@ struct MailWindow: View {
                 .safeAreaInset(edge: .bottom) {
                     HStack {
                         if store.loading { ProgressView().controlSize(.small); Text("Syncing…") }
+                        else if store.showingSavedContent { Label(store.cacheRefreshFailed ? "Saved content · refresh unavailable" : "Saved on this Mac", systemImage: "internaldrive") }
                         else { Text("\(store.messages.count) messages loaded") }
                         Spacer()
                         if !store.demo && !store.messages.isEmpty { Button("Load more") { store.refresh(more: true) }.disabled(store.busy || store.messages.count >= 1000) }

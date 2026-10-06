@@ -41,6 +41,17 @@ dependency licenses must accompany binary distribution. The Swift UI remains
 GPL-3.0-or-later; review all applicable AGPL and combined-work obligations before
 distributing the complete suite. No public binary release is made by this change.
 
+## Opt-in Mail storage candidate
+
+`Tools/MailStorage` is AGPL-3.0-only and part of the Mail helper's corresponding
+source. The `secure-storage` feature uses rusqlite's
+`bundled-sqlcipher-vendored-openssl` provider. SQLCipher is BSD-3-Clause;
+OpenSSL is Apache-2.0. Original SQLCipher/OpenSSL license and notice files must
+accompany any candidate binary distribution. The new lockfile adds
+`openssl-src 300.6.1+3.6.3`; existing package versions remain pinned.
+Sources: https://github.com/sqlcipher/sqlcipher and https://github.com/openssl/openssl.
+The default helper does not enable this candidate. No public binary is released.
+
 ## Reference source (downloaded for review; not linked or redistributed)
 
 - ProtonMail/WebClients: desktop Mail/Pass UX, authentication and OS integration.

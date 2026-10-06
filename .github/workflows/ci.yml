@@ -46,3 +46,5 @@ jobs:
         run: |
           scripts/build-mail-helper.sh
           scripts/test-mail-helper.sh
+      - name: Opt-in encrypted Mail storage and cache-first contracts
+        run: scripts/test-mail-storage.sh

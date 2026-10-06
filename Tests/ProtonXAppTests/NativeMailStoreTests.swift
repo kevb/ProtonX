@@ -253,3 +253,49 @@ private let linkedDraft = NativeMailDraft(token: 3, sender: "alex.demo@gmail.com
     store.markDraftEdited(); #expect(store.composeStatus == nil)
     store.lock()
 }
+
+@Test @MainActor func mailSavedListAppearsBeforeRefreshAndNeverClaimsServerSync() async {
+    var saved = mailSnapshot; saved.fresh = false
+    var refreshing = mailSnapshot; refreshing.loading = true; refreshing.fresh = false
+    var fresh = mailSnapshot; fresh.fresh = true
+    let runner = SyntheticMailRunner([
+        .init(method: "restore", result: .init(phase: .connected, cacheFirst: true)),
+        .init(method: "snapshot", result: saved),
+        .init(method: "message", result: .init(id: 11, body: "SYNTHETIC cached body")),
+        .init(method: "snapshot", result: refreshing),
+        .init(method: "snapshot", result: fresh)
+    ])
+    let store = mailStore(runner, saved: true)
+    store.unlock(); await waitForMail { !store.busy }
+    #expect(store.messages.count == 1); #expect(store.showingSavedContent)
+    #expect(store.lastSynced == nil); #expect(runner.payloads[1].mode == "local")
+    store.selectedItem = 11; store.select(); await waitForMail { store.body != nil }
+    await waitForMail { store.lastSynced != nil }
+    #expect(runner.payloads.filter { $0.method == "snapshot" }.map(\.mode) == ["local", "refresh", "poll"])
+    #expect(store.selectedItem == 11); #expect(store.body == "SYNTHETIC cached body")
+    #expect(!store.showingSavedContent); #expect(!store.loading)
+    store.lock()
+}
+
+@Test @MainActor func mailRefreshFailureRetainsSavedContentAndLockStopsScheduledWork() async {
+    var saved = mailSnapshot; saved.fresh = false
+    var failed = saved; failed.refreshFailed = true
+    let runner = SyntheticMailRunner([
+        .init(method: "restore", result: .init(phase: .connected, cacheFirst: true)),
+        .init(method: "snapshot", result: saved), .init(method: "snapshot", result: failed)
+    ])
+    let store = mailStore(runner, saved: true)
+    store.unlock(); await waitForMail { !store.busy }
+    await waitForMail { store.cacheRefreshFailed }
+    #expect(store.messages.count == 1); #expect(store.showingSavedContent)
+    #expect(store.lastSynced == nil); #expect(store.error != nil)
+    store.lock(); #expect(!store.cacheRefreshFailed); #expect(!store.showingSavedContent)
+    let stopped = SyntheticMailRunner([
+        .init(method: "restore", result: .init(phase: .connected, cacheFirst: true)),
+        .init(method: "snapshot", result: saved)
+    ])
+    let locked = mailStore(stopped, saved: true)
+    locked.unlock(); await waitForMail { !locked.busy }; locked.lock()
+    try? await Task.sleep(for: .milliseconds(500))
+    #expect(stopped.calls == ["restore", "snapshot"]); #expect(locked.messages.isEmpty)
+}

@@ -41,10 +41,14 @@ public struct NativeMailResult: Codable, Sendable {
     public var token: UInt64?
     public var sendState: NativeMailSendState?
     public var closed: Bool?
-    public init(phase: NativeMailPhase? = nil, folders: [NativeMailFolder]? = nil, folder: UInt64? = nil, messages: [NativeMailMessage]? = nil, loading: Bool? = nil, email: String? = nil, id: UInt64? = nil, body: String? = nil, attachments: Int? = nil, draft: NativeMailDraft? = nil, token: UInt64? = nil, sendState: NativeMailSendState? = nil, closed: Bool? = nil) {
+    public var cacheFirst: Bool?
+    public var fresh: Bool?
+    public var refreshFailed: Bool?
+    public init(phase: NativeMailPhase? = nil, folders: [NativeMailFolder]? = nil, folder: UInt64? = nil, messages: [NativeMailMessage]? = nil, loading: Bool? = nil, email: String? = nil, id: UInt64? = nil, body: String? = nil, attachments: Int? = nil, draft: NativeMailDraft? = nil, token: UInt64? = nil, sendState: NativeMailSendState? = nil, closed: Bool? = nil, cacheFirst: Bool? = nil, fresh: Bool? = nil, refreshFailed: Bool? = nil) {
         self.phase = phase; self.folders = folders; self.folder = folder; self.messages = messages
         self.loading = loading; self.email = email; self.id = id; self.body = body; self.attachments = attachments
         self.draft = draft; self.token = token; self.sendState = sendState; self.closed = closed
+        self.cacheFirst = cacheFirst; self.fresh = fresh; self.refreshFailed = refreshFailed
     }
 }
 public enum NativeMailFailure: String, Codable, Error, LocalizedError, Sendable {
@@ -57,8 +61,12 @@ public enum NativeMailFailure: String, Codable, Error, LocalizedError, Sendable 
     case messageTooLarge = "message_too_large", snapshotFailed = "snapshot_failed", pageLimit = "page_limit"
     case draftFailed = "draft_failed", draftUnsupported = "draft_unsupported", senderUnavailable = "sender_unavailable"
     case sendUncertain = "send_uncertain", sendRejected = "send_rejected"
+    case storageUnavailable = "storage_unavailable", storageKeyMissing = "storage_key_missing", storageUpgradeRequired = "storage_upgrade_required"
     public var errorDescription: String? {
         switch self {
+        case .storageUnavailable: "Mail’s local storage could not open safely. Your saved files have been retained. Close other ProtonX copies and check Keychain access."
+        case .storageKeyMissing: "Mail’s storage key is missing from this Mac’s Keychain. Your saved files have been retained; a replacement key will not be created."
+        case .storageUpgradeRequired: "This experimental build requires an encrypted Mail database. Existing storage has been retained. Continue using your current build until the storage upgrade is ready."
         case .draftFailed: "Your draft could not complete this operation. Your text is still in the composer."
         case .draftUnsupported: "This draft contains content this composer cannot safely edit. Use the official client."
         case .senderUnavailable: "That sending address is unavailable. Check your Gmail connection or select an enabled address."
@@ -214,6 +222,7 @@ public final class NativeMailProcess: NativeMailRunning, @unchecked Sendable {
         guard reply.schema == 1, reply.id == expectedID, (reply.result == nil) != (reply.failure == nil) else { throw ProtonXError.invalidResponse }
         if let failure = reply.failure { throw failure }
         guard let result = reply.result, (result.messages?.count ?? 0) <= 1000, (result.folders?.count ?? 0) <= 1024, (result.body?.utf8.count ?? 0) <= 2 * 1024 * 1024 else { throw ProtonXError.invalidResponse }
+        guard result.fresh != true || (result.loading != true && result.refreshFailed != true) else { throw ProtonXError.invalidResponse }
         if let messages = result.messages { guard Set(messages.map(\.id)).count == messages.count else { throw ProtonXError.invalidResponse } }
         if let draft = result.draft {
             guard draft.token > 0, draft.senders.count <= 256, Set(draft.senders).count == draft.senders.count,

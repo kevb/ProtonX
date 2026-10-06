@@ -128,7 +128,10 @@ has no browser, remote-resource loader or script execution.
 
 The session encryption key protects tokens/key secrets, not the entire Mail data
 database. The pinned SDK persists decoded message bodies and metadata in ordinary
-SQLite. See [the local storage review and release gate](LOCAL_STORAGE.md).
+SQLite in the default build. An opt-in SQLCipher candidate keys new databases
+and requests a saved first page before refresh. It refuses legacy profiles;
+whole-profile migration and attachment protection remain incomplete. See
+[the local storage review and release gate](LOCAL_STORAGE.md).
 
 Sidebar and messages are bounded; selected
 contents are decrypted on demand and session/selection epochs reject late replies.

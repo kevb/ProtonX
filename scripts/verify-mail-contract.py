@@ -4,6 +4,7 @@ import json
 import pathlib
 import re
 import subprocess
+import tomllib
 
 root = pathlib.Path(__file__).resolve().parent.parent
 protocol = json.loads((root / "Resources/MailProtocol.json").read_text())
@@ -37,4 +38,17 @@ assert 'auto_save_every: if cfg!(feature = "protonx-native") { None }' in draft_
 assert (native / "project/mail/rust/mail/mail-common/tests/protonx_linked_sender.rs").read_bytes() == (root / "Tools/MailContractTests/linked_sender.rs").read_bytes()
 assert (native / "project/mail/rust/mail/mail-common/tests/protonx_local_storage.rs").read_bytes() == (root / "Tools/MailContractTests/local_storage.rs").read_bytes()
 assert (native / "Cargo.lock").read_bytes() == (root / "Resources/MailHelper.lock").read_bytes()
+for original in (root / "Tools/MailStorage").rglob("*"):
+    if original.is_file():
+        assert (native / "protonx-mail-storage" / original.relative_to(root / "Tools/MailStorage")).read_bytes() == original.read_bytes()
+assert (native / "protonx-mail-helper/src/secure_storage.rs").read_bytes() == (root / "Tools/ProtonXMailHelper/src/secure_storage.rs").read_bytes()
+pool = (native / "project/mail/rust/shared/stash/src/connection_manager.rs").read_text()
+assert pool.index('protonx_mail_storage::initialize_sdk_connection(&c)?') < pool.index('(init_fn)(&mut c)?')
+manifest = tomllib.loads((native / "protonx-mail-helper/Cargo.toml").read_text())
+assert "secure-storage" not in manifest["features"].get("default", [])
+main = helper.split("fn main()", 1)[1]
+assert main.index('secure_storage::prepare(&directory)') < main.index('Backend::new(directory.clone())')
+secure = (native / "protonx-mail-helper/src/secure_storage.rs").read_text()
+assert secure.index('return Err("storage_upgrade_required")') < secure.index('get_generic_password(SERVICE, ACCOUNT)')
+assert 'org.kevb.ProtonX.Mail.Storage' in secure
 print("Independent native Mail protocol and privacy contracts verified")

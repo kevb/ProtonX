@@ -43,7 +43,64 @@ own policy; it is not a replacement for product-specific cache encryption. No
 existing account database was deleted, migrated, opened for inspection or modified
 by this review. Avoid describing this alpha as a secure local Mail cache.
 
-## Next implementation sequence
+## Opt-in encrypted-storage candidate
+
+The default app remains on the baseline described above. This candidate is **not
+installed or enabled for existing accounts**. `scripts/build-mail-helper.sh
+--secure-storage` writes a separate helper to `.tools/mail-helper-secure`; normal
+app builds continue to package `.tools/mail-helper`. Do not substitute the candidate
+into an account build while migration and attachment gates remain unresolved.
+
+The candidate configures SQLCipher on every SDK read/write connection before its
+first statement. A random 256-bit database key is kept in the separate local
+Keychain service `org.kevb.ProtonX.Mail.Storage`, account `database-v1`. Account and
+user databases share this Mail-only storage key; Proton account cryptography,
+product policy, Pass keys and Mail session keys remain unchanged. Keys travel
+through an in-process C API; they are not printed or passed in argv/environment.
+
+Before SDK initialization, the candidate takes a profile lock, rejects symlinks,
+checks all session/user database headers and validates encrypted files. A missing
+key for existing databases, a wrong key or damaged data fails closed rather than
+letting the SDK rebuild a profile. Any existing plaintext database is refused
+**before Keychain access**. There is no user migration action yet. New databases
+are keyed before schema creation. Database workers are joined on graceful pool
+shutdown to close encrypted connections before process/crypto-library teardown.
+The profile lock coordinates this candidate only; older builds do not honor it.
+
+`Tools/MailStorage` contains a low-level, synthetic-tested single-file export:
+checkpoint WAL, export with SQLCipher into a same-directory temporary file,
+preserve schema/application versions, verify, sync and atomically replace. It is
+not called by the helper. It does not yet provide a whole-profile transaction,
+crash recovery manifest, old-build exclusion, backup handling or secure erasure.
+The generic pending-send fixture demonstrates row preservation, not SDK queue
+replay or delivery safety. Never invoke it on a real profile yet.
+
+The candidate advertises `cacheFirst` after authentication. Swift requests a local
+first page, then one refresh. Subsequent `poll` requests read callback status
+without queuing another fetch. Saved content retains selection/body during refresh
+and failure; only a successful network-refresh status updates `lastSynced`.
+Legacy requests and normal app behavior remain supported. Synthetic store tests
+cover that command sequence, stale refresh labels, failure retention and lock
+cancellation. An encrypted actual-SDK fixture reads its decoded body locally and
+reopens with the key, without a server. Offline session restoration and measured
+startup latency have not yet been established. Preflight currently runs full
+cipher integrity checks over the databases; their cost on large mailboxes must
+be measured and addressed before activation. The shorter snapshot wait alone
+does not establish a faster launch.
+
+**File caches are still a release blocker.** The SDK also writes decrypted
+attachments/embedded MIME attachments into ordinary files outside SQLite.
+SQLCipher does not protect those files, backups or old plaintext profiles. No
+complete secure Mail cache claim follows from encrypted database tests. Pass's
+complete persisted item cache is also still separate future work.
+
+Run `scripts/test-mail-storage.sh` for the temporary synthetic engine/SDK tests and
+secure-helper contracts. They never request Keychain credentials or open an
+installed account profile. SQLCipher's documented
+[export-based conversion](https://www.zetetic.net/sqlcipher/encrypting-plaintext-databases/)
+and [key API](https://www.zetetic.net/sqlcipher/sqlcipher-api/) underpin this candidate.
+
+## Remaining implementation sequence
 
 1. **Protect Mail's existing database first.** Investigate database encryption
    through an established library, with a separate Mail Keychain key. Cover account

@@ -22,7 +22,11 @@ include passwords, tokens, real message bodies or vault exports in public issues
   Subjects, participants and previously decrypted bodies can persist unencrypted
   in that database and its journals. Local UI lock does not encrypt or remove them.
   This is an unresolved release blocker; see docs/LOCAL_STORAGE.md and its synthetic
-  storage contract. It never reuses Pass or Bridge credentials. `nativeMailConnected`
+  storage contract. An opt-in SQLCipher candidate keys new SDK databases with a
+  separate Mail storage Keychain key; normal builds do not enable it. Existing
+  plaintext profiles are refused, not converted. Attachment file caches and
+  whole-profile migration remain unprotected/unimplemented release gates.
+  It never reuses Pass or Bridge credentials. `nativeMailConnected`
   is an untrusted Boolean hint; reopening requires local unlock and SDK restore.
   Native credentials/challenges travel on private stdin. Human verification and
   FIDO-only challenges fail explicitly; no product limit or challenge is bypassed.
