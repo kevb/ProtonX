@@ -23,5 +23,8 @@ for source in json.loads((root / 'upstream.lock.json').read_text())['sources']:
     if source['name'] == 'WebClients':
         subprocess.run(['git', 'config', 'core.sparseCheckout', 'true'], cwd=path, check=True)
         (path / '.git/info/sparse-checkout').write_text('/applications/inbox-desktop/\n/applications/pass-desktop/\n/packages/shared/lib/auth/\n/packages/shared/lib/api/\n/packages/shared/lib/fetch/\n/packages/shared/lib/constants.ts\n/packages/pass/\n/LICENSE\n/package.json\n')
+    if source['name'] == 'clients':
+        subprocess.run(['git', 'config', 'core.sparseCheckout', 'true'], cwd=path, check=True)
+        (path / '.git/info/sparse-checkout').write_text('/.cargo/\n/license/\n/project/account/rust/\n/project/calendar/rust/\n/project/contact/rust/\n/project/core/rust/\n/project/mail/rust/\n/project/payment/rust/\n/tools/uniffi-bindgen/\n/Cargo.toml\n/Cargo.lock\n/README.md\n')
     subprocess.run(['git', 'fetch', '--depth=1', 'origin', source['revision']], cwd=path, check=True)
     subprocess.run(['git', 'checkout', '--detach', 'FETCH_HEAD'], cwd=path, check=True)

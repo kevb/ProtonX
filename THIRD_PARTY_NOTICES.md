@@ -31,6 +31,9 @@ system third-party notices for those components; they are not bundled by ProtonX
 - ProtonMail/ios-mail: native Mail architecture.
 - protonpass/proton-pass-common: Pass models and serialization contract.
 - ProtonMail/proton-bridge: local IMAP/SMTP behavior and TLS certificate identity.
+- ProtonMail/clients: direct native Mail SDK feasibility reference. Its Mail SDK
+  is AGPL-3.0-only; it is not linked into or redistributed with ProtonX. Any
+  integration needs its own complete dependency and combined-work license review.
 
 All URLs and immutable revisions are recorded in `upstream.lock.json`.
 Reference repositories retain their own licenses. `scripts/bootstrap.py

@@ -131,9 +131,11 @@ provides the Mail/Calendar experience. ProtonX currently has only a small Bridge
 client: 25 recent messages, limited plain-text MIME, single-recipient composition
 and TLS verification. Mail lacks paging, thread view, reply/forward, read/unread,
 archive/trash, mailbox search, attachments, drafts, notifications and Calendar.
-The next useful Mail slice is paging + read/unread + reply, after a real Bridge
-round trip and broader synthetic MIME coverage. Direct Mail auth would be a
-separate integration project; it should not share the Pass session. Bridge's
+The next useful Mail slice is now **native sign-in → decrypted inbox → restart**,
+ahead of further Bridge feature expansion. The current manual setup does not
+meet the intended consumer experience. [The native Mail decision](MAIL_NATIVE_SIGN_IN.md)
+reviews the public Rust Mail core, its build probe and separate session boundary.
+Paging, read/unread and reply follow that working integration. Bridge's
 [paid-plan requirement](https://proton.me/mail/bridge) remains part of this design.
 
 Drive is already closely integrated with Finder: Proton documents a background

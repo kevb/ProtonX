@@ -92,6 +92,12 @@ remote logout and removes this app's local session after it succeeds.
 
 ## Connect Mail
 
+This is the current **Bridge prototype**, not the intended final onboarding.
+The next Mail milestone is native Proton sign-in and session restoration without
+server settings, reusing Proton's existing Mail core. See the
+[native Mail integration decision](docs/MAIL_NATIVE_SIGN_IN.md); this direct
+sign-in route is not implemented yet.
+
 Start [Proton Bridge](https://proton.me/mail/bridge), sign in there, and open its
 mail-client configuration. Enter that email address, Bridge-generated password,
 IMAP/SMTP ports and TLS mode into ProtonX Mail. Export Bridge's **public** TLS

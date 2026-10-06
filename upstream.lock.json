@@ -1,7 +1,14 @@
 {
   "schema": 1,
-  "reviewed_on": "2026-10-05",
+  "reviewed_on": "2026-10-06",
   "sources": [
+    {
+      "name": "clients",
+      "url": "https://github.com/ProtonMail/clients.git",
+      "revision": "2ecb794dbc221384dc6d88840965ac144db301ad",
+      "role": "direct native Mail core build feasibility reference; not linked",
+      "license": "Mail SDK AGPL-3.0-only; preserve per-component notices"
+    },
     {
       "name": "pass-cli",
       "url": "https://github.com/protonpass/pass-cli.git",

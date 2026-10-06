@@ -5,6 +5,27 @@ Rust 1.99.0. Automated test content is synthetic. User-driven live sign-in and
 local unlock reached a vault workspace in the morning follow-up. Only fixed UI
 states were inspected; no live vault contents were returned to the model.
 
+## Direct Mail core feasibility follow-up, 2026-10-06
+
+- Reviewed and pinned ProtonMail/clients `2ecb794dbc221384dc6d88840965ac144db301ad`
+  as reference only. No production Mail SDK linkage or direct sign-in UI added.
+- Unmodified public workspace metadata failed on an unpublished unrelated member.
+  An isolated copy retains the 83 published members and replaces the internal
+  crates.io Nexus proxy with public crates.io. The original checkout is unchanged.
+- Metadata and host-native `mail-uniffi` 0.168.2 typecheck passed. Native library
+  build with the candidate lock and `mail-macos-debug` profile passed, producing
+  an arm64 dynamic library and static archive. An unoptimized linker warning
+  concerns oversized DWARF unwind metadata; optimized builds remain untested.
+- Candidate lock removes 239 unused original package records and adds no new
+  registry/Git package name/version/source records. The preparation script,
+  lock and commands are recorded in `Experiments/MailCore`; reproducing its
+  manifest/config/lock and locked metadata passed. Existing-directory preparation
+  refuses replacement, Python compilation and reference-pin checks passed.
+- This is compile/link evidence only. No Mail account credentials, session,
+  Keychain item, message read/send or live API authentication were exercised.
+  Bindings, privacy/license review and disposable-account sign-in/decryption/
+  restart are still gates. See [the decision](MAIL_NATIVE_SIGN_IN.md).
+
 ## Completed
 
 The following is the overnight record; the morning follow-up below supersedes
