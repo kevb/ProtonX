@@ -13,8 +13,9 @@ belong in this document, screenshots, tests, or public issues.
    credential-free requests to both fork endpoints succeeded. Muon's normal
    request layer first creates an anonymous session; its public `from_fork`
    code flow explicitly omits that step. ProtonX now uses that existing flow for
-   desktop login, preserving the original CLI path. Rebuild and verify a real
-   handoff before calling this fixed. Then exercise first-vault setup, restart,
+   desktop login, preserving the original CLI path. The corrected local build
+   reached a connected vault workspace after user authentication and macOS local
+   unlock, with creation enabled and no error alert. Then exercise first-vault setup, restart,
    local unlock, cancellation, expiry, sign-out and reauthentication. Direct
    password login remains experimental; its rejection has not been resolved.
 2. **Prove a small complete Pass workflow and fix any bugs it exposes.** Use
@@ -47,7 +48,7 @@ Authentication and a verified basic workflow are the first acceptance gates.
 
 | Area | Official baseline | ProtonX today | Next action |
 | --- | --- | --- | --- |
-| Sign-in | Desktop account handoff; account verification | System authentication window plus experimental native prompts; live flow not yet established | First gate: verified login, setup and recovery; no CLI-eligibility workaround |
+| Sign-in | Desktop account handoff; account verification | Corrected system handoff and local unlock reached a live vault; native password prompts remain experimental | Finish setup/restart/recovery coverage; no CLI-eligibility workaround |
 | Vault browsing and sync | Synced vault/item workspace | Native three-column UI, title search, explicit refresh; repeated helper startup/sync | Reliable snapshot, status, large-vault timing and cancellation |
 | Item editing | Logins, notes, cards and other supported item forms; custom fields | Creates/edits login and note basics; reads several other kinds; URLs editable only at creation; one URL input | Complete login editor, then cards/identities/Wi-Fi/SSH forms |
 | TOTP | Setup and use of two-factor secrets | Copy of an existing permitted code; no setup/edit UI | Synthetic enrollment fixture, URI validation, entitlement-aware editing; preserve server limits |

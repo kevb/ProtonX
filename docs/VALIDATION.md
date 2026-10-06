@@ -6,6 +6,9 @@ attempted with the account owner's authorization; no vault contents were accesse
 
 ## Completed
 
+The following is the overnight record; the morning follow-up below supersedes
+its desktop-handoff status.
+
 - Native Swift app compiles in debug and release; release app bundle is locally
   ad-hoc signed and verifies with strict code-signature verification.
 - Independent GitHub CI on macOS 15 Intel passed Swift contracts, both synthetic
@@ -71,15 +74,20 @@ coverage; system-level interaction is not fully automated.
 - Local verification passed: 34 Swift tests (plus the optional Bridge test
   skipped), 114 helper tests in each product mode, and 249 SDK unit/integration
   tests, with two intentional fixture-dump helpers ignored. The release helper
-  and native app bundle rebuild passed. The corrected account handoff progressed
-  past the previous immediate rejection. A successfully completed sign-in and
-  remote synthetic-item workflow still need user validation.
+  and native app bundle rebuild passed. The corrected account handoff reached
+  a connected vault workspace after user authentication and macOS local unlock,
+  with creation enabled and no error alert. Only these fixed UI states were
+  inspected; no account identifiers, vault titles, item contents or credentials
+  were returned to the model. Remote synthetic-item CRUD, restart and recovery
+  still need validation. This observation does not validate the experimental
+  direct-password flow or every account challenge.
 - The feature comparison and next acceptance gates are recorded in
   [GAP_ANALYSIS.md](GAP_ANALYSIS.md).
 
 ## Not established
 
-- Successful desktop account-fork login and vault setup, remote vault CRUD/sync,
+- Repeated desktop account-fork login and first-vault setup across account types,
+  remote vault CRUD/sync,
   TOTP/second/extra-password challenges,
   session expiry/revocation and recovery. Upstream implementation is reused but
   does not eliminate integration risk.

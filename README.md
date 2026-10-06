@@ -7,7 +7,8 @@ windows, and **one optional menu-bar icon**. Native vault and mail UI, without a
 **Status: 0.1 developer alpha.** Pass is the priority. This is a working native
 client built on Proton's open-source Rust Pass library and desktop API protocol, plus an initial native Mail
 client for Proton Bridge. It is not a full replacement for all official apps.
-Real-account interoperability has not yet been validated. Use a disposable test
+Initial user-driven sign-in, local unlock and vault loading have been observed.
+Remote writes and session recovery still need validation. Use a disposable test
 account before trusting this alpha with your vault.
 Builds are available locally; binary publication also awaits the recorded
 [dependency license review](docs/LICENSE_REVIEW.md).
@@ -67,8 +68,9 @@ it and the helper. The vault interface stays native after sign-in.
 second-password and extra-password prompts. A live attempt was rejected with
 HTTP 422 / API 8004; its exact cause is not established. The earlier CLI backend
 successfully authenticated but failed CLI eligibility. Neither outcome establishes
-working desktop vault interoperability. The desktop account handoff still needs
-live validation, including security-key, SSO and verification behavior.
+complete desktop vault interoperability. The corrected desktop account handoff
+has reached a live vault after user authentication and local unlock; security-key,
+SSO, verification and recovery behavior still need validation.
 
 Encrypted session/cache files belong to the helper; their local encryption key
 is in macOS Keychain. ProtonX uses the pinned macOS desktop protocol and does not
