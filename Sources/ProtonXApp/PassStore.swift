@@ -36,6 +36,8 @@ final class PassStore: ObservableObject {
     private var authContext: LAContext?
     private let webAuthentication = NativeWebAuthentication()
     var filteredItems: [PassItem] { ItemSearch.filter(showingTrash ? trashedItems : items, query: query, vaultID: selectedVault, kind: kind, sort: sort) }
+    var isLoadingInitialSnapshot: Bool { phase == .open && !isDemo && busy && lastSyncedAt == nil }
+    var initialSnapshotFailed: Bool { phase == .open && !isDemo && !busy && lastSyncedAt == nil && error != nil }
     var currentItem: PassItem? {
         guard let selectedItem, let item = (showingTrash ? trashedItems : items).first(where: { $0.id == selectedItem }),
               ItemSearch.matches(item, query: query, vaultID: selectedVault, kind: kind) else { return nil }

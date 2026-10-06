@@ -20,6 +20,31 @@ private final class NoAccountRunner: HelperRunning, @unchecked Sendable {
     return store
 }
 
+private final class DelayedSnapshotRunner: HelperRunning, @unchecked Sendable {
+    let fail: Bool
+    init(fail: Bool) { self.fail = fail }
+    func cancelAll() {}
+    func run(_ command: HelperCommand, challenge: ChallengeHandler?) async throws -> Data {
+        if command.arguments.first == "login" { return Data() }
+        // Keep the synthetic first list pending even if the store is locked.
+        await Task.detached { try? await Task.sleep(for: .milliseconds(120)) }.value
+        if fail { throw ProtonXError.invalidInput("Synthetic unavailable network") }
+        return Data(#"{"vaults":[],"items":[],"trashed_items":[],"capabilities":{"totp_limit":null,"custom_fields_allowed":true}}"#.utf8)
+    }
+}
+
+@Test(arguments: [false, true]) @MainActor func passInitialSnapshotDistinguishesLoadingFailureAndConfirmedEmpty(_ fail: Bool) async {
+    let store = PassStore(service: PassService(runner: DelayedSnapshotRunner(fail: fail)), sessionDirectory: URL(fileURLWithPath: "/nonexistent/protonx-synthetic-tests"), previewOnly: false)
+    store.login()
+    let start = ContinuousClock.now
+    while store.phase != .open && start.duration(to: .now) < .seconds(2) { await Task.yield() }
+    #expect(store.isLoadingInitialSnapshot); #expect(!store.initialSnapshotFailed)
+    while store.busy && start.duration(to: .now) < .seconds(2) { await Task.yield() }
+    #expect(!store.isLoadingInitialSnapshot); #expect(store.initialSnapshotFailed == fail)
+    #expect((store.lastSyncedAt != nil) == !fail)
+    store.lock(); #expect(!store.initialSnapshotFailed); #expect(!store.isLoadingInitialSnapshot)
+}
+
 @Test @MainActor func filtersImmediatelyClearStaleDetailWithoutWaitingForView() throws {
     let store = demoStore()
     #expect(store.currentItem?.kind == "login"); #expect(store.detail != nil)

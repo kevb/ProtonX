@@ -17,8 +17,12 @@ include passwords, tokens, real message bodies or vault exports in public issues
   preference `mailConnected` is a Boolean only.
 - Native Mail uses Proton's pinned Rust Mail SDK in a separate helper, profile
   `~/Library/Application Support/ProtonX/Mail`, and Keychain service
-  `org.kevb.ProtonX.Mail.Native`. The SDK manages encrypted sessions and local
-  databases. It never reuses Pass or Bridge credentials. `nativeMailConnected`
+  `org.kevb.ProtonX.Mail.Native`. The SDK protects session tokens/key secrets with
+  a Keychain-backed encryption key, but its Mail data database is ordinary SQLite.
+  Subjects, participants and previously decrypted bodies can persist unencrypted
+  in that database and its journals. Local UI lock does not encrypt or remove them.
+  This is an unresolved release blocker; see docs/LOCAL_STORAGE.md and its synthetic
+  storage contract. It never reuses Pass or Bridge credentials. `nativeMailConnected`
   is an untrusted Boolean hint; reopening requires local unlock and SDK restore.
   Native credentials/challenges travel on private stdin. Human verification and
   FIDO-only challenges fail explicitly; no product limit or challenge is bypassed.
@@ -27,7 +31,8 @@ include passwords, tokens, real message bodies or vault exports in public issues
   session on disk; lock is not remote logout. Sign-out uses the SDK's account logout.
 - Main Proton passwords travel through a private pipe and are not stored in UI
   preferences, argument lists, credential environment variables or logs. Decrypted
-  item data and mail bodies live in app memory while open. Swift strings/copies
+  Pass item data lives in app memory while open; Mail's core also persists decoded
+  message bodies as described above. Swift strings/copies
   cannot offer reliable zeroization; clearing UI references is not a memory scrub.
 - Primary sign-in displays Proton's account page in macOS authentication services
   with an ephemeral browser session. The fork URL contains a one-use code/key;

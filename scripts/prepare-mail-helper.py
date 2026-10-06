@@ -35,6 +35,7 @@ with tempfile.TemporaryDirectory(prefix="ProtonX-mail-source-") as stage:
     subprocess.run(["git", "apply", "--check", str(root / "patches/mail-core.patch")], cwd=prepared, check=True)
     subprocess.run(["git", "apply", str(root / "patches/mail-core.patch")], cwd=prepared, check=True)
     shutil.copy2(root / "Tools/MailContractTests/linked_sender.rs", prepared / "project/mail/rust/mail/mail-common/tests/protonx_linked_sender.rs")
+    shutil.copy2(root / "Tools/MailContractTests/local_storage.rs", prepared / "project/mail/rust/mail/mail-common/tests/protonx_local_storage.rs")
     protocol = json.loads((root / "Resources/MailProtocol.json").read_text())
     constants = (
         f'pub const WEB_VERSION: &str = {json.dumps(protocol["webVersion"])};\n'

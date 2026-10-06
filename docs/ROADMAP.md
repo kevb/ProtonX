@@ -48,3 +48,19 @@ These have synthetic/source validation; remote writes and recovery are still gat
 - Decide separate process/sandbox packaging after proving the suite UX and IPC needs.
 - Measure total memory/CPU (including Bridge and transient helpers) before publishing
   any reduction percentages.
+- Add optional native Spotlight launchers named **ProtonX Mail** and **ProtonX Pass**
+  that open the corresponding window in the shared app. Defer installation until
+  builds can be reliably updated in Applications; document shared Quit/Dock/⌘Tab
+  behavior. Pair them with a visible in-window product switcher.
+
+## Local storage and faster opening
+
+- Distinguish initial loading/failure from genuinely empty vaults and folders.
+- Resolve the Mail core's plaintext database/body persistence before expanding
+  cached browsing or calling it secure. See [the storage/startup review](LOCAL_STORAGE.md).
+- Show saved Mail metadata after local unlock, then refresh in the background,
+  with accurate freshness and failure state and stable selection.
+- Persist Pass item revisions through Proton's existing encryption layer, subject
+  to product/organisation offline policy; start with read-only access.
+- Measure time to first list and selected detail on matching synthetic cold/warm
+  workloads. Storage migration, wrong keys, corruption and lock races are gates.

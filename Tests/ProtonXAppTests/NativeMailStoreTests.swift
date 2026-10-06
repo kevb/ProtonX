@@ -90,6 +90,36 @@ private let mailSnapshot = NativeMailResult(folders: [NativeMailFolder(id: 1, na
     #expect(store.phase == .locked); #expect(runner.calls.isEmpty); #expect(store.error == nil)
 }
 
+@Test @MainActor func mailInitialLoadAndFailureAreNotPresentedAsEmptyFolders() async {
+    let runner = SyntheticMailRunner([
+        .init(method: "restore", result: .init(phase: .connected)),
+        .init(method: "snapshot", result: .init(), failure: .snapshotFailed, delay: .milliseconds(120)),
+        .init(method: "snapshot", result: mailSnapshot)
+    ])
+    let store = mailStore(runner, saved: true)
+    store.unlock(); await waitForMail { runner.calls.count == 2 }
+    #expect(store.phase == .open); #expect(store.messages.isEmpty)
+    #expect(store.isLoadingList); #expect(!store.initialListFailed)
+    await waitForMail { !store.busy }
+    #expect(!store.isLoadingList); #expect(store.initialListFailed)
+    store.refresh(); await waitForMail { !store.busy }
+    #expect(store.messages.count == 1); #expect(!store.initialListFailed)
+    store.lock(); #expect(!store.isLoadingList); #expect(!store.initialListFailed)
+}
+
+@Test @MainActor func mailLockDuringInitialListCannotRevealLateContent() async {
+    let runner = SyntheticMailRunner([
+        .init(method: "restore", result: .init(phase: .connected)),
+        .init(method: "snapshot", result: mailSnapshot, delay: .milliseconds(120))
+    ])
+    let store = mailStore(runner, saved: true)
+    store.unlock(); await waitForMail { runner.calls.count == 2 }
+    #expect(store.isLoadingList)
+    store.lock(); try? await Task.sleep(for: .milliseconds(180))
+    #expect(store.phase == .locked); #expect(store.messages.isEmpty)
+    #expect(!store.isLoadingList); #expect(!store.initialListFailed)
+}
+
 @Test @MainActor func mailFailedSignOutRetainsSessionUntilAcknowledged() async {
     let runner = SyntheticMailRunner([.init(method: "restore", result: .init(phase: .connected)), .init(method: "snapshot", result: mailSnapshot), .init(method: "sign_out", result: .init(), failure: .signOutFailed), .init(method: "sign_out", result: .init(phase: .welcome))])
     let store = mailStore(runner, saved: true)

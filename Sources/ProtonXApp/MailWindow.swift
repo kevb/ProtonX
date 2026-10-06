@@ -154,7 +154,20 @@ struct MailWindow: View {
                 .searchable(text: $store.query, prompt: "Search loaded mail")
                 .onChange(of: store.query) { _, _ in store.reconcileSelection() }
                 .onChange(of: store.selectedItem) { _, _ in store.select() }
-                .overlay { if store.visibleMessages.isEmpty { ContentUnavailableView(store.loading ? "Syncing your inbox" : store.query.isEmpty ? "No messages here" : "No matching messages", systemImage: "tray", description: Text(store.loading ? "Your mailbox is loading." : "Refresh or choose another folder.")) } }
+                .overlay {
+                    if store.visibleMessages.isEmpty {
+                        if store.isLoadingList {
+                            ProgressView("Loading your mailbox…").frame(maxWidth: .infinity, maxHeight: .infinity)
+                        } else if store.initialListFailed {
+                            ContentUnavailableView {
+                                Label("Could not load this folder", systemImage: "exclamationmark.circle")
+                            } description: { Text("Try refreshing when your connection is available.") }
+                            actions: { Button("Retry") { store.refresh() } }
+                        } else {
+                            ContentUnavailableView(store.query.isEmpty ? "No messages here" : "No matching messages", systemImage: "tray", description: Text("Refresh or choose another folder."))
+                        }
+                    }
+                }
                 .safeAreaInset(edge: .bottom) {
                     HStack {
                         if store.loading { ProgressView().controlSize(.small); Text("Syncing…") }

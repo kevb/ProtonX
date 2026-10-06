@@ -44,6 +44,8 @@ final class NativeMailStore: ObservableObject {
         messages.filter { query.isEmpty || $0.subject.localizedStandardContains(query) || $0.sender.localizedStandardContains(query) || $0.senderName.localizedStandardContains(query) }
     }
     var selectedMessage: NativeMailMessage? { visibleMessages.first { $0.id == selectedItem } }
+    var isLoadingList: Bool { phase == .open && !demo && (loading || (busy && (loadedFolder == nil || loadedFolder != selectedFolder))) }
+    var initialListFailed: Bool { phase == .open && !demo && !busy && error != nil && (loadedFolder == nil || loadedFolder != selectedFolder) }
     func signIn(username: String, password: String) {
         guard !previewOnly, !busy, !username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !password.isEmpty else { return }
         if demo { lock(); demo = false }

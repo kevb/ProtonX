@@ -35,5 +35,6 @@ assert 'if cfg!(feature = "protonx-native")' in telemetry and 'return Ok(false);
 draft_source = (native / "project/mail/rust/mail/mail-uniffi/src/mail/draft.rs").read_text()
 assert 'auto_save_every: if cfg!(feature = "protonx-native") { None }' in draft_source
 assert (native / "project/mail/rust/mail/mail-common/tests/protonx_linked_sender.rs").read_bytes() == (root / "Tools/MailContractTests/linked_sender.rs").read_bytes()
+assert (native / "project/mail/rust/mail/mail-common/tests/protonx_local_storage.rs").read_bytes() == (root / "Tools/MailContractTests/local_storage.rs").read_bytes()
 assert (native / "Cargo.lock").read_bytes() == (root / "Resources/MailHelper.lock").read_bytes()
 print("Independent native Mail protocol and privacy contracts verified")

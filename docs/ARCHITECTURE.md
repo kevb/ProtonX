@@ -119,18 +119,23 @@ See [offline design](OFFLINE_DESIGN.md) and the isolated
 ## Mail and Drive
 
 The default Mail window uses Proton's native Rust Mail SDK through one bounded,
-serial private helper. It runs while Mail is unlocked, with its own encrypted
+serial private helper. It runs while Mail is unlocked, with its own separate
 profile and `org.kevb.ProtonX.Mail.Native` Keychain service. Native forms drive
 credentials/TOTP/second-password states. Saved-session restore follows local
-Mac authentication. The SDK owns SRP, account/address keys, encrypted databases,
+Mac authentication. The SDK owns SRP, account/address keys, local databases,
 API transport, sync and selected-message decryption. Native HTML-to-text rendering
 has no browser, remote-resource loader or script execution.
 
-The first direct slice is read-only. Sidebar and messages are bounded; selected
+The session encryption key protects tokens/key secrets, not the entire Mail data
+database. The pinned SDK persists decoded message bodies and metadata in ordinary
+SQLite. See [the local storage review and release gate](LOCAL_STORAGE.md).
+
+Sidebar and messages are bounded; selected
 contents are decrypted on demand and session/selection epochs reject late replies.
 Lock/close tears down the helper. Remote sign-out is acknowledged before clearing
 the saved-session hint. Unsupported human verification/FIDO-only/password-change
-states are explicit. Direct account interoperability is not yet established.
+states are explicit. The user reported real sign-in and reading; delivery and
+recovery remain acceptance gates. See [composer behavior](MAIL_COMPOSER.md).
 
 `Resources/MailProtocol.json`, `Resources/MailHelper.lock` and
 `patches/mail-core.patch` pin this independent Mail implementation. The small

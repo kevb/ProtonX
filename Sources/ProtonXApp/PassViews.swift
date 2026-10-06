@@ -112,7 +112,15 @@ struct PassWindow: View {
             }
                 .listStyle(.sidebar).scrollContentBackground(.hidden)
                 .overlay {
-                    if store.filteredItems.isEmpty {
+                    if store.isLoadingInitialSnapshot {
+                        ProgressView("Loading your vault…").frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else if store.initialSnapshotFailed {
+                        ContentUnavailableView {
+                            Label("Could not load your vault", systemImage: "exclamationmark.circle")
+                        } description: {
+                            Text("Try refreshing when your connection is available.")
+                        } actions: { Button("Retry") { store.refresh() } }
+                    } else if store.filteredItems.isEmpty {
                         ContentUnavailableView {
                             Label(store.query.isEmpty ? (store.showingTrash ? "Trash is empty" : "No items yet") : "No matching items", systemImage: store.query.isEmpty ? (store.showingTrash ? "trash" : "key") : "magnifyingglass")
                         } description: {

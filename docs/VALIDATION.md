@@ -5,6 +5,21 @@ Rust 1.99.0. Automated test content is synthetic. User-driven live sign-in and
 local unlock reached a vault workspace in the morning follow-up. Only fixed UI
 states were inspected; no live vault contents were returned to the model.
 
+## Startup and local storage review, 2026-10-06
+
+- 73 Swift tests passed, including delayed first-load, failed-load/retry and
+  lock-before-list-completion coverage. Initial Pass/Mail loading is distinguished
+  from confirmed empty results; failed initial lists offer Retry.
+- 64 Rust tests passed via `scripts/test-mail-helper.sh`: nine helper contracts,
+  53 public Mail tests and two ProtonX synthetic fixtures (linked sender and local
+  storage). The temporary SQLite fixture confirms decoded bodies remain readable
+  without a Keychain key. It proves a missing security property, not secure caching.
+- Release Swift build and strict app/helper signature verification passed for
+  `build/ProtonX Loading Update.app`. The existing Mail helper source is unchanged.
+- No installed account profile was inspected or migrated, no Mail was sent and
+  no app was installed in Applications. No startup-speed improvement was measured.
+  See [the storage correction and acceptance gates](LOCAL_STORAGE.md).
+
 ## Native Mail composer follow-up, 2026-10-06
 
 - The user reported native account sign-in and successful message reading. No

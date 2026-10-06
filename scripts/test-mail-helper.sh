@@ -12,6 +12,9 @@ cargo test --locked -p mail-common --test message_mail_scroller --profile mail-m
 
 cargo test --locked -p mail-common --test message_body --profile mail-macos-debug
 
+# A temporary SQLite fixture establishes the actual at-rest storage boundary.
+cargo test --locked -p mail-common --test protonx_local_storage --profile mail-macos-debug
+
 # Composer, sender selection (including BYOE), recipient validation and delivery
 # use upstream local mock servers and public synthetic keys only.
 cargo test --locked -p mail-common --test draft_change_sender --test draft_constructors --test draft_recipients --test draft_send --test protonx_linked_sender --profile mail-macos-debug

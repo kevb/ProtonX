@@ -20,6 +20,12 @@ boundary and retain SwiftUI/AppKit for the interface. Keep Mail sessions, keys,
 local databases and Keychain entries separate from Pass. Authentication success
 is insufficient: Mail must unlock the account/address keys and decrypt a message.
 
+The [local storage review](LOCAL_STORAGE.md) corrects the earlier assumption that
+the Mail profile is entirely encrypted: the pinned core's SQLite database persists
+decoded message bodies. Keychain-protected session credentials do not encrypt that
+database. Secure storage and migration are release blockers before cached browsing
+is expanded or described as secure offline access.
+
 ## Evidence and upstream references
 
 The newly reviewed reference is

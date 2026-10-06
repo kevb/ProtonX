@@ -57,8 +57,11 @@ replacing a running primary bundle. Quit the old app before opening the update;
 both real bundles use the same isolated ProtonX Pass profile.
 
 Both helpers are built from exact Proton source revisions. Pass runs for one
-operation and exits; Mail persists while its window is unlocked and stops on lock/close. It uses a separate encrypted
-profile and Keychain namespace; it does not import the official app's session.
+operation and exits; Mail persists while its window is unlocked and stops on lock/close.
+Mail uses a separate profile and Keychain namespace; it does not import the official
+app's session. Session credentials are protected, but the pinned Mail core's local
+database can store decoded messages unencrypted. This remains a release blocker:
+see [the local storage review](docs/LOCAL_STORAGE.md).
 To download every reviewed upstream repository:
 
 ```sh
