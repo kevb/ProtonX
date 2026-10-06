@@ -22,20 +22,50 @@ struct ItemEditor: View {
     @State private var saving = false
     @State private var conflicted = false
     @State private var saveTask: Task<Void, Never>?
+    @State private var originalContent: EditableContent?
     @FocusState private var focusedField: String?
     private var isLogin: Bool { draft.kind == "login" }
+    // Memory-only comparison; opening an item must not create a new revision.
+    private struct EditableContent: Equatable {
+        let title: String, note: String, username: String, email: String, password: String
+        let websites: [String]
+        let totpSetup: String
+        let removeTOTP: Bool
+        let customFields: [CustomFieldDraft]
+    }
+    private var content: EditableContent {
+        EditableContent(title: draft.title, note: draft.note, username: username, email: email,
+                        password: password, websites: normalizedWebsites, totpSetup: totpSetup,
+                        removeTOTP: removeTOTP, customFields: draft.customFields)
+    }
+    private var normalizedWebsites: [String] {
+        websites.map { $0.value.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+    }
+    private var cannotSave: Bool {
+        conflicted || saving || store.busy || store.mustRefreshBeforeWriting ||
+        draft.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || vaultID.isEmpty ||
+        (editing && (originalContent == nil || originalContent == content))
+    }
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                PassItemBadge(symbol: isLogin ? "key" : "note.text", kind: draft.kind, size: 40)
+            HStack(spacing: 14) {
+                Button { clear(); dismiss() } label: { Image(systemName: "xmark") }
+                    .buttonStyle(PassIconStyle()).keyboardShortcut(.cancelAction).disabled(saving)
+                    .accessibilityLabel("Cancel editing").help("Cancel (Esc)")
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(editing ? "Edit \(isLogin ? "login" : "secure note")" : "Create item").font(.title2.weight(.semibold))
-                    Text(editing ? "Keep your details up to date" : "Add a login or secure note").font(.caption).foregroundStyle(.secondary)
+                    Text(editing ? "Edit \(isLogin ? "login" : "secure note")" : "Create item").font(.system(size: 16, weight: .semibold))
+                    if editing, let vault = store.vaults.first(where: { $0.id == vaultID }) {
+                        Text(vault.name).font(.caption).foregroundStyle(.secondary)
+                    }
                 }
-            }.padding(24).frame(maxWidth: .infinity, alignment: .leading).background(PassTheme.canvas)
-            Divider()
+                Spacer()
+                if saving { ProgressView().controlSize(.small) }
+                Button(editing ? "Save Changes" : "Create \(isLogin ? "Login" : "Note")", action: save)
+                    .buttonStyle(PassPillStyle(primary: true)).keyboardShortcut(.defaultAction)
+                    .disabled(cannotSave).accessibilityIdentifier("saveItem")
+            }.padding(.horizontal, 24).padding(.vertical, 18).background(PassTheme.canvas)
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 14) {
                     if !editing {
                         HStack(spacing: 16) {
                             Picker("Type", selection: $draft.kind) { Text("Login").tag("login"); Text("Secure note").tag("note") }
@@ -44,8 +74,8 @@ struct ItemEditor: View {
                         }.pickerStyle(.menu).font(.system(size: 13)).padding(.horizontal, 4)
                     }
                     VStack(alignment: .leading, spacing: 10) {
-                        Text("Title").font(.system(size: 12)).foregroundStyle(.secondary)
-                        TextField("Untitled", text: $draft.title).font(.system(size: 23, weight: .semibold))
+                        Text("Title").font(.system(size: 13)).foregroundStyle(.secondary)
+                        TextField("Untitled", text: $draft.title).font(.system(size: 26, weight: .semibold))
                             .focused($focusedField, equals: "title").accessibilityLabel("Title").accessibilityIdentifier("itemTitle")
                     }.padding(20).passSurface().editorFocus(focusedField == "title")
                     if isLogin { loginFields; websiteFields }
@@ -53,22 +83,14 @@ struct ItemEditor: View {
                     customFields
                 }.textFieldStyle(.plain).padding(24).disabled(saving)
             }.background(PassTheme.canvas)
-            Divider()
-            VStack(alignment: .leading, spacing: 12) {
-                if let localError {
+            if let localError {
+                Divider()
+                VStack(alignment: .leading, spacing: 12) {
                     Text(localError).foregroundStyle(.red).font(.callout).textSelection(.enabled)
                     if store.mustRefreshBeforeWriting && !conflicted { Button("Refresh Vault") { store.refresh() }.disabled(store.busy) }
-                }
-                HStack {
-                    Button("Cancel") { clear(); dismiss() }.buttonStyle(PassPillStyle()).keyboardShortcut(.cancelAction).disabled(saving)
-                    Spacer()
-                    if saving { ProgressView().controlSize(.small) }
-                    Button(editing ? "Save Changes" : "Create \(isLogin ? "Login" : "Note")", action: save)
-                        .buttonStyle(PassPillStyle(primary: true))
-                        .keyboardShortcut(.defaultAction).disabled(conflicted || saving || store.busy || store.mustRefreshBeforeWriting || draft.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || vaultID.isEmpty)
-                }
-            }.padding(20).background(PassTheme.canvas)
-        }.frame(width: 620, height: 720).tint(PassTheme.accent)
+                }.padding(20).frame(maxWidth: .infinity, alignment: .leading).background(PassTheme.canvas)
+            }
+        }.frame(width: 640, height: 760).tint(PassTheme.accent)
         .onAppear(perform: populate)
         .onDisappear { saveTask?.cancel(); clear() }
         .onChange(of: draft.kind) { _, _ in totpSetup = ""; removeTOTP = false }
@@ -91,7 +113,7 @@ struct ItemEditor: View {
                 }
             }
             Divider().padding(.leading, 54)
-            entryRow("Verification code", symbol: "lock") {
+            entryRow("2FA secret key (TOTP)", symbol: "lock") {
                 if existingTOTP {
                     Text("Existing setup is kept unless you replace or remove it.").font(.caption).foregroundStyle(.secondary)
                     Toggle("Remove existing setup", isOn: $removeTOTP).font(.caption)
@@ -109,21 +131,29 @@ struct ItemEditor: View {
     private var websiteFields: some View {
         entryRow("Websites", symbol: "globe") {
             ForEach($websites) { $website in
-                HStack(spacing: 12) {
+                HStack(spacing: 10) {
                     TextField("https://example.com", text: $website.value)
                         .focused($focusedField, equals: "website:" + website.id.uuidString).accessibilityLabel("Website address")
-                    Button { websites.removeAll { $0.id == website.id } } label: { Image(systemName: "minus") }
-                        .buttonStyle(PassIconStyle()).accessibilityLabel("Remove website")
+                    Button { websites.removeAll { $0.id == website.id } } label: { Image(systemName: "xmark") }
+                        .buttonStyle(.plain).foregroundStyle(.secondary).frame(width: 28, height: 28)
+                        .contentShape(Rectangle()).accessibilityLabel("Remove website").help("Remove website")
                 }
+                .padding(.horizontal, 12).padding(.vertical, 6)
+                .background(PassTheme.canvas, in: RoundedRectangle(cornerRadius: 12))
+                .overlay { RoundedRectangle(cornerRadius: 12).strokeBorder(focusedField == "website:" + website.id.uuidString ? PassTheme.accent : PassTheme.border, lineWidth: 1).allowsHitTesting(false) }
             }
-            Button("Add website", systemImage: "plus") { websites.append(WebsiteInput()) }
-                .buttonStyle(PassPillStyle()).padding(.top, 4)
-        }.passSurface().editorFocus(focusedField?.hasPrefix("website:") == true)
+            Divider().padding(.vertical, 4)
+            Button("Add website", systemImage: "plus") {
+                let website = WebsiteInput()
+                websites.append(website)
+                focusedField = "website:" + website.id.uuidString
+            }.buttonStyle(.plain).foregroundStyle(PassTheme.accent).padding(.vertical, 4)
+        }.passSurface()
     }
     private var noteField: some View {
         entryRow(isLogin ? "Note" : "Secure note", symbol: "note.text") {
             TextEditor(text: $draft.note).font(.system(size: 15)).scrollContentBackground(.hidden)
-                .frame(height: isLogin ? 100 : 260).focused($focusedField, equals: "note").accessibilityLabel("Notes")
+                .frame(height: isLogin ? 76 : 260).focused($focusedField, equals: "note").accessibilityLabel("Notes")
                 .overlay(alignment: .topLeading) {
                     if draft.note.isEmpty { Text(isLogin ? "Add a note…" : "Write your note…").font(.system(size: 15)).foregroundStyle(.secondary).padding(.top, 8).padding(.leading, 5).allowsHitTesting(false).accessibilityHidden(true) }
                 }
@@ -158,8 +188,8 @@ struct ItemEditor: View {
         HStack(alignment: .top, spacing: 14) {
             Image(systemName: symbol).font(.system(size: 17)).foregroundStyle(PassTheme.accent).frame(width: 22, height: 24).accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 10) {
-                Text(title).font(.system(size: 12)).foregroundStyle(.secondary)
-                content().font(.system(size: 15))
+                Text(title).font(.system(size: 13)).foregroundStyle(.secondary)
+                content().font(.system(size: 16))
             }.frame(maxWidth: .infinity, alignment: .leading)
         }.padding(18)
     }
@@ -174,13 +204,15 @@ struct ItemEditor: View {
             originalWebsites = detail.urls; websites = detail.urls.isEmpty ? [WebsiteInput()] : detail.urls.map { WebsiteInput(value: $0) }
             existingTOTP = detail.hasTOTP; draft.customFields = detail.editableCustomFields; unsupportedFields = detail.unsupportedCustomFieldCount
         }
+        originalContent = content
         focusedField = "title"
     }
     private func save() {
+        guard !cannotSave else { return }
         var input = draft
         if isLogin {
             input.username = username; input.email = email; input.password = password
-            let urls = websites.map { $0.value.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+            let urls = normalizedWebsites
             input.urls = !editing || urls != originalWebsites ? urls : nil
             input.totpURI = removeTOTP ? "" : (totpSetup.isEmpty ? nil : totpSetup)
         }
@@ -199,7 +231,7 @@ struct ItemEditor: View {
             }
         }
     }
-    private func clear() { draft = NativeItemDraft(); username = ""; email = ""; password = ""; websites = []; totpSetup = ""; originalWebsites = [] }
+    private func clear() { draft = NativeItemDraft(); username = ""; email = ""; password = ""; websites = []; totpSetup = ""; originalWebsites = []; originalContent = nil }
 }
 
 private extension View {

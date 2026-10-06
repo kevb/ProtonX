@@ -34,14 +34,17 @@ belong in this document, screenshots, tests, or public issues.
   child-process recovery and synthetic saved-session/local-unlock checks. Unknown
   Trash/restore outcomes now block duplicate attempts until refresh; expiry on
   detail/write/post-write refresh clears the workspace and returns to sign-in.
-  Real SDK session restoration and cross-client interoperability remain gates.
+  The user subsequently reported successful bidirectional edit/sync with the
+  official desktop app, a passed conflict test, Trash/restore and quit/restart.
+  Broader item interoperability, upgrade continuity and real expiry remain gates.
 - The visual pass adds adaptive lavender/indigo surfaces, grouped rounded detail
   cards and clearer Edit/Create actions. Native selection and keyboard controls
   remain. The user reported successfully creating, syncing and deleting a live
   test login; no private contents were inspected by the agent.
 
-The next acceptance gates remain designated disposable-account CRUD verified
-from another client, restart/recovery and large-vault measurements. A ProtonX
+The fictional-login cross-client workflow and quit/restart passed according to the
+user's live test. The next gates include broader item round trips, expiry/revocation,
+Keychain continuity across upgrades and large-vault measurements. A ProtonX
 credential provider is optional future system/native-app work; use the standalone
 official extension for Safari. [The reliability plan](PASS_RELIABILITY.md) separates
 existing synthetic coverage from remaining automation and live checks.
@@ -94,7 +97,7 @@ Authentication and a verified basic workflow are the first acceptance gates.
 | --- | --- | --- | --- |
 | Sign-in | Desktop account handoff; account verification | Corrected system handoff and local unlock reached a live vault; native password prompts remain experimental | Finish setup/restart/recovery coverage; no CLI-eligibility workaround |
 | Vault browsing and sync | Synced vault/item workspace | Native three-column UI, title search, sorting, atomic metadata/Trash snapshot and sync status | Large-vault timing, reconnect and cancellation |
-| Item editing | Logins, notes, cards and other supported item forms; custom fields | Login/note editor with notes, multiple URLs and text/hidden custom fields; revision-bound saves; other kinds readable | Live editor interoperability, then cards/identities/Wi-Fi/SSH forms |
+| Item editing | Logins, notes, cards and other supported item forms; custom fields | Login/note editor with notes, multiple URLs and text/hidden custom fields; revision-bound saves; user-tested bidirectional login edits and conflict refusal; other kinds readable | Broader field interoperability, then cards/identities/Wi-Fi/SSH forms |
 | TOTP | Setup and use of two-factor secrets | Permitted code copy and concealed setup/replacement/removal UI | Live enrollment round trip; preserve server limits |
 | Organisation | Vault management, moving items | Vault selection only; no create/rename/delete/move UI | Create/rename vaults and move items after permission-aware metadata |
 | Permissions | Shared vaults and role-specific access | Create/update/trash flags surfaced; UI + native SDK guards; server remains authoritative | Shared-role interoperability and item-share edge cases |

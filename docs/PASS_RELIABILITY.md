@@ -11,9 +11,9 @@ Existing tests are evidence of local contracts, not full Proton interoperability
 | --- | --- | --- |
 | Helper failure | `ProcessTests.swift` covers process deadlines/cancellation, sanitised failures, partial-output exits for reads/writes, fresh-process recovery and exited-helper prompt cancellation | SDK saved-session/key recovery and upgrade fixtures; never replay an unconfirmed write |
 | Refresh/reconnect | `PassRecoveryTests.swift` covers first-load retry, retaining last-success data through failure, successful reconnect, atomic permission/capability replacement and no repeated sign-in | Independent-client event reconciliation and larger synthetic workloads |
-| Edits/conflicts | Revision required/forwarded; native stale-revision guards; scripted conflict/unconfirmed edit blocks another write until refresh, then loads the newer revision | Real concurrent-client revision changes; broader unsupported-field round trips |
-| Trash restoration | Synthetic demo lifecycle plus command-path restore/denial, lost acknowledgement, acknowledged restore with failed refresh and authoritative reconciliation | Designated-account round trip verified through the official extension |
-| Restart/session recovery | Two new stores over an isolated synthetic session hint require local unlock; denied/late unlock does not start the helper; expired read/write/restore sessions clear data and require sign-in | Real SDK encrypted-session restore, Keychain continuity and server expiry/revocation interoperability |
+| Edits/conflicts | Revision required/forwarded; native stale-revision guards; scripted conflict/unconfirmed edit blocks another write until refresh; user reports successful bidirectional desktop edits and a passed conflict test | Broader unsupported-field round trips and independent-client event reconciliation |
+| Trash restoration | Synthetic lifecycle and command-path restore/denial, lost acknowledgement, failed post-write refresh; user reports live Trash/restore passed | Larger workloads and cross-client Trash reconciliation under interrupted refresh |
+| Restart/session recovery | Synthetic saved-session/local-unlock and expiry tests; user reports live quit/restart passed | Keychain continuity across rebuilds/upgrades and real server expiry/revocation interoperability |
 | Encrypted offline browse | [Storage review](OFFLINE_DESIGN.md) exists; a durable item cache is not implemented | Add read-only persistence through Proton's existing encryption/storage layer; test wrong/missing keys, corruption, rotations, account isolation, policy expiry and lock races |
 
 Some process fixtures execute a real disposable child process; preview lifecycle
@@ -66,3 +66,7 @@ wire value, with a real encrypted read-then-password-update mock-server contract
 The UI keeps a visible Refresh Vault action beside a blocked-write warning, even
 when its error banner is dismissed. Genuine stale revisions and non-active states
 remain refused. See [the Safari integration decision](CREDENTIAL_PROVIDER.md).
+The user subsequently reported the bidirectional edit/sync, conflict, Trash/restore
+and quit/restart acceptance steps passed. This is live user-observed evidence for
+the fictional login, not automated real-account testing or coverage of all item
+types. Encrypted offline browsing remains unimplemented.

@@ -5,6 +5,29 @@ Rust 1.99.0. Automated test content is synthetic. User-driven live sign-in and
 local unlock reached a vault workspace in the morning follow-up. Only fixed UI
 states were inspected; no live vault contents were returned to the model.
 
+## Official-editor layout refinement, 2026-10-06
+
+- Used the supplied official Pass editor screenshot as a layout reference only;
+  it is not checked into the repository. Close and Save now remain in the header,
+  title/content typography is larger, website inputs have individual outlined
+  rows with remove controls, and Add website focuses the new row. Login notes
+  are more compact; secure notes retain their larger writing area.
+- Unchanged edits cannot save or create a new revision. A memory-only baseline
+  compares editable contents; reverting changes disables Save again. Empty
+  website rows do not count as a change. Conflict/refresh gates are retained.
+  Baseline values are cleared when the editor closes; nothing is persisted.
+- Username and Email remain separate SDK fields. TOTP secrets remain concealed
+  with existing setup/plan checks. No attachment upload or unsupported password
+  strength claim is added.
+- 91 Swift contract/recovery tests passed. Synthetic native preview checks
+  confirmed disabled/enabled/reverted Save, focus on adding a website, two URLs
+  surviving save/reopen, removal enabling Save, and cancellation discarding the
+  draft. Login-edit and secure-note-create layouts were visually inspected.
+- Preview and account-capable release builds passed, with strict nested
+  signature verification for `build/ProtonX Editor Update.app`. Existing helpers
+  are unchanged. No real account was accessed during this pass and the user's
+  running app was left intact. No public binary was released.
+
 ## False edit-conflict correction, 2026-10-06
 
 - The user reported creating a fictional login, viewing it in the official Pass
@@ -36,8 +59,13 @@ states were inspected; no live vault contents were returned to the model.
   extension does not expose searchable browsing; website filling is separate.
   The updated app was opened, local unlock completed, and the saved session
   restored the fictional login with Edit enabled. No sign-in credentials or
-  hidden password were read. Corrected-save interoperability still awaits the
-  user's repeat test.
+  hidden password were read.
+- After the correction, the user reported successful edits and sync in both
+  directions with the official Proton Pass desktop app, a passed conflict test,
+  successful Trash/restore, and successful quit/restart. These are user-observed
+  live acceptance results for the fictional test record, separate from automated
+  fixtures. They do not establish server expiry/revocation, prompt-free rebuilds,
+  encrypted offline browsing or interoperability for every item type.
 
 ## Pass recovery follow-up, 2026-10-06
 
