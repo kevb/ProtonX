@@ -1,217 +1,185 @@
 import SwiftUI
-import LocalAuthentication
-import UniformTypeIdentifiers
 import ProtonXCore
 
-@MainActor
-final class MailStore: ObservableObject {
-    @Published var config: MailConfiguration?
-    @Published var mailboxes: [String] = []
-    @Published var mailbox = "INBOX"
-    @Published var messages: [MailMessage] = []
-    @Published var selectedID: UInt64?
-    @Published var selected: MailMessage?
-    @Published var query = ""
-    @Published var busy = false
-    @Published var error: String?
-    @Published var locked = false
-    @Published var demo = false
-    @Published var sent = false
-    private var epoch = SessionEpoch()
-    private var selectionEpoch = SessionEpoch()
-    private var task: Task<Void, Never>?
-    private var selectionTask: Task<Void, Never>?
-    private var auth: LAContext?
-    private let service = BridgeMailService()
-    private let keychain = KeychainStore(service: "org.kevb.ProtonX.Mail")
-    private var demoMessages: [MailMessage] = []
-    init() { locked = UserDefaults.standard.bool(forKey: "mailConnected") }
-    func connect(_ newConfig: MailConfiguration) {
-        run { [self] in
-            try newConfig.validate()
-            let folders = try await service.mailboxes(newConfig)
-            let initial = try await service.list(newConfig, mailbox: "INBOX")
-            try Task.checkCancellation()
-            try keychain.save(JSONEncoder().encode(newConfig), account: "bridge")
-            UserDefaults.standard.set(true, forKey: "mailConnected")
-            config = newConfig; mailboxes = folders; messages = initial; locked = false; demo = false
-        }
-    }
-    func unlock() {
-        let context = LAContext(); auth = context
-        run { [self] in
-            guard try await context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: "Unlock ProtonX Mail on this Mac") else { throw ProtonXError.cancelled }
-            try Task.checkCancellation()
-            guard let data = try keychain.load(account: "bridge") else { locked = false; return }
-            let saved = try JSONDecoder().decode(MailConfiguration.self, from: data)
-            let folders = try await service.mailboxes(saved)
-            let initial = try await service.list(saved, mailbox: mailbox)
-            try Task.checkCancellation()
-            config = saved; mailboxes = folders; messages = initial; locked = false
-        }
-    }
-    func refresh() {
-        guard let config else { return }
-        run { [self] in
-            let next = try await service.list(config, mailbox: mailbox)
-            try Task.checkCancellation(); messages = next
-        }
-    }
-    func select() {
-        selected = nil; selectionEpoch.invalidate(); selectionTask?.cancel()
-        guard let id = selectedID else { return }
-        if demo { selected = demoMessages.first { $0.uid == id }; return }
-        guard let config else { return }
-        let captured = epoch.value, selection = selectionEpoch.value, folder = mailbox
-        selectionTask = Task {
-            do {
-                let message = try await service.message(config, mailbox: folder, uid: id)
-                try Task.checkCancellation()
-                if epoch.accepts(captured) && selectionEpoch.accepts(selection) { selected = message }
-            } catch { if !Task.isCancelled && epoch.accepts(captured) { self.error = error.localizedDescription } }
-        }
-    }
-    func send(_ draft: MailDraft) {
-        guard let config, !demo else { error = "Demo messages cannot be sent."; return }
-        sent = false
-        run { [self] in try await service.send(draft, config: config); try Task.checkCancellation(); sent = true }
-    }
-    func lock() {
-        epoch.invalidate(); selectionEpoch.invalidate(); task?.cancel(); selectionTask?.cancel(); auth?.invalidate(); service.cancelAll()
-        config = nil; messages = []; selected = nil; selectedID = nil; query = ""; demoMessages = []; demo = false; busy = false; error = nil
-        locked = UserDefaults.standard.bool(forKey: "mailConnected")
-    }
-    func disconnect() {
-        lock()
-        do { try keychain.delete(account: "bridge"); UserDefaults.standard.set(false, forKey: "mailConnected"); locked = false }
-        catch { self.error = error.localizedDescription }
-    }
-    func enterDemo() {
-        lock(); demo = true; locked = false; mailbox = "INBOX"; mailboxes = ["INBOX"]
-        demoMessages = [
-            MailMessage(uid: 1, subject: "Welcome to ProtonX", sender: "ProtonX <hello@example.com>", recipient: "alex@example.com", date: "Demo message", body: "A native inbox, with a shared menu-bar icon and Mac keyboard shortcuts.\n\nThis is synthetic data. No Proton account has been accessed.\n\nMail uses Proton Bridge for encryption and authentication. HTML and remote images are never loaded in this version."),
-            MailMessage(uid: 2, subject: "Your weekend plans", sender: "Sam <sam@example.com>", recipient: "alex@example.com", date: "Demo message", body: "Coffee on Saturday?\n\nThis is another synthetic example.")]
-        messages = demoMessages; selectedID = 1; select()
-    }
-    private func run(_ action: @escaping @MainActor () async throws -> Void) {
-        guard !busy else { return }; busy = true; error = nil
-        let captured = epoch.value
-        task = Task {
-            do { try await action() }
-            catch { if !Task.isCancelled && epoch.accepts(captured) { self.error = error.localizedDescription } }
-            if epoch.accepts(captured) { busy = false }
-        }
-    }
-}
-
 struct MailWindow: View {
-    @StateObject private var store = MailStore()
-    @State private var compose = false
-    @State private var confirmDisconnect = false
+    @StateObject private var store: NativeMailStore
+    @State private var username = ""
+    @State private var password = ""
+    @State private var code = ""
+    @State private var bridge = false
+    @State private var confirmSignOut = false
+    @FocusState private var focus: String?
+    init(previewOnly: Bool = false) { _store = StateObject(wrappedValue: NativeMailStore(previewOnly: previewOnly)) }
     var body: some View {
         Group {
-            if store.config != nil || store.demo { inbox }
-            else if store.locked {
-                VStack(spacing: 20) { Image(systemName: "lock.shield").font(.largeTitle); Text("Mail is locked").font(.title); Button("Unlock Mail") { store.unlock() }.buttonStyle(.borderedProminent).disabled(store.busy); if store.busy { ProgressView() }; Button("Disconnect Bridge…") { confirmDisconnect = true } }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else { BridgeSetupView(store: store) }
-        }.frame(minWidth: 820, minHeight: 540)
-        .safeAreaInset(edge: .bottom) {
-            if let error = store.error { HStack { Text(error).font(.callout); Spacer(); Button("Dismiss") { store.error = nil } }.padding(12).background(.orange.opacity(0.12)) }
+            if store.phase == .open { workspace }
+            else { authentication }
         }
-        .sheet(isPresented: $compose) { ComposeView(store: store) }
-        .confirmationDialog("Disconnect Proton Bridge?", isPresented: $confirmDisconnect) {
-            Button("Disconnect", role: .destructive) { store.disconnect() }
-        } message: { Text("Remove this app’s saved Bridge credentials from Keychain. Your Proton mailbox stays on the server.") }
-        .onReceive(NotificationCenter.default.publisher(for: .protonXLock)) { _ in store.lock(); compose = false }
-    }
-    private var inbox: some View {
-        NavigationSplitView {
-            List(store.mailboxes, id: \.self, selection: $store.mailbox) { folder in Label(folder == "INBOX" ? "Inbox" : folder, systemImage: folder == "INBOX" ? "tray" : "folder").tag(folder) }
-                .navigationSplitViewColumnWidth(min: 170, ideal: 190)
-                .onChange(of: store.mailbox) { _, _ in store.selectedID = nil; store.selected = nil; store.refresh() }
-                .safeAreaInset(edge: .bottom) {
-                    VStack(alignment: .leading, spacing: 12) {
-                        if store.demo { Text("Demo · synthetic data").font(.caption).foregroundStyle(.orange) }
-                        Button("Lock Mail", systemImage: "lock") { store.lock() }
-                        Button("Disconnect…") { confirmDisconnect = true }
-                    }.padding()
-                }
-        } content: {
-            List(store.messages.filter { store.query.isEmpty || $0.subject.localizedStandardContains(store.query) || $0.sender.localizedStandardContains(store.query) }, selection: $store.selectedID) { message in
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(message.subject).font(.headline).lineLimit(2)
-                    Text(message.sender).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                }.padding(.vertical, 6).tag(message.uid)
-            }.navigationSplitViewColumnWidth(min: 250, ideal: 320).searchable(text: $store.query, prompt: "Search loaded messages")
-                .onChange(of: store.selectedID) { _, _ in store.select() }
-                .safeAreaInset(edge: .bottom) { Text("Newest 25 messages · refresh to sync").font(.caption).foregroundStyle(.secondary).padding(10) }
-        } detail: {
-            if let message = store.selected {
-                ScrollView { VStack(alignment: .leading, spacing: 20) {
-                    Text(message.subject).font(.title2.weight(.semibold))
-                    VStack(alignment: .leading, spacing: 6) { Text("From: " + message.sender); Text("To: " + message.recipient); Text(message.date).foregroundStyle(.secondary) }.font(.callout).textSelection(.enabled)
-                    Divider(); Text(message.body).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
-                    if message.attachmentCount > 0 { Text("\(message.attachmentCount) attachment(s). Use the official client to download.").font(.caption).foregroundStyle(.secondary) }
-                }.padding(28).frame(maxWidth: .infinity, alignment: .leading) }
-            } else { ContentUnavailableView("Choose a message", systemImage: "envelope", description: Text("Read your mail without loading remote images.")) }
-        }.navigationTitle("ProtonX Mail")
-        .toolbar {
-            ToolbarItemGroup {
-                if store.busy { ProgressView().controlSize(.small) }
-                Button { store.refresh() } label: { Label("Refresh", systemImage: "arrow.clockwise") }.disabled(store.busy || store.demo)
-                Button { compose = true } label: { Label("Compose", systemImage: "square.and.pencil") }.disabled(store.demo || store.busy)
+        .background(PassTheme.collection)
+        .preferredColorScheme(designAppearance)
+        .frame(minWidth: 860, minHeight: 580)
+        .safeAreaInset(edge: .bottom) {
+            if let error = store.error {
+                HStack(alignment: .top, spacing: 12) {
+                    Image(systemName: "exclamationmark.circle")
+                    Text(error).font(.callout).textSelection(.enabled)
+                    Spacer()
+                    Button("Dismiss") { store.error = nil }
+                }.padding(12).background(.orange.opacity(0.12))
             }
         }
+        .sheet(isPresented: $bridge) { BridgeMailWindow().frame(width: 1050, height: 740) }
+        .confirmationDialog("Sign out of ProtonX Mail?", isPresented: $confirmSignOut) {
+            Button("Sign Out", role: .destructive) { clearCredentials(); store.signOut() }
+        } message: { Text("End this app’s Mail session and remove its local account data. Your messages remain with Proton.") }
+        .onReceive(NotificationCenter.default.publisher(for: .protonXLock)) { _ in clearCredentials(); store.lock(); bridge = false }
+        .onAppear { focus = "username" }
+        .onDisappear { clearCredentials(); store.lock() }
+        .onChange(of: store.phase) { _, phase in
+            if phase != .welcome { password = "" }
+            code = ""
+            focus = phase == .totp || phase == .mailboxPassword ? "challenge" : "username"
+        }
     }
-}
-
-struct BridgeSetupView: View {
-    @ObservedObject var store: MailStore
-    @State private var config = MailConfiguration()
-    @State private var importing = false
-    var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            Label("Connect Proton Bridge", systemImage: "envelope").font(.title2.weight(.semibold))
-            Text("Start Proton Bridge and sign in there, then copy the mail-client credentials below. Bridge handles your account login and encryption. A Bridge-eligible Proton plan is required.").foregroundStyle(.secondary)
-            Form {
-                TextField("Email", text: $config.username)
-                SecureField("Bridge password", text: $config.password)
-                TextField("IMAP port", value: $config.imapPort, format: .number.grouping(.never))
-                TextField("SMTP port", value: $config.smtpPort, format: .number.grouping(.never))
-                Toggle("Use direct TLS (SSL) instead of STARTTLS", isOn: $config.directTLS)
-                Button(config.certificatePEM.isEmpty ? "Import Bridge TLS certificate…" : "Certificate imported · replace…") { importing = true }
-            }.formStyle(.grouped)
-            HStack { Button("Explore demo inbox") { store.enterDemo() }; Spacer(); if store.busy { ProgressView() }; Button("Connect") { store.connect(config) }.buttonStyle(.borderedProminent).disabled(store.busy || config.certificatePEM.isEmpty || config.password.isEmpty) }
-            Text("Only 127.0.0.1 is supported. TLS certificate and hostname verification are required. Credentials are saved in this Mac’s Keychain after a successful connection.").font(.caption).foregroundStyle(.secondary)
-        }.padding(32).frame(maxWidth: 580).frame(maxWidth: .infinity, maxHeight: .infinity)
-        .fileImporter(isPresented: $importing, allowedContentTypes: [.data]) { result in
-            do {
-                let url = try result.get(); let access = url.startAccessingSecurityScopedResource(); defer { if access { url.stopAccessingSecurityScopedResource() } }
-                let data = try Data(contentsOf: url)
-                guard data.count < 65536, let text = String(data: data, encoding: .utf8), text.contains("BEGIN CERTIFICATE"), !text.contains("PRIVATE KEY") else { throw ProtonXError.invalidInput("Select Bridge’s public PEM certificate, without a private key.") }
-                config.certificatePEM = text
-            } catch { store.error = error.localizedDescription }
-        }.onDisappear { config = MailConfiguration() }
+    private var designAppearance: ColorScheme? {
+        #if PROTONX_DESIGN_LIGHT
+        if store.previewOnly { return .light }
+        #endif
+        return nil
     }
-}
-
-struct ComposeView: View {
-    @ObservedObject var store: MailStore
-    @Environment(\.dismiss) private var dismiss
-    @State private var draft = MailDraft()
-    @State private var confirmSend = false
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("New message").font(.title2.weight(.semibold))
-            TextField("To (one email address)", text: $draft.to)
-            TextField("Subject", text: $draft.subject)
-            TextEditor(text: $draft.body).frame(minHeight: 240)
-            if let error = store.error { Text(error).font(.callout).foregroundStyle(.red) }
-            HStack { Button("Cancel") { draft = MailDraft(); dismiss() }.disabled(store.busy); Spacer(); if store.busy { ProgressView() }; Button("Send…") { confirmSend = true }.disabled(store.busy || !MailDraft.validAddress(draft.to)) }
-        }.padding(24).frame(width: 600).textFieldStyle(.roundedBorder)
-        .confirmationDialog("Send this message to \(draft.to)?", isPresented: $confirmSend) { Button("Send Message") { store.send(draft) } }
-        .onChange(of: store.sent) { _, sent in if sent { draft = MailDraft(); dismiss() } }
-        .onDisappear { draft = MailDraft() }
+    private var authentication: some View {
+        VStack(spacing: 22) {
+            Image(systemName: store.phase == .locked ? "lock.shield" : "envelope.badge.shield.half.filled")
+                .font(.system(size: 42, weight: .light)).foregroundStyle(PassTheme.accent).accessibilityHidden(true)
+            VStack(spacing: 8) {
+                Text(title).font(.system(size: 28, weight: .semibold))
+                Text(subtitle).font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center)
+            }
+            if store.phase == .welcome || store.phase == .signingIn {
+                VStack(alignment: .leading, spacing: 16) {
+                    TextField("Proton email or username", text: $username).textContentType(.username).focused($focus, equals: "username")
+                    Divider()
+                    SecureField("Password", text: $password).textContentType(.password).focused($focus, equals: "password")
+                        .onSubmit(signIn)
+                }.padding(20).passSurface().textFieldStyle(.plain).disabled(store.busy || store.previewOnly)
+                Button(action: signIn) { HStack { if store.busy { ProgressView().controlSize(.small) }; Text(store.busy ? "Signing in…" : "Sign In") }.frame(maxWidth: .infinity) }
+                    .buttonStyle(PassPillStyle(primary: true)).disabled(store.busy || username.isEmpty || password.isEmpty || store.previewOnly)
+                if !store.previewOnly { Button("Use a saved Mail session") { clearCredentials(); store.unlock() }.buttonStyle(.plain).foregroundStyle(PassTheme.accent) }
+            } else if store.phase == .locked {
+                Button { store.unlock() } label: { HStack { if store.busy { ProgressView().controlSize(.small) }; Text("Unlock Mail") }.frame(maxWidth: .infinity) }
+                    .buttonStyle(PassPillStyle(primary: true)).disabled(store.busy)
+            } else if store.phase == .totp || store.phase == .mailboxPassword {
+                Group {
+                    if store.phase == .mailboxPassword { SecureField("Mailbox password", text: $code) }
+                    else { TextField("Verification code", text: $code).textContentType(.oneTimeCode) }
+                }.textFieldStyle(.plain).padding(20).passSurface().focused($focus, equals: "challenge").onSubmit(submitChallenge)
+                Button { submitChallenge() } label: { HStack { if store.busy { ProgressView().controlSize(.small) }; Text("Continue") }.frame(maxWidth: .infinity) }
+                    .buttonStyle(PassPillStyle(primary: true)).disabled(store.busy || code.isEmpty)
+            } else if store.phase == .securityKey {
+                Text("This account requires a security key. Native security-key sign-in is not supported in this build yet.").font(.callout).foregroundStyle(.secondary)
+            }
+            if store.busy || store.phase == .totp || store.phase == .mailboxPassword || store.phase == .securityKey {
+                Button("Cancel") { clearCredentials(); store.cancelSignIn() }
+            }
+            Divider()
+            Button("Explore demo inbox") { clearCredentials(); store.enterDemo() }.buttonStyle(.plain).foregroundStyle(PassTheme.accent)
+            if !store.previewOnly { Button("Connect using Bridge…") { clearCredentials(); bridge = true }.font(.caption).buttonStyle(.plain).foregroundStyle(.secondary) }
+        }.frame(maxWidth: 380).padding(36).frame(maxWidth: .infinity, maxHeight: .infinity)
     }
+    private var title: String {
+        switch store.phase {
+        case .locked: "Mail is locked"
+        case .totp: "Verify your sign-in"
+        case .mailboxPassword: "Unlock your mailbox"
+        case .securityKey: "Security key required"
+        default: "Your Mail, at home on Mac"
+        }
+    }
+    private var subtitle: String {
+        switch store.phase {
+        case .locked: "Use Touch ID or your Mac password to reopen your saved Mail session."
+        case .totp: "Enter the code from your authenticator."
+        case .mailboxPassword: "Your account uses a second password to unlock its encryption keys."
+        default: "Sign in with your Proton account, in a native Mac window."
+        }
+    }
+    private var workspace: some View {
+        NavigationSplitView {
+            List(selection: $store.selectedFolder) {
+                Section("Mail") {
+                    ForEach(store.folders) { folder in
+                        HStack(spacing: 12) {
+                            Image(systemName: folder.name.localizedCaseInsensitiveContains("inbox") ? "tray" : "folder").foregroundStyle(PassTheme.accent)
+                            Text(folder.name)
+                            Spacer()
+                            if folder.count > 0 { Text(folder.count.formatted()).font(.caption).foregroundStyle(.secondary) }
+                        }.padding(.vertical, 6).tag(folder.id)
+                    }
+                }
+            }.disabled(store.busy).scrollContentBackground(.hidden).background(PassTheme.sidebar)
+                .navigationSplitViewColumnWidth(min: 180, ideal: 220, max: 290)
+                .onChange(of: store.selectedFolder) { _, _ in store.changeFolder() }
+                .safeAreaInset(edge: .bottom) {
+                    VStack(alignment: .leading, spacing: 14) {
+                        if store.demo { Label("Synthetic preview", systemImage: "testtube.2").font(.caption).foregroundStyle(.secondary) }
+                        else { Text(store.email).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
+                        Button("Lock Mail", systemImage: "lock") { store.lock() }
+                        if !store.demo { Button("Sign Out…", systemImage: "rectangle.portrait.and.arrow.right") { confirmSignOut = true }.disabled(store.busy) }
+                    }.buttonStyle(.plain).padding(18).frame(maxWidth: .infinity, alignment: .leading).background(PassTheme.sidebar)
+                }
+        } content: {
+            List(selection: $store.selectedItem) {
+                ForEach(store.visibleMessages) { message in
+                    HStack(alignment: .top, spacing: 12) {
+                        Circle().fill(message.unread ? (store.selectedItem == message.id ? Color.white : PassTheme.accent) : .clear).frame(width: 7, height: 7).padding(.top, 7)
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(message.senderName.isEmpty ? message.sender : message.senderName).font(.system(size: 13, weight: message.unread ? .semibold : .regular)).lineLimit(1)
+                            Text(message.subject.isEmpty ? "(No subject)" : message.subject).font(.callout).lineLimit(2)
+                            if message.date > 0 { Text(Date(timeIntervalSince1970: Double(message.date)), style: .date).font(.caption).foregroundStyle(.secondary) }
+                        }
+                        Spacer(minLength: 0)
+                        if message.attachments > 0 { Image(systemName: "paperclip").font(.caption).foregroundStyle(.secondary).accessibilityLabel("Has attachments") }
+                    }.padding(.vertical, 9).tag(message.id)
+                }
+            }.frame(minWidth: 280).scrollContentBackground(.hidden).background(PassTheme.collection)
+                .navigationSplitViewColumnWidth(min: 280, ideal: 330, max: 460)
+                .searchable(text: $store.query, prompt: "Search loaded mail")
+                .onChange(of: store.query) { _, _ in store.reconcileSelection() }
+                .onChange(of: store.selectedItem) { _, _ in store.select() }
+                .overlay { if store.visibleMessages.isEmpty { ContentUnavailableView(store.loading ? "Syncing your inbox" : store.query.isEmpty ? "No messages here" : "No matching messages", systemImage: "tray", description: Text(store.loading ? "Your mailbox is loading." : "Refresh or choose another folder.")) } }
+                .safeAreaInset(edge: .bottom) {
+                    HStack {
+                        if store.loading { ProgressView().controlSize(.small); Text("Syncing…") }
+                        else { Text("\(store.messages.count) messages loaded") }
+                        Spacer()
+                        if !store.demo && !store.messages.isEmpty { Button("Load more") { store.refresh(more: true) }.disabled(store.busy || store.messages.count >= 1000) }
+                    }.font(.caption).foregroundStyle(.secondary).padding(12)
+                }
+        } detail: {
+            if let message = store.selectedMessage {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 22) {
+                        Text(message.subject.isEmpty ? "(No subject)" : message.subject).font(.system(size: 25, weight: .semibold))
+                        VStack(alignment: .leading, spacing: 9) {
+                            Label(message.sender, systemImage: "person")
+                            Text("To: \(message.recipient)").foregroundStyle(.secondary)
+                            if message.date > 0 { Text(Date(timeIntervalSince1970: Double(message.date)), format: .dateTime).font(.caption).foregroundStyle(.secondary) }
+                        }.font(.callout).padding(18).frame(maxWidth: .infinity, alignment: .leading).passSurface()
+                        if let body = store.body { Text(body).textSelection(.enabled).font(.body).lineSpacing(5).frame(maxWidth: .infinity, alignment: .leading) }
+                        else if store.error != nil { Button("Retry loading message") { store.select() } }
+                        else { ProgressView("Decrypting message…").frame(maxWidth: .infinity) }
+                        if message.attachments > 0 { Label("\(message.attachments) attachment(s) · open with the official client for now", systemImage: "paperclip").font(.caption).foregroundStyle(.secondary) }
+                    }.padding(30).frame(maxWidth: 900, alignment: .leading).frame(maxWidth: .infinity, alignment: .leading)
+                }.background(PassTheme.canvas)
+            } else { ContentUnavailableView("Choose a message", systemImage: "envelope", description: Text("Read your mail in its own Mac window.")).frame(maxWidth: .infinity, maxHeight: .infinity).background(PassTheme.canvas) }
+        }
+        .navigationTitle("ProtonX Mail")
+        .toolbar {
+            ToolbarItem { if store.busy { ProgressView().controlSize(.small) } }
+            ToolbarItem { Button { store.refresh() } label: { Label("Refresh Mail", systemImage: "arrow.clockwise") }.disabled(store.busy || store.demo) }
+        }
+    }
+    private func signIn() { let supplied = password; password = ""; store.signIn(username: username, password: supplied) }
+    private func submitChallenge() { let supplied = code; code = ""; store.submitChallenge(supplied) }
+    private func clearCredentials() { password = ""; code = "" }
 }

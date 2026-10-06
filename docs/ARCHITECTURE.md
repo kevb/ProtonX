@@ -118,21 +118,30 @@ See [offline design](OFFLINE_DESIGN.md) and the isolated
 
 ## Mail and Drive
 
-The current Mail prototype delegates account authentication and encryption to a separately running
-Proton Bridge. Its generated mail-client password is independent of the user's
-main Proton password. The native view displays a bounded set of message headers
-and fetches a selected message. Plain-text MIME bodies are decoded; HTML and
-remote resources are not executed. SMTP composition uses encoded headers/body
-and rejects control characters in addresses/subjects. This release does not
-bundle or supervise Bridge. The additional Bridge process and its menu item are
-part of the cost of this design and must be included in resource comparisons.
+The default Mail window uses Proton's native Rust Mail SDK through one bounded,
+serial private helper. It runs while Mail is unlocked, with its own encrypted
+profile and `org.kevb.ProtonX.Mail.Native` Keychain service. Native forms drive
+credentials/TOTP/second-password states. Saved-session restore follows local
+Mac authentication. The SDK owns SRP, account/address keys, encrypted databases,
+API transport, sync and selected-message decryption. Native HTML-to-text rendering
+has no browser, remote-resource loader or script execution.
 
-This is not the intended consumer onboarding. The next Mail milestone is native
-Proton credentials/challenges followed by a decrypted inbox and session restore,
-using Proton's existing Rust Mail core. Manual Bridge/server configuration remains
-an optional compatibility path. [MAIL_NATIVE_SIGN_IN.md](MAIL_NATIVE_SIGN_IN.md)
-records the reviewed upstream code, isolated build probe and acceptance gates;
-direct Mail authentication is not implemented in the app yet.
+The first direct slice is read-only. Sidebar and messages are bounded; selected
+contents are decrypted on demand and session/selection epochs reject late replies.
+Lock/close tears down the helper. Remote sign-out is acknowledged before clearing
+the saved-session hint. Unsupported human verification/FIDO-only/password-change
+states are explicit. Direct account interoperability is not yet established.
+
+`Resources/MailProtocol.json`, `Resources/MailHelper.lock` and
+`patches/mail-core.patch` pin this independent Mail implementation. The small
+opt-in patch exposes an existing module and disables logging/telemetry, with
+no replacement cryptography. Original source/license notices are preserved.
+[MAIL_NATIVE_SIGN_IN.md](MAIL_NATIVE_SIGN_IN.md) records build and acceptance gates.
+
+The older Bridge implementation remains an advanced optional compatibility path
+with literal-loopback verified TLS and confirmed plain-text SMTP composition.
+It does not supply credentials to the direct client. External Bridge's process
+and menu item remain part of that optional path's resource cost.
 
 Drive is deliberately not represented as a working product in the UI. A future
 adapter needs a public, redistributable native SDK/CLI, encrypted streaming and

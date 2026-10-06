@@ -100,3 +100,20 @@ notes have a larger writing area, with custom fields below. Type/vault pickers
 stay native. Multiline note entry and saved login notes/websites/concealed custom
 fields passed synthetic interaction checks. The reference screenshots' background
 account/item contents were not copied into project assets or fixtures.
+
+## Direct Mail experience, 2026-10-06
+
+Mail opens to native username/password fields in the suite's adaptive palette.
+TOTP and second mailbox password use the same form; saved-session reopen uses
+Mac local unlock. Manual ports, generated passwords and certificate import are
+confined to the optional Bridge compatibility sheet. Pass stays independently
+usable, with one shared menu-bar icon and product-window shortcuts.
+
+The reader has native folder and message selection, searchable loaded metadata,
+rounded sender/date details, bounded paging and a text-only message body. Search
+or folder changes clear hidden details immediately. Lock clears the window and
+stops the Mail core. Unsupported challenges and failed operations are explicit.
+Dark and light synthetic controls passed selection, search, empty/return folder
+and lock checks; full accessibility and minimum-OS runtime coverage remain gates.
+This first direct client cannot compose/reply, manage attachments or threads,
+mark read/unread or archive. Those actions follow real sign-in/read/restart proof.

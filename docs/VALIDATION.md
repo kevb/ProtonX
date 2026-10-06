@@ -5,6 +5,44 @@ Rust 1.99.0. Automated test content is synthetic. User-driven live sign-in and
 local unlock reached a vault workspace in the morning follow-up. Only fixed UI
 states were inspected; no live vault contents were returned to the model.
 
+## Native Mail implementation and local signing, 2026-10-06
+
+- Direct Mail credentials/TOTP/second-password states, isolated saved-session
+  restore, folders/paging, selected-message decryption and SDK account logout
+  are implemented. The native helper statically links pinned Mail SDK 0.168.2.
+  Bridge settings are an advanced compatibility path. The direct client is
+  read-only, with explicit unsupported human verification/FIDO-only states.
+- Optimized `mail-macos` helper and release Swift app built; the stripped Mail
+  executable is approximately 36 MiB. This is disk size, not process RAM or an
+  Electron comparison. Normal runtime has no bundled web engine. The SDK runs
+  while Mail is unlocked and terminates on lock/close.
+- 61 Swift tests passed, including strict Mail reply framing/IDs/bounds, private
+  credentials, persistent challenge retries, helper deadlines/lock, late replies,
+  cancelled-selection continuity, local-unlock cancellation, failed logout,
+  expiry clearing, hidden-selection clearing and preview isolation.
+- Five native Mail helper tests passed. Twelve public Proton `mail-common` tests
+  passed: five encrypted message-body/MIME/attachment fixtures and seven local
+  mock-server paging tests. Neither test suite accesses a real account or its
+  Keychain namespace. The reproducible helper script and protocol/privacy
+  verifier passed with the committed lock. No registry/Git package records were
+  added to the previously tested core candidate lock; only the helper record and
+  its direct dependency edges were added.
+- Dark/light preview inspected with native controls: message selection, search
+  clearing hidden contents, empty Sent folder, return to Inbox, locking and
+  disabled sign-in. Column minimum now keeps message subjects readable. Preview
+  forces synthetic data in both products and cannot open account/Bridge paths.
+- App and nested helpers passed strict signature verification using the existing
+  configured local certificate. The certificate is self-signed, despite its
+  Developer ID-like name. A synthetic Keychain probe passed repeated launches of
+  one binary and refused an ad-hoc replacement, but **failed rebuilt-executable
+  continuity** (`errSecAuthFailed`) even with the same certificate/identifier.
+  Its item was cleaned up. No account ACLs were changed. Local signing is supported,
+  but prompt-free helper updates remain unverified; see [LOCAL_SIGNING.md](LOCAL_SIGNING.md).
+- No live Mail login, mailbox contents, delivery, restart/revocation or cross-client
+  interoperability was tested. User-driven designated-account validation is next.
+  Normal Mac local unlock remains enabled. No binary is publicly distributed;
+  AGPL/dependency and combined-work release review remains a gate.
+
 ## Direct Mail core feasibility follow-up, 2026-10-06
 
 - Reviewed and pinned ProtonMail/clients `2ecb794dbc221384dc6d88840965ac144db301ad`

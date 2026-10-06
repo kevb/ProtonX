@@ -32,8 +32,9 @@ These have synthetic/source validation; remote writes and recovery are still gat
 - **Required onboarding: native Proton sign-in → decrypted inbox → session
   restoration.** No manual server settings in the normal experience. See
   [the direct Mail core decision and acceptance gates](MAIL_NATIVE_SIGN_IN.md).
-- Prove the public Proton Rust Mail SDK build/bindings and review its AGPL
-  dependency obligations, logging and storage before production integration.
+- Native Mail core build, private IPC, native authentication states, reader and
+  separate session restore are implemented with synthetic tests. Prove real
+  sign-in/decryption/restart on a designated account and review release licensing.
 - Native credential/challenge UI with separate Mail session/Keychain storage;
   synthetic contracts followed by designated disposable-account validation.
 - Verified account interoperability and richer MIME parsing.

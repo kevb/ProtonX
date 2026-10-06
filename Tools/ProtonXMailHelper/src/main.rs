@@ -1,0 +1,755 @@
+// Copyright (c) 2026 ProtonX contributors. SPDX-License-Identifier: AGPL-3.0-only
+// Account authentication and message decryption remain in Proton's pinned SDK.
+#![recursion_limit = "256"]
+mod protocol;
+
+use futures::executor::block_on;
+use mail_account_uniffi::login::{LoginError, LoginFlow, TfaMethods};
+use mail_issue_reporter_service::IssueReportKeys;
+use mail_issue_reporter_service_uniffi::{IssueLevel, IssueReporter};
+use mail_uniffi::core::datatypes::{ApiConfig, AppDetails, Id};
+use mail_uniffi::core::verification::{
+    ChallengeNotifier, ChallengePayload, ChallengeResponse, ChallengeServer,
+};
+use mail_uniffi::core::{OSKeyChain, OSKeyChainEntryKind, OSKeyChainError, StoredSessionState};
+use mail_uniffi::errors::{ActionError, MailScrollerError, ProtonError, UserSessionError};
+use mail_uniffi::mail::datatypes::{Message, MimeType};
+use mail_uniffi::mail::mail_scroller::{
+    MessageScroller, MessageScrollerListUpdate, MessageScrollerLiveQueryCallback,
+    MessageScrollerStatusUpdate, MessageScrollerUpdate,
+};
+use mail_uniffi::mail::messages::{get_message_body, scroll_messages_for_label};
+use mail_uniffi::mail::sidebar::Sidebar;
+use mail_uniffi::mail::{
+    MailSession, MailSessionParams, MailUserSession, Mailbox, Origin, create_mail_session,
+    new_inbox_mailbox, new_mailbox,
+};
+use mail_uniffi_common::errors::UserApiServiceError;
+use security_framework::passwords::{
+    delete_generic_password, get_generic_password, set_generic_password,
+};
+use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
+use std::io::{self, BufRead, Write};
+use std::path::PathBuf;
+use std::sync::{
+    Arc, Condvar, Mutex,
+    atomic::{AtomicBool, Ordering},
+};
+use std::time::{Duration, Instant};
+
+macro_rules! sdk_result {
+    ($kind:path, $value:expr) => {{
+        use $kind as Outcome;
+        match $value {
+            Outcome::Ok(value) => Ok(value),
+            Outcome::Error(error) => Err(error),
+        }
+    }};
+}
+macro_rules! sdk_void {
+    ($kind:path, $value:expr) => {{
+        use $kind as Outcome;
+        match $value {
+            Outcome::Ok => Ok(()),
+            Outcome::Error(error) => Err(error),
+        }
+    }};
+}
+
+const MAX_INPUT: usize = 64 * 1024;
+const MAX_OUTPUT: usize = 8 * 1024 * 1024;
+const KEYCHAIN_SERVICE: &str = "org.kevb.ProtonX.Mail.Native";
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Request {
+    schema: u8,
+    id: u64,
+    command: Command,
+}
+#[derive(Deserialize)]
+#[serde(tag = "method", rename_all = "snake_case", deny_unknown_fields)]
+enum Command {
+    Initialize,
+    Restore,
+    Login { username: String, password: String },
+    Totp { code: String },
+    MailboxPassword { password: String },
+    Snapshot { folder: Option<u64>, more: bool },
+    Message { folder: u64, item: u64 },
+    SignOut,
+}
+#[derive(Serialize)]
+struct Response {
+    schema: u8,
+    id: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    result: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    failure: Option<&'static str>,
+}
+
+struct NativeKeychain;
+fn account(kind: OSKeyChainEntryKind) -> &'static str {
+    match kind {
+        OSKeyChainEntryKind::EncryptionKey => "session-encryption-key",
+        OSKeyChainEntryKind::DeviceKey => "device-key",
+        OSKeyChainEntryKind::PinHash => "pin-hash",
+    }
+}
+impl OSKeyChain for NativeKeychain {
+    fn store(&self, kind: OSKeyChainEntryKind, key: String) -> Result<(), OSKeyChainError> {
+        set_generic_password(KEYCHAIN_SERVICE, account(kind), key.as_bytes())
+            .map_err(|_| OSKeyChainError::OS("Keychain access denied".into()))
+    }
+    fn load(&self, kind: OSKeyChainEntryKind) -> Result<Option<String>, OSKeyChainError> {
+        match get_generic_password(KEYCHAIN_SERVICE, account(kind)) {
+            Ok(data) => String::from_utf8(data)
+                .map(Some)
+                .map_err(|_| OSKeyChainError::OS("Invalid Keychain value".into())),
+            Err(e) if e.code() == -25300 => Ok(None),
+            Err(_) => Err(OSKeyChainError::OS("Keychain access denied".into())),
+        }
+    }
+    fn delete(&self, kind: OSKeyChainEntryKind) -> Result<(), OSKeyChainError> {
+        match delete_generic_password(KEYCHAIN_SERVICE, account(kind)) {
+            Ok(()) => Ok(()),
+            Err(e) if e.code() == -25300 => Ok(()),
+            Err(_) => Err(OSKeyChainError::OS("Keychain access denied".into())),
+        }
+    }
+}
+struct NoReports;
+impl IssueReporter for NoReports {
+    fn report(&self, _: IssueLevel, _: Option<String>, _: String, _: IssueReportKeys) {}
+}
+struct Verification(Arc<AtomicBool>);
+#[async_trait::async_trait]
+impl ChallengeNotifier for Verification {
+    async fn on_challenge(
+        &self,
+        _: Arc<ChallengeServer>,
+        _: Arc<ChallengePayload>,
+    ) -> ChallengeResponse {
+        self.0.store(true, Ordering::SeqCst);
+        ChallengeResponse::Cancelled // Explicit unsupported challenge; no bypass or downgrade.
+    }
+}
+
+fn proton_failure(error: &ProtonError, fallback: &'static str) -> &'static str {
+    match error {
+        ProtonError::ServerError(UserApiServiceError::Unauthorized(_)) => "session_expired",
+        _ => fallback,
+    }
+}
+fn action_failure(error: ActionError, fallback: &'static str) -> &'static str {
+    match error {
+        ActionError::Other(error) => proton_failure(&error, fallback),
+        _ => fallback,
+    }
+}
+fn session_failure(error: UserSessionError, fallback: &'static str) -> &'static str {
+    match error {
+        UserSessionError::Other(error) => proton_failure(&error, fallback),
+        _ => fallback,
+    }
+}
+fn scroller_failure(error: MailScrollerError) -> &'static str {
+    match error {
+        MailScrollerError::Other(error) => proton_failure(&error, "snapshot_failed"),
+        _ => "snapshot_failed",
+    }
+}
+
+#[derive(Default)]
+struct ListState {
+    items: Vec<Message>,
+    generation: u64,
+    loading: bool,
+    failed: Option<&'static str>,
+}
+struct ListCallback(Arc<(Mutex<ListState>, Condvar)>);
+impl MessageScrollerLiveQueryCallback for ListCallback {
+    fn on_update(&self, update: MessageScrollerUpdate) {
+        let (lock, wake) = &*self.0;
+        let mut state = lock.lock().unwrap();
+        match update {
+            MessageScrollerUpdate::List(update) => {
+                match update {
+                    MessageScrollerListUpdate::None { .. } => {}
+                    MessageScrollerListUpdate::Append { items, .. } => state.items.extend(items),
+                    MessageScrollerListUpdate::ReplaceFrom { idx, items, .. } => {
+                        if (idx as usize) <= state.items.len() {
+                            state.items.truncate(idx as usize);
+                            state.items.extend(items);
+                        } else {
+                            state.failed = Some("snapshot_failed");
+                        }
+                    }
+                    MessageScrollerListUpdate::ReplaceBefore { idx, items, .. } => {
+                        if (idx as usize) <= state.items.len() {
+                            state.items.splice(..idx as usize, items);
+                        } else {
+                            state.failed = Some("snapshot_failed");
+                        }
+                    }
+                    MessageScrollerListUpdate::ReplaceRange {
+                        from, to, items, ..
+                    } => {
+                        if from <= to && (to as usize) <= state.items.len() {
+                            state.items.splice(from as usize..to as usize, items);
+                        } else {
+                            state.failed = Some("snapshot_failed");
+                        }
+                    }
+                }
+                if state.items.len() > 1000 {
+                    state.failed = Some("snapshot_failed");
+                    state.items.clear();
+                }
+            }
+            MessageScrollerUpdate::Status(MessageScrollerStatusUpdate::FetchNewStart) => {
+                state.loading = true
+            }
+            MessageScrollerUpdate::Status(MessageScrollerStatusUpdate::FetchNewEnd) => {
+                state.loading = false
+            }
+            MessageScrollerUpdate::Error { error } => {
+                state.failed = Some(scroller_failure(error));
+                state.loading = false;
+            }
+            MessageScrollerUpdate::CategoryViewChanged { .. } => {}
+        }
+        state.generation += 1;
+        wake.notify_all();
+    }
+}
+
+struct Backend {
+    session: Arc<MailSession>,
+    user: Option<Arc<MailUserSession>>,
+    flow: Option<Arc<LoginFlow>>,
+    verification: Arc<AtomicBool>,
+    mailbox: Option<Arc<Mailbox>>,
+    scroller: Option<Arc<MessageScroller>>,
+    listing: Arc<(Mutex<ListState>, Condvar)>,
+    folder: Option<u64>,
+}
+impl Backend {
+    fn new(directory: PathBuf) -> Result<Self, &'static str> {
+        let verification = Arc::new(AtomicBool::new(false));
+        let path = |name: &str| directory.join(name).to_string_lossy().into_owned();
+        let session = sdk_result!(
+            mail_uniffi::mail::CreateMailSessionResult,
+            create_mail_session(
+                MailSessionParams {
+                    origin: Origin::App,
+                    session_dir: path("sessions"),
+                    user_dir: path("users"),
+                    mail_cache_dir: path("cache"),
+                    mail_cache_size: 128 * 1024 * 1024,
+                    log_dir: path("diagnostics"),
+                    log_debug: false,
+                    api_env_config: Some(ApiConfig {
+                        user_agent: protocol::USER_AGENT.into(),
+                        ..Default::default()
+                    }),
+                    app_details: AppDetails {
+                        platform: "macos".into(),
+                        product: "mail".into(),
+                        version: format!(
+                            "{}+id{}",
+                            protocol::WEB_VERSION,
+                            protocol::DESKTOP_VERSION
+                        )
+                    },
+                    quarantine_xattr_app_name: Some("ProtonX".into()),
+                    event_poll_duration_seconds: Some(60),
+                    enable_content_search: false,
+                },
+                Box::new(NativeKeychain),
+                Some(Arc::new(Verification(verification.clone()))),
+                None,
+                Arc::new(NoReports)
+            )
+        )
+        .map_err(|_| "initialization_failed")?;
+        Ok(Self {
+            session,
+            user: None,
+            flow: None,
+            verification,
+            mailbox: None,
+            scroller: None,
+            listing: Arc::new((Mutex::new(ListState::default()), Condvar::new())),
+            folder: None,
+        })
+    }
+    fn login_failure(&self, error: LoginError) -> &'static str {
+        if self.verification.swap(false, Ordering::SeqCst) {
+            return "verification_required";
+        }
+        match error {
+            LoginError::Incorrect2FACode => "incorrect_code",
+            LoginError::CantUnlockUserKey => "mailbox_password_rejected",
+            LoginError::InvalidCredentials => "sign_in_rejected",
+            LoginError::NoLogin
+            | LoginError::NoAddress
+            | LoginError::PostLoginValidationFailed(_) => "account_unavailable",
+            _ => "sign_in_failed",
+        }
+    }
+    fn finish_login(&mut self) -> Result<Value, &'static str> {
+        let flow = self.flow.clone().ok_or("invalid_state")?;
+        if flow.is_awaiting_2fa() {
+            let methods = sdk_result!(
+                mail_account_uniffi::login::LoginFlowTfaMethodsResult,
+                block_on(flow.tfa_methods())
+            )
+            .map_err(|e| self.login_failure(e))?;
+            return Ok(
+                json!({"phase": if matches!(methods,TfaMethods::Fido2) { "security_key" } else { "totp" }}),
+            );
+        }
+        if flow.is_awaiting_mailbox_password() {
+            return Ok(json!({"phase":"mailbox_password"}));
+        }
+        if flow.is_awaiting_new_password() {
+            return Err("password_change_required");
+        }
+        if !flow.is_logged_in() {
+            return Err("invalid_state");
+        }
+        let user = sdk_result!(
+            mail_uniffi::mail::MailSessionToUserSessionResult,
+            block_on(self.session.to_user_session(flow))
+        )
+        .map_err(|_| "session_failed")?;
+        let id = sdk_result!(
+            mail_uniffi::mail::MailUserSessionUserIdResult,
+            user.user_id()
+        )
+        .map_err(|_| "session_failed")?;
+        sdk_void!(
+            mail_uniffi::errors::VoidSessionResult,
+            block_on(self.session.set_primary_account(id))
+        )
+        .map_err(|_| "session_failed")?;
+        self.user = Some(user);
+        self.flow = None;
+        Ok(json!({"phase":"connected"}))
+    }
+    fn handle(&mut self, command: Command) -> Result<Value, &'static str> {
+        match command {
+            Command::Initialize => {
+                let sessions = sdk_result!(
+                    mail_uniffi::mail::MailSessionGetSessionsResult,
+                    block_on(self.session.get_sessions())
+                )
+                .map_err(|_| "session_failed")?;
+                Ok(
+                    json!({"phase":if sessions.iter().any(|s| matches!(s.state(),StoredSessionState::Authenticated)) {"locked"}else{"welcome"}}),
+                )
+            }
+            Command::Restore => {
+                let sessions = sdk_result!(
+                    mail_uniffi::mail::MailSessionGetSessionsResult,
+                    block_on(self.session.get_sessions())
+                )
+                .map_err(|_| "session_failed")?;
+                let mut authenticated = sessions
+                    .into_iter()
+                    .filter(|s| matches!(s.state(), StoredSessionState::Authenticated));
+                let saved = authenticated.next().ok_or("session_expired")?;
+                if authenticated.next().is_some() {
+                    return Err("invalid_state");
+                } // Account switching is not implemented.
+                self.user = Some(
+                    sdk_result!(
+                        mail_uniffi::mail::MailSessionUserSessionFromStoredSessionResult,
+                        block_on(self.session.user_session_from_stored_session(saved))
+                    )
+                    .map_err(|e| session_failure(e, "session_failed"))?,
+                );
+                Ok(json!({"phase":"connected"}))
+            }
+            Command::Login { username, password } => {
+                if self.user.is_some() {
+                    return Err("invalid_state");
+                }
+                if username.trim().is_empty()
+                    || username.len() > 320
+                    || password.is_empty()
+                    || password.len() > 8192
+                {
+                    return Err("invalid_input");
+                }
+                self.verification.store(false, Ordering::SeqCst);
+                let flow = sdk_result!(
+                    mail_uniffi::mail::MailSessionNewLoginFlowResult,
+                    block_on(self.session.new_login_flow())
+                )
+                .map_err(|_| "sign_in_failed")?;
+                self.flow = Some(flow.clone());
+                sdk_void!(
+                    mail_account_uniffi::login::LoginFlowLoginResult,
+                    block_on(flow.login(username, password, None))
+                )
+                .map_err(|e| self.login_failure(e))?;
+                self.finish_login()
+            }
+            Command::Totp { code } => {
+                if !(6..=8).contains(&code.len()) || !code.bytes().all(|b| b.is_ascii_digit()) {
+                    return Err("invalid_input");
+                }
+                let flow = self.flow.clone().ok_or("invalid_state")?;
+                sdk_void!(
+                    mail_account_uniffi::login::LoginFlowSubmitTotpResult,
+                    block_on(flow.submit_totp(code))
+                )
+                .map_err(|e| self.login_failure(e))?;
+                self.finish_login()
+            }
+            Command::MailboxPassword { password } => {
+                if password.is_empty() || password.len() > 8192 {
+                    return Err("invalid_input");
+                }
+                let flow = self.flow.clone().ok_or("invalid_state")?;
+                sdk_void!(
+                    mail_account_uniffi::login::LoginFlowSubmitMailboxPasswordResult,
+                    block_on(flow.submit_mailbox_password(password))
+                )
+                .map_err(|e| self.login_failure(e))?;
+                self.finish_login()
+            }
+            Command::Snapshot { folder, more } => self.snapshot(folder, more),
+            Command::Message { folder, item } => {
+                if self.folder != Some(folder) {
+                    return Err("invalid_selection");
+                }
+                // A local selected item must have been disclosed in this folder's bounded snapshot.
+                if !self
+                    .listing
+                    .0
+                    .lock()
+                    .unwrap()
+                    .items
+                    .iter()
+                    .any(|m| m.id.as_u64() == item)
+                {
+                    return Err("invalid_selection");
+                }
+                let mailbox = self.mailbox.as_ref().ok_or("invalid_state")?;
+                let message = sdk_result!(
+                    mail_uniffi::mail::messages::GetMessageBodyResult,
+                    block_on(get_message_body(mailbox, Id::from(item)))
+                )
+                .map_err(|e| action_failure(e, "message_failed"))?;
+                if message.failed_to_decrypt() {
+                    return Err("decryption_failed");
+                }
+                let raw = message.raw_body();
+                if raw.len() > 2 * 1024 * 1024 {
+                    return Err("message_too_large");
+                }
+                // Pure text conversion: no WebView, network requests, CSS or JavaScript execution.
+                let body = if matches!(message.mime_type(), MimeType::TextPlain) {
+                    raw
+                } else {
+                    html2text::from_read(raw.as_bytes(), 100).map_err(|_| "message_failed")?
+                };
+                if body.len() > 2 * 1024 * 1024 {
+                    return Err("message_too_large");
+                }
+                Ok(json!({"id":item,"body":body,"attachments":message.attachments().len()}))
+            }
+            Command::SignOut => {
+                let user = self.user.as_ref().ok_or("invalid_state")?;
+                let id = sdk_result!(
+                    mail_uniffi::mail::MailUserSessionUserIdResult,
+                    user.user_id()
+                )
+                .map_err(|_| "session_failed")?;
+                sdk_void!(
+                    mail_uniffi::errors::VoidSessionResult,
+                    block_on(self.session.logout_account(id))
+                )
+                .map_err(|_| "sign_out_failed")?;
+                self.user = None;
+                self.mailbox = None;
+                self.scroller = None;
+                self.flow = None;
+                self.listing.0.lock().unwrap().items.clear();
+                Ok(json!({"phase":"welcome"}))
+            }
+        }
+    }
+    fn snapshot(&mut self, folder: Option<u64>, more: bool) -> Result<Value, &'static str> {
+        let user = self.user.clone().ok_or("invalid_state")?;
+        let sidebar = Sidebar::new(&user);
+        let systems = sdk_result!(
+            mail_uniffi::mail::sidebar::SidebarSystemLabelsResult,
+            block_on(sidebar.system_labels())
+        )
+        .map_err(|e| action_failure(e, "snapshot_failed"))?;
+        let custom = sdk_result!(
+            mail_uniffi::mail::sidebar::SidebarAllCustomFoldersResult,
+            block_on(sidebar.all_custom_folders())
+        )
+        .map_err(|e| action_failure(e, "snapshot_failed"))?;
+        let mut folders: Vec<Value> = systems
+            .iter()
+            .filter(|f| f.display)
+            .map(|f| json!({"id":f.id.as_u64(),"name":f.name,"count":f.count}))
+            .collect();
+        folders.extend(
+            custom
+                .iter()
+                .map(|f| json!({"id":f.id.as_u64(),"name":f.name,"count":f.total})),
+        );
+        let mailbox = if let Some(id) = folder {
+            if !folders.iter().any(|f| f["id"].as_u64() == Some(id)) {
+                return Err("invalid_selection");
+            }
+            sdk_result!(
+                mail_uniffi::mail::NewMailboxResult,
+                new_mailbox(&user, Id::from(id))
+            )
+        } else {
+            sdk_result!(
+                mail_uniffi::mail::NewInboxMailboxResult,
+                new_inbox_mailbox(&user)
+            )
+        }
+        .map_err(|_| "snapshot_failed")?;
+        let selected = mailbox.label_id().as_u64();
+        let changed = self.folder != Some(selected);
+        if changed {
+            self.scroller = None;
+            self.mailbox = Some(mailbox.clone());
+            self.folder = Some(selected);
+            self.listing = Arc::new((
+                Mutex::new(ListState {
+                    loading: true,
+                    ..Default::default()
+                }),
+                Condvar::new(),
+            ));
+            self.scroller = Some(
+                sdk_result!(
+                    mail_uniffi::mail::messages::ScrollMessagesForLabelResult,
+                    block_on(scroll_messages_for_label(
+                        mailbox,
+                        None,
+                        Box::new(ListCallback(self.listing.clone()))
+                    ))
+                )
+                .map_err(|_| "snapshot_failed")?,
+            );
+        }
+        let scroller = self.scroller.as_ref().ok_or("invalid_state")?.clone();
+        let previous = self.listing.0.lock().unwrap().generation;
+        if more {
+            if self.listing.0.lock().unwrap().items.len() >= 1000 {
+                return Err("page_limit");
+            }
+            sdk_void!(
+                mail_uniffi::mail::mail_scroller::MessageScrollerFetchMoreResult,
+                scroller.fetch_more()
+            )
+            .map_err(scroller_failure)?;
+        } else {
+            sdk_void!(
+                mail_uniffi::mail::mail_scroller::MessageScrollerFetchNewResult,
+                scroller.fetch_new()
+            )
+            .map_err(scroller_failure)?;
+        }
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let (lock, wake) = &*self.listing;
+        let mut state = lock.lock().unwrap();
+        while (state.generation == previous || state.loading)
+            && state.failed.is_none()
+            && Instant::now() < deadline
+        {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            state = wake.wait_timeout(state, remaining).unwrap().0;
+        }
+        if let Some(failure) = state.failed {
+            return Err(failure);
+        }
+        let messages:Vec<Value>=state.items.iter().take(1000).map(|m|json!({"id":m.id.as_u64(),"subject":m.subject,"sender":m.sender.address,"senderName":m.sender.name,"recipient":m.to_list.iter().map(|r|r.address.as_str()).collect::<Vec<_>>().join(", "),"date":m.time.0,"unread":m.unread,"attachments":m.num_attachments})).collect();
+        let loading = state.loading;
+        drop(state); // Never hold a callback mutex across SDK I/O.
+        let details = sdk_result!(
+            mail_uniffi::mail::MailUserSessionAccountDetailsResult,
+            block_on(user.account_details())
+        )
+        .map_err(|e| session_failure(e, "session_failed"))?;
+        Ok(
+            json!({"folders":folders,"folder":selected,"messages":messages,"loading":loading,"email":details.email}),
+        )
+    }
+}
+
+fn read_packet(reader: &mut impl BufRead) -> io::Result<Option<Vec<u8>>> {
+    let mut packet = Vec::new();
+    loop {
+        let bytes = reader.fill_buf()?;
+        if bytes.is_empty() {
+            return if packet.is_empty() {
+                Ok(None)
+            } else {
+                Err(io::ErrorKind::UnexpectedEof.into())
+            };
+        }
+        let take = bytes
+            .iter()
+            .position(|b| *b == b'\n')
+            .map(|p| p + 1)
+            .unwrap_or(bytes.len());
+        if packet.len() + take > MAX_INPUT {
+            return Err(io::ErrorKind::InvalidData.into());
+        }
+        packet.extend_from_slice(&bytes[..take]);
+        reader.consume(take);
+        if packet.last() == Some(&b'\n') {
+            packet.pop();
+            return Ok(Some(packet));
+        }
+    }
+}
+fn main() {
+    // No inherited account/debug/proxy configuration; Swift supplies only this profile path.
+    std::panic::set_hook(Box::new(|_| {}));
+    unsafe {
+        libc_umask();
+    }
+    let Some(directory) = std::env::var_os("PROTONX_MAIL_DIR").map(PathBuf::from) else {
+        std::process::exit(2)
+    };
+    let stdin = io::stdin();
+    let mut reader = stdin.lock();
+    let stdout = io::stdout();
+    let mut writer = stdout.lock();
+    let mut backend: Option<Backend> = None;
+    while let Ok(Some(packet)) = read_packet(&mut reader) {
+        let Ok(request) = serde_json::from_slice::<Request>(&packet) else {
+            break;
+        };
+        if request.schema != 1 || request.id == 0 {
+            break;
+        }
+        let result = if backend.is_none() {
+            Backend::new(directory.clone()).map(|created| {
+                backend = Some(created);
+            })
+        } else {
+            Ok(())
+        }
+        .and_then(|_| backend.as_mut().unwrap().handle(request.command));
+        let response = match result {
+            Ok(value) => Response {
+                schema: 1,
+                id: request.id,
+                result: Some(value),
+                failure: None,
+            },
+            Err(failure) => Response {
+                schema: 1,
+                id: request.id,
+                result: None,
+                failure: Some(failure),
+            },
+        };
+        let Ok(mut output) = serde_json::to_vec(&response) else {
+            break;
+        };
+        if output.len() > MAX_OUTPUT {
+            break;
+        }
+        output.push(b'\n');
+        if writer
+            .write_all(&output)
+            .and_then(|_| writer.flush())
+            .is_err()
+        {
+            break;
+        }
+    }
+    // Exiting on EOF/lock tears down the runtime, pending requests and decrypted memory.
+}
+unsafe fn libc_umask() {
+    unsafe extern "C" {
+        fn umask(mask: u16) -> u16;
+    }
+    unsafe {
+        umask(0o077);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn protocol_refuses_unknown_fields_and_methods() {
+        assert!(serde_json::from_value::<Request>(json!({"schema":1,"id":1,"command":{"method":"login","username":"test@example.com","password":"synthetic","extra":"bad"}})).is_err());
+        assert!(
+            serde_json::from_value::<Request>(
+                json!({"schema":1,"id":1,"command":{"method":"export"}})
+            )
+            .is_err()
+        );
+    }
+    #[test]
+    fn framing_refuses_oversized_or_partial_credentials() {
+        assert!(read_packet(&mut io::Cursor::new(vec![b'x'; MAX_INPUT + 1])).is_err());
+        assert!(read_packet(&mut io::Cursor::new(b"partial")).is_err());
+        assert_eq!(
+            read_packet(&mut io::Cursor::new(b"{}\n")).unwrap(),
+            Some(b"{}".to_vec())
+        );
+    }
+    #[test]
+    fn expired_sessions_are_distinct_from_network_errors_without_server_text() {
+        let unauthorized = ProtonError::ServerError(UserApiServiceError::Unauthorized(
+            "SYNTHETIC-private-server-text".into(),
+        ));
+        assert_eq!(
+            action_failure(ActionError::Other(unauthorized), "message_failed"),
+            "session_expired"
+        );
+        assert_eq!(
+            scroller_failure(MailScrollerError::Other(ProtonError::Network)),
+            "snapshot_failed"
+        );
+        let forbidden = ProtonError::ServerError(UserApiServiceError::Forbidden(
+            "SYNTHETIC-private-server-text".into(),
+        ));
+        assert_eq!(
+            session_failure(UserSessionError::Other(forbidden), "session_failed"),
+            "session_failed"
+        );
+    }
+    #[test]
+    fn malformed_live_list_update_fails_without_panicking() {
+        let listing = Arc::new((Mutex::new(ListState::default()), Condvar::new()));
+        ListCallback(listing.clone()).on_update(MessageScrollerUpdate::List(
+            MessageScrollerListUpdate::ReplaceRange {
+                scroller_id: "synthetic".into(),
+                from: 5,
+                to: 2,
+                items: vec![],
+            },
+        ));
+        assert_eq!(listing.0.lock().unwrap().failed, Some("snapshot_failed"));
+    }
+    #[test]
+    fn renderer_never_loads_remote_resources() {
+        let html=b"<p>Synthetic note</p><img src='https://example.invalid/private'><script>secret()</script>";
+        let text = html2text::from_read(&html[..], 80).unwrap();
+        assert!(text.contains("Synthetic note"));
+        assert!(!text.contains("secret()"));
+    }
+}

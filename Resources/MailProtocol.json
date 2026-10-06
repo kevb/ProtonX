@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "clientID": "macos-mail",
+  "webVersion": "5.0.134.11",
+  "desktopVersion": "1.14.0",
+  "userAgent": "ProtonX/0.1.0 (native macOS Mail)",
+  "desktopSource": "WebClients",
+  "desktopRevision": "0b1d912065235b251adc545c1d91cb615bfab73b",
+  "webVersionSource": "https://mail.proton.me/assets/static/index.4ac2b8a2.js",
+  "webAssetSHA256": "a682e14c6defaebbef33f9a139bc0b1eef79e9f85838144ae983ba42fd390463",
+  "reviewedOn": "2026-10-06"
+}

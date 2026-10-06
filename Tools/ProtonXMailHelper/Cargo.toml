@@ -1,0 +1,24 @@
+[package]
+name = "protonx-mail-helper"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.93"
+license = "AGPL-3.0-only"
+publish = false
+
+[dependencies]
+mail-uniffi = { path = "../project/mail/rust/mail/mail-uniffi", features = ["protonx-native"] }
+mail-uniffi-common = { workspace = true }
+mail-account-uniffi = { workspace = true }
+mail-issue-reporter-service-uniffi = { workspace = true }
+mail-issue-reporter-service = { workspace = true }
+futures = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+security-framework = "3.7.0"
+html2text = "0.16.2"
+async-trait = { workspace = true }
+
+[[bin]]
+name = "protonx-mail"
+path = "src/main.rs"

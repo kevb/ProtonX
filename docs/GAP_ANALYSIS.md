@@ -111,7 +111,7 @@ unconditional feature on every account.
 
 | Area | Assessment and next step |
 | --- | --- |
-| Menu bar | One optional ProtonX item is implemented. Mail still needs external Bridge, which can retain its own item. Do not claim one icon for all Proton processes or change official-app settings automatically. Validate no-icon operation, narrow/notched displays and quick access. |
+| Menu bar | One optional ProtonX item is implemented. Direct Mail needs no external Bridge; the optional compatibility path can retain Bridge’s own item. Do not claim one icon for all Proton processes or change official-app settings automatically. Validate no-icon operation, narrow/notched displays and quick access. |
 | Product structure | Keep separate Pass/Mail windows and sessions, with shared window commands and OS integration. This preserves each task's shape without multiplying tray items. Consider separate signed processes/sandboxes when extensions or privilege boundaries justify them. |
 | Keychain and unlock | Keychain is already used, but local UI unlock is not a security audit or proof of authenticated-session recovery. Test genuine restart/unlock, screen lock, sleep, user switching and owned-clipboard clearing. Official macOS Pass already offers biometrics; Touch ID alone is not a differentiator. |
 | Navigation | Complete keyboard-only search, selection, editing, Trash/restore and VoiceOver checks. Ensure native menus expose the same enabled actions as buttons. Clear stale details when filters/selection change. |
@@ -127,16 +127,16 @@ This is a feasibility direction, not a working extension or approved entitlement
 ## Mail and Drive
 
 Proton's [official Mail desktop app](https://proton.me/support/mail-desktop-app)
-provides the Mail/Calendar experience. ProtonX currently has only a small Bridge
-client: 25 recent messages, limited plain-text MIME, single-recipient composition
-and TLS verification. Mail lacks paging, thread view, reply/forward, read/unread,
-archive/trash, mailbox search, attachments, drafts, notifications and Calendar.
-The next useful Mail slice is now **native sign-in → decrypted inbox → restart**,
-ahead of further Bridge feature expansion. The current manual setup does not
-meet the intended consumer experience. [The native Mail decision](MAIL_NATIVE_SIGN_IN.md)
-reviews the public Rust Mail core, its build probe and separate session boundary.
-Paging, read/unread and reply follow that working integration. Bridge's
-[paid-plan requirement](https://proton.me/mail/bridge) remains part of this design.
+provides the Mail/Calendar experience. ProtonX now packages a direct native Mail
+core with credentials/TOTP/second-password states, separate session restoration,
+folders, bounded paging and selected-message decryption. The normal experience
+has no Bridge/server settings. This is a synthetically tested read-only slice;
+real-account interoperability remains unverified. Human verification and
+FIDO-only states are unsupported; threading, sending/reply, read/unread,
+archive/trash, attachment handling and push UI remain gaps. See
+[the native Mail decision](MAIL_NATIVE_SIGN_IN.md).
+The advanced Bridge compatibility path retains its separate
+[paid-plan requirement](https://proton.me/mail/bridge).
 
 Drive is already closely integrated with Finder: Proton documents a background
 app, Finder folder, on-demand files, offline pinning and sync activity in its

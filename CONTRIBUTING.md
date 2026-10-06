@@ -5,13 +5,14 @@ issues/PRs are welcome. Keep native macOS behavior and product separation intact
 Use synthetic data in fixtures, screenshots and performance reports.
 
 Build with Swift 6 and stable Rust. Run `swift test`, `scripts/test-bridge.sh`,
-`scripts/test-helper.sh` for adapter changes, and `scripts/build-app.sh`.
+`scripts/test-helper.sh` for Pass adapter changes, `scripts/test-mail-helper.sh`
+for Mail adapter changes, and `scripts/build-app.sh`.
 Use the resulting app for keyboard-only and light/dark checks. Do not introduce
 unit tests that only restate trivial view layout; test contracts, lifecycle races
 and user-visible behavior. Error messages must never echo raw helper output.
 
 A patch touching Proton code must preserve its copyright/license notices, remain
-reviewable in `patches/pass-cli.patch`, and have an accompanying pinned-source
+reviewable in `patches/pass-cli.patch` or `patches/mail-core.patch`, and have an accompanying pinned-source
 update and contract tests. Do not replace crypto, skip certificate verification,
 or bypass server product permissions. Keep CLI eligibility in the CLI product
 policy; the explicit desktop policy uses the pinned desktop account protocol.

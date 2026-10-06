@@ -1,0 +1,54 @@
+--- a/project/mail/rust/mail/mail-uniffi/Cargo.toml
++++ b/project/mail/rust/mail/mail-uniffi/Cargo.toml
+@@ -65,6 +65,8 @@
+ zeroizing-alloc = { workspace = true }
+ 
+ [features]
++# ProtonX has no diagnostics/telemetry uploads. Upstream defaults are unchanged.
++protonx-native = ["mail-telemetry/protonx-native"]
+ default = []
+ # Enable stdout logging for iOS (logs appear in Xcode console)
+ # Works in both debug and release builds
+--- a/project/mail/rust/mail/mail-uniffi/src/mail.rs
++++ b/project/mail/rust/mail/mail-uniffi/src/mail.rs
+@@ -20,7 +20,7 @@
+ mod search_results;
+ mod session;
+ pub mod settings;
+-mod sidebar;
++pub mod sidebar;
+ mod state;
+ mod user_session;
+ 
+--- a/project/mail/rust/mail/mail-uniffi/src/mail/logging.rs
++++ b/project/mail/rust/mail/mail-uniffi/src/mail/logging.rs
+@@ -8,6 +8,7 @@
+ use tracing_subscriber::{EnvFilter, Layer};
+ 
+ pub(super) fn init_log(log_service: &LogService, debug: bool) -> std::io::Result<()> {
++    if cfg!(feature = "protonx-native") { return Ok(()); }
+     let file_subscriber = log_service
+         .create_layer()?
+         .with_file(false)
+--- a/project/mail/rust/shared/telemetry-service/Cargo.toml
++++ b/project/mail/rust/shared/telemetry-service/Cargo.toml
+@@ -4,6 +4,9 @@
+ edition.workspace = true
+ rust-version.workspace = true
+ license = "AGPL-3.0-only"
++
++[features]
++protonx-native = []
+ 
+ [dependencies]
+ anyhow = { workspace = true }
+--- a/project/mail/rust/shared/telemetry-service/src/client.rs
++++ b/project/mail/rust/shared/telemetry-service/src/client.rs
+@@ -46,6 +46,7 @@
+     }
+ 
+     async fn telemetry_enabled(&self) -> Result<bool, String> {
++        if cfg!(feature = "protonx-native") { return Ok(false); }
+         let tether = self.stash.connection();
+ 
+         let telemetry_enabled = tether

@@ -6,7 +6,7 @@
       "name": "clients",
       "url": "https://github.com/ProtonMail/clients.git",
       "revision": "2ecb794dbc221384dc6d88840965ac144db301ad",
-      "role": "direct native Mail core build feasibility reference; not linked",
+      "role": "native Mail helper runtime (public source workspace subset)",
       "license": "Mail SDK AGPL-3.0-only; preserve per-component notices"
     },
     {

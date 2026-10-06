@@ -5,10 +5,11 @@ SwiftUI and AppKit, Proton's existing cryptography, independently usable product
 windows, and **one optional menu-bar icon**. Native vault and mail UI, without a bundled Electron or Chromium runtime.
 
 **Status: 0.1 developer alpha.** Pass is the priority. This is a working native
-client built on Proton's open-source Rust Pass library and desktop API protocol, plus an initial native Mail
-client for Proton Bridge. It is not a full replacement for all official apps.
+client built on Proton's open-source Rust Pass and Mail cores with separate
+desktop product protocols and sessions. It is not a full replacement for all official apps.
 Initial user-driven sign-in, local unlock and vault loading have been observed.
-Remote writes and session recovery still need validation. Use a disposable test
+The user reported a successful create/sync/delete test login. Editing and session
+recovery still need validation; direct Mail account interoperability is unverified. Use a disposable test
 account before trusting this alpha with your vault.
 Builds are available locally; binary publication also awaits the recorded
 [dependency license review](docs/LICENSE_REVIEW.md).
@@ -20,7 +21,7 @@ ProtonX is independent of Proton AG. GPL-3.0-or-later.
 | Product | Implemented | Current limits |
 | --- | --- | --- |
 | Pass | macOS authentication window and experimental native password prompts; atomic vault/Trash loading, title search and sorting; on-demand item details; password copy and reveal; TOTP copy/setup/edit; create/edit logins and notes with multiple websites and text/hidden custom fields; revision conflict protection; trash/restore; remote sign-out | no browser autofill, passkey operations, attachments, sharing UI, account switching, or offline UI |
-| Mail | Native mailbox/message lists; plain-text MIME reader; single-recipient plain-text compose/send; Bridge credentials in Keychain; verified local TLS | Requires a running, eligible Proton Bridge account; newest 25 messages per mailbox; no attachment handling, HTML rendering, reply threading, push or direct Proton login |
+| Mail | Direct native username/password, TOTP and second-password flow; separate Keychain-backed session restoration; folders, paged message list and selected-message decryption through Proton’s Mail SDK; safe text reader | Read-only direct client; account interoperability unverified; no human verification/FIDO-only login, threading, attachments, sending or push UI. Search covers loaded metadata, capped at 1,000 messages. Bridge compose remains an advanced prototype |
 | Drive | Architecture decision and planned integration boundary | No Drive client implemented |
 
 Native behavior: standard windows and toolbars, keyboard commands, light/dark
@@ -31,8 +32,8 @@ to Proton or writes account credentials.
 
 ## Build and run
 
-Requires **macOS 14+**, **Xcode 16+ / Swift 6**, Python 3, Git, and a stable Rust
-toolchain (tested with Rust 1.99). Quit ProtonX before rebuilding its bundle.
+Requires **macOS 14+**, **Xcode 16+ / Swift 6**, Python 3.11+, Git, and a stable Rust
+toolchain 1.93+ (tested with Rust 1.99). Quit ProtonX before rebuilding its bundle.
 First launch Xcode and accept its license. No
 signing account or Proton credentials are needed to build or explore demo mode.
 
@@ -44,18 +45,19 @@ open build/ProtonX.app
 ```
 
 Choose **Explore with demo data** to inspect Pass. Use **Products → Open Mail**
-to explore the separate demo inbox. Build output is ad-hoc signed for local use;
-it is not notarized. No global dependencies are installed by the build scripts.
+to sign in or explore the separate demo inbox. Build output defaults to ad-hoc
+signing; a configured identity gives stable signatures. See
+[local signing and its measured Keychain limits](docs/LOCAL_SIGNING.md). It is not notarized. No global dependencies are installed by the build scripts.
 
 For UX testing alongside a running session, `./scripts/build-app.sh --preview`
-builds `build/ProtonX Preview.app`: synthetic Pass data only, a separate bundle
+builds `build/ProtonX Preview.app`: synthetic Pass/Mail data only, a separate bundle
 identity, no sign-in and no extra menu-bar item or global shortcut registration.
 `./scripts/build-app.sh --stage-update` builds `build/ProtonX Update.app` without
 replacing a running primary bundle. Quit the old app before opening the update;
 both real bundles use the same isolated ProtonX Pass profile.
 
-The helper is built from an exact Proton source revision. It runs only when a
-Pass operation is requested, and exits afterwards. It uses a separate encrypted
+Both helpers are built from exact Proton source revisions. Pass runs for one
+operation and exits; Mail persists while its window is unlocked and stops on lock/close. It uses a separate encrypted
 profile and Keychain namespace; it does not import the official app's session.
 To download every reviewed upstream repository:
 
@@ -92,23 +94,30 @@ remote logout and removes this app's local session after it succeeds.
 
 ## Connect Mail
 
-This is the current **Bridge prototype**, not the intended final onboarding.
-The next Mail milestone is native Proton sign-in and session restoration without
-server settings, reusing Proton's existing Mail core. See the
-[native Mail integration decision](docs/MAIL_NATIVE_SIGN_IN.md); this direct
-sign-in route is not implemented yet.
+Choose **Products → Open Mail** (⌘2) and enter your Proton username/password.
+If required, enter an authenticator code or your second mailbox password in the
+native form. There are no ports, generated passwords or certificates in the
+normal onboarding. The direct Mail core is now packaged; live server acceptance
+and end-to-end account recovery still need designated-account validation.
+See [the native Mail integration and acceptance gates](docs/MAIL_NATIVE_SIGN_IN.md).
 
-Start [Proton Bridge](https://proton.me/mail/bridge), sign in there, and open its
-mail-client configuration. Enter that email address, Bridge-generated password,
-IMAP/SMTP ports and TLS mode into ProtonX Mail. Export Bridge's **public** TLS
-certificate and import the PEM file. Do not import a private key. ProtonX only
-connects to `127.0.0.1`, requires TLS, validates the certificate and hostname, and
-never disables verification. Bridge remains responsible for Proton authentication,
-message encryption and remote sync. Bridge may retain its own menu-bar item;
-ProtonX doesn't change its settings or manage its lifecycle in this release.
+Mail keeps its own encrypted session and Keychain entries. On restart, **Unlock
+Mail** uses Touch ID or your Mac password before restoring that session. Locking
+clears the UI and stops Mail’s helper. Sign Out ends its SDK account session.
+Pass and Mail do not share authentication. Accounts requiring human verification,
+a security-key-only challenge or a password change currently receive an explicit
+unsupported state; use Proton’s official client for those flows.
 
-Sending requires an explicit final confirmation in the app. If a send times out,
-check Sent before retrying: a lost acknowledgement can mean mail was delivered.
+This first direct client reads mail. It does not send, reply, mark read/unread,
+archive, manage attachments or display conversations yet. Refresh updates the
+loaded view; search filters loaded subjects and senders. No remote images/scripts
+are executed. **Explore demo inbox** uses synthetic data with no account access.
+
+**Connect using Bridge…** is an optional compatibility prototype under sign-in.
+It retains the existing local TLS reader and confirmed plain-text compose/send.
+A separate eligible Bridge installation, generated client password and imported
+public certificate are required there. It is independent of direct Mail login
+and remains subject to Bridge’s product limits. No automatic send retry is added.
 
 ## Keyboard and menu bar
 
@@ -126,6 +135,7 @@ swift test
 ./scripts/test-bridge.sh        # Synthetic IMAP/SMTP servers, verified TLS
 ./scripts/test-bridge.sh --starttls # Same round trip with STARTTLS
 ./scripts/test-helper.sh        # Public SDK/CLI tests plus native transport contracts
+./scripts/test-mail-helper.sh   # Native Mail IPC, public synthetic decryption and paging
 ./scripts/test-credential-provider.sh # Compile-only API probe and synthetic origin cases
 ```
 

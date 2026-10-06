@@ -4,7 +4,8 @@ Review date: 2026-10-06. The required product experience is **open Mail → ente
 Proton username/password → complete any account challenge → inbox**. On restart,
 restore Mail's own session with local unlock as appropriate. No separate Bridge
 installation, generated mail-client password, ports or certificate import should
-be required in the normal experience. Direct sign-in is not implemented today.
+be required in the normal experience. The direct sign-in-to-reader slice is now implemented in local builds. Real-account
+interoperability remains an acceptance gate.
 
 ## Decision
 
@@ -25,7 +26,8 @@ The newly reviewed reference is
 [ProtonMail/clients at 2ecb794](https://github.com/ProtonMail/clients/tree/2ecb794dbc221384dc6d88840965ac144db301ad),
 recorded in `upstream.lock.json`. The archived `ProtonMail/rust-mail` repository
 points to this monorepo; do not treat the archived repository as the maintained
-source. No Mail SDK is embedded in the ProtonX app yet.
+source. The pinned Mail SDK is now statically linked into the dedicated `protonx-mail`
+helper; SwiftUI/AppKit remains the product interface.
 
 Under `project/mail/rust/`:
 
@@ -83,7 +85,42 @@ unused package records without introducing new registry/Git package records;
 the existing resolved name/version/source records remain. This improves the
 feasibility evidence beyond the original workspace metadata failure.
 
-## First useful milestone and acceptance gates
+## Implemented native slice, 2026-10-06
+
+`Tools/ProtonXMailHelper`, `NativeMailProcess`, `NativeMailStore` and the Mail
+window implement native credentials, TOTP, second password, saved-session local
+unlock, bounded folders/paging, selected-message decryption and remote sign-out.
+The helper retains the SDK runtime only while Mail is unlocked. Pass is separate.
+Bridge setup is behind an advanced option. Human verification, FIDO-only and
+password-change states are explicit unsupported outcomes; no bypass is added.
+
+The reproducible production build materializes clean pinned source using
+`scripts/prepare-mail-helper.py`, removes unpublished workspace members and applies
+`patches/mail-core.patch`. It exposes the existing sidebar module and disables
+logging/telemetry through an opt-in feature. Automatic issue reports are discarded.
+The committed native lock adds only the helper's own workspace package to the
+candidate core lock; no registry/Git package records change. AGPL text is copied
+from the pinned Mail Rust license into `LICENSE-MAIL-HELPER`. Full dependency and
+combined-work distribution review remains required; no public binary is published.
+
+`Resources/MailProtocol.json` separately pins macos-mail, the official desktop
+extension version and the reviewed public web asset's version/hash. The SDK
+formats its desktop header; ProtonX identifies itself in User-Agent. The contract
+checks the desktop source and privacy patch. These protocol facts are not proof
+that Proton accepts our independent native client.
+
+Host optimized build and strict local signatures passed. Synthetic tests exercise
+challenge transitions, private IPC, typed error retries, lock/late replies, expiry,
+failed logout retention and preview isolation. Proton's public message-body tests
+exercise actual decryption and MIME fixtures; its paging tests exercise local
+mock servers. Synthetic preview selection/search/folder/lock checks passed.
+Neither these tests nor a successful build establishes real-account sign-in.
+
+Next: user-driven designated-account sign-in/read/restart validation, human
+verification and security-key support, expired/revoked-session recovery, then
+read/unread, archive/trash, compose/reply, threads, attachments and search.
+
+## Acceptance gates
 
 1. Build/link the pinned public core for the host Mac, produce Swift bindings or
    a bounded private helper interface, and record the full dependency/license

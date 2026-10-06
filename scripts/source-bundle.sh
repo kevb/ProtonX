@@ -3,19 +3,42 @@
 set -euo pipefail
 source "$(dirname "$0")/env.sh"
 cd "$PROTONX_ROOT"
+if [[ -n "$(git status --porcelain)" ]]; then
+  echo 'Commit source changes before generating a corresponding-source archive.' >&2
+  exit 1
+fi
 scripts/build-helper.sh
+scripts/build-mail-helper.sh
 mkdir -p "$PROTONX_ROOT/build"
 # Outside the checkout: git apply otherwise discovers the enclosing ProtonX
 # repository and can silently skip paths outside its current directory prefix.
 PROTONX_STAGE="$(mktemp -d "${TMPDIR:-/tmp}/ProtonX-source.XXXXXX")"
 trap 'rm -rf "$PROTONX_STAGE"' EXIT
 PROTONX_SOURCE="$PROTONX_STAGE/ProtonX-0.1.0-source"
-mkdir -p "$PROTONX_SOURCE/helper" "$PROTONX_SOURCE/protonx"
+mkdir -p "$PROTONX_SOURCE/helper" "$PROTONX_SOURCE/protonx" "$PROTONX_SOURCE/mail-helper"
 (cd upstream/pass-cli && cargo vendor --locked "$PROTONX_SOURCE/helper/vendor" > "$PROTONX_SOURCE/helper/vendor-config.toml")
 # Git-tracked source only: never package local profiles, test keys, build logs or toolchain state.
 git archive HEAD | tar -x -C "$PROTONX_SOURCE/protonx"
 git -C upstream/pass-cli archive HEAD | tar -x -C "$PROTONX_SOURCE/helper"
 cp Resources/PassHelper.lock "$PROTONX_SOURCE/helper/Cargo.lock"
+python3 - "$PROTONX_ROOT/.tools/mail-native" "$PROTONX_SOURCE/mail-helper" <<'MAILSOURCE'
+import pathlib, shutil, sys
+source, destination = map(pathlib.Path, sys.argv[1:])
+for directory in ('project', 'tools', 'license', 'protonx-mail-helper', '.cargo'):
+    shutil.copytree(source/directory, destination/directory)
+for filename in ('Cargo.toml', 'Cargo.lock'):
+    shutil.copy2(source/filename, destination/filename)
+for original in source.rglob('*'):
+    if original.is_file():
+        copied = destination/original.relative_to(source)
+        if not copied.is_file() or copied.read_bytes() != original.read_bytes():
+            raise SystemExit('Native Mail corresponding-source mismatch')
+print('Native Mail corresponding source matches every materialized build input')
+MAILSOURCE
+(cd .tools/mail-native && cargo vendor --locked "$PROTONX_SOURCE/mail-helper/vendor" > "$PROTONX_SOURCE/mail-helper/vendor-config.toml")
+sed -i.bak 's|directory = ".*"|directory = "vendor"|' "$PROTONX_SOURCE/mail-helper/vendor-config.toml"
+rm "$PROTONX_SOURCE/mail-helper/vendor-config.toml.bak"
+cat "$PROTONX_SOURCE/mail-helper/vendor-config.toml" >> "$PROTONX_SOURCE/mail-helper/.cargo/config.toml"
 sed -i.bak 's|directory = ".*"|directory = "vendor"|' "$PROTONX_SOURCE/helper/vendor-config.toml"
 rm "$PROTONX_SOURCE/helper/vendor-config.toml.bak"
 (cd "$PROTONX_SOURCE/helper" && git apply "$PROTONX_ROOT/patches/pass-cli.patch")
@@ -37,7 +60,7 @@ PYCHECK
 mkdir -p "$PROTONX_SOURCE/helper/.cargo"
 printf '\n' >> "$PROTONX_SOURCE/helper/.cargo/config.toml"
 cat "$PROTONX_SOURCE/helper/vendor-config.toml" >> "$PROTONX_SOURCE/helper/.cargo/config.toml"
-cp THIRD_PARTY_NOTICES.md LICENSE "$PROTONX_SOURCE/"
+cp THIRD_PARTY_NOTICES.md LICENSE LICENSE-MAIL-HELPER "$PROTONX_SOURCE/"
 git rev-parse HEAD > "$PROTONX_SOURCE/SOURCE_REVISION.txt"
 # An inventory points to the original license declarations; vendor directories
 # contain the original source, copyright notices and license files.
@@ -71,11 +94,19 @@ with (root/'DEPENDENCIES.tsv').open('w') as output:
     for package in sorted(metadata['packages'], key=lambda package: (package['name'], package['version'])):
         source = Path(package['manifest_path']).parent.relative_to(root)
         output.write('\t'.join([package['name'], package['version'], package.get('license') or 'See source license files', str(source)])+'\n')
+metadata = json.loads(subprocess.check_output(
+    ['cargo', 'metadata', '--offline', '--locked', '--format-version', '1'], cwd=root/'mail-helper'))
+with (root/'MAIL_DEPENDENCIES.tsv').open('w') as output:
+    output.write('name\tversion\tlicense\tsource_directory\n')
+    for package in sorted(metadata['packages'], key=lambda package: (package['name'], package['version'])):
+        source = Path(package['manifest_path']).parent.relative_to(root)
+        output.write('\t'.join([package['name'], package['version'], package.get('license') or 'See source license files', str(source)])+'\n')
+
 PYNOTICES
 cat > "$PROTONX_SOURCE/BUILDING.md" <<'BUILDING'
 # Rebuild this source bundle
 
-Use a Mac with Xcode 16+/Swift 6, Git, Python 3 and Rust stable (tested with 1.99).
+Use a Mac with Xcode 16+/Swift 6, Git, Python 3.11+ and Rust 1.93+ (tested with 1.99).
 Accept Xcode's license first. No Proton account is needed. The helper's crates
 are included under `helper/vendor`, including their original license files.
 `SOURCE_REVISION.txt` identifies the ProtonX commit; `DEPENDENCIES.tsv` indexes
@@ -88,18 +119,24 @@ From this directory:
 cd helper
 cargo build --offline --locked --release -p pass-cli --features protonx-desktop
 cargo test --offline --locked -p pass-cli --features protonx-desktop
+cd ../mail-helper
+cargo build --offline --locked -p protonx-mail-helper --profile mail-macos
+cargo test --offline --locked -p protonx-mail-helper --profile mail-macos-debug
 cd ../protonx
 mkdir -p upstream/pass-cli/target/release
 cp ../helper/target/release/pass-cli upstream/pass-cli/target/release/pass-cli
+mkdir -p .tools/mail-helper
+cp ../mail-helper/target/mail-macos/protonx-mail .tools/mail-helper/protonx-mail
 ./scripts/build-app.sh --skip-helper
 swift test
 ./scripts/test-bridge.sh
 ./scripts/test-bridge.sh --starttls
 ```
 
-The build produces `protonx/build/ProtonX.app` with local ad-hoc signatures.
+The build produces `protonx/build/ProtonX.app` with local ad-hoc signatures by default.
 It does not notarize or install the app. Keep this source archive available
-alongside any binary distribution. See `LICENSE` and `THIRD_PARTY_NOTICES.md`.
+alongside any binary distribution. See `LICENSE`, `LICENSE-MAIL-HELPER` and `THIRD_PARTY_NOTICES.md`. The Mail helper
+includes AGPL-3.0-only components; `MAIL_DEPENDENCIES.tsv` indexes its packages.
 BUILDING
 tar -czf "$PROTONX_STAGE/ProtonX-0.1.0-source.tar.gz" -C "$PROTONX_STAGE" ProtonX-0.1.0-source
 # Preserve the previous generated package until its replacement is complete.
