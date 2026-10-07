@@ -21,8 +21,30 @@ private func offlineError(_ failure: String) throws -> ProtonXError {
 }
 
 /// Synthetic responses only. Separate cache/online paths expose race conditions.
+private final class OfflineResponseGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var released = false
+    private var continuations: [CheckedContinuation<Void, Never>] = []
+    func wait() async {
+        await withCheckedContinuation { continuation in
+            let resumeNow = lock.withLock {
+                if released { return true }
+                continuations.append(continuation); return false
+            }
+            if resumeNow { continuation.resume() }
+        }
+    }
+    func release() {
+        let waiting = lock.withLock {
+            released = true
+            let waiting = continuations; continuations.removeAll(); return waiting
+        }
+        waiting.forEach { $0.resume() }
+    }
+}
+
 private final class OfflineRunner: HelperRunning, @unchecked Sendable {
-    struct Response: Sendable { var value = ""; var failure: ProtonXError?; var delay: Duration = .zero }
+    struct Response: Sendable { var value = ""; var failure: ProtonXError?; var delay: Duration = .zero; var gate: OfflineResponseGate? }
     private let lock = NSLock()
     private var recorded: [HelperCommand] = []
     private var online: [Response]
@@ -44,6 +66,7 @@ private final class OfflineRunner: HelperRunning, @unchecked Sendable {
             default: Issue.record("Unexpected command in read-only offline test"); return .init(failure: .invalidResponse)
             }
         }
+        if let gate = response.gate { await gate.wait() }
         if response.delay > .zero { await Task.detached { try? await Task.sleep(for: response.delay) }.value }
         if let failure = response.failure { throw failure }
         return Data(response.value.utf8)
@@ -63,7 +86,8 @@ private func offlineSession() throws -> URL {
 
 @Test @MainActor func savedPassMetadataAndSelectedDetailAppearBeforeSlowOnlineRefresh() async throws {
     let root = try offlineSession(); defer { try? FileManager.default.removeItem(at: root) }
-    let runner = OfflineRunner(online: [.init(value: offlineMetadata(title: "Updated online"), delay: .milliseconds(200))])
+    let onlineGate = OfflineResponseGate(); defer { onlineGate.release() }
+    let runner = OfflineRunner(online: [.init(value: offlineMetadata(title: "Updated online"), gate: onlineGate)])
     var unlocks = 0
     let store = PassStore(service: PassService(runner: runner), sessionDirectory: root, previewOnly: false,
         localUnlock: { unlocks += 1; return true }, now: { offlineNow })
@@ -77,6 +101,7 @@ private func offlineSession() throws -> URL {
     #expect(store.detail?.offlineAttachmentsUnavailable == true); #expect(!store.canEdit); #expect(!store.canCopyTOTP)
     let command = try #require(runner.calls.first { $0.arguments.first == "native-cache-detail" })
     #expect(command.arguments == ["native-cache-detail", "--generation", offlineGeneration, "--share-id", "s", "--item-id", "i"])
+    onlineGate.release()
     await awaitOffline { !store.busy }
     #expect(!store.isUsingSavedVault); #expect(!store.mustRefreshBeforeWriting); #expect(store.items.first?.title == "Updated online")
     #expect(store.lastSyncedAt == offlineNow); #expect(store.offlineCacheStatus == "ready")
@@ -166,13 +191,18 @@ func unavailableSavedPassCacheFallsBackToOnlineWithoutDeletingSession(_ kind: St
 
 @Test @MainActor func lateSavedPassDetailFailureCannotDiscardReconnectedWorkspace() async throws {
     let root = try offlineSession(); defer { try? FileManager.default.removeItem(at: root) }
-    let runner = OfflineRunner(detail: .init(failure: try offlineError("cacheUnavailable"), delay: .milliseconds(180)),
-        online: [.init(value: offlineMetadata(title: "Reconnected"), delay: .milliseconds(70))])
+    let onlineGate = OfflineResponseGate(); defer { onlineGate.release() }
+    let detailGate = OfflineResponseGate(); defer { detailGate.release() }
+    let runner = OfflineRunner(detail: .init(failure: try offlineError("cacheUnavailable"), gate: detailGate),
+        online: [.init(value: offlineMetadata(title: "Reconnected"), gate: onlineGate)])
     let store = PassStore(service: PassService(runner: runner), sessionDirectory: root, previewOnly: false,
         localUnlock: { true }, now: { offlineNow }); defer { store.lock() }
     store.unlock(); await awaitOffline { store.isUsingSavedVault }
     store.selectedItem = "s:i"; await awaitOffline { runner.calls.contains { $0.arguments.first == "native-cache-detail" } }
+    onlineGate.release()
     await awaitOffline { !store.busy }
+    #expect(store.items.first?.title == "Reconnected")
+    detailGate.release()
     try? await Task.sleep(for: .milliseconds(220))
     #expect(!store.isUsingSavedVault); #expect(store.items.first?.title == "Reconnected")
     #expect(store.error == nil); #expect(store.detail != nil); #expect(!store.mustRefreshBeforeWriting)

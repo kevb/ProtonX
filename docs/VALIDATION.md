@@ -29,6 +29,11 @@ states were inspected; no live vault contents were returned to the model.
 - The signed update is staged at `build/ProtonX Focus Update.app`, including the
   reader scrolling/image controls. Installation awaits the user closing the
   installed app; its running binaries and unsaved work are left intact.
+- The preceding GitHub run exposed two Pass offline-test timing races on the
+  slower Intel runner: short synthetic network delays could finish before the
+  test observed saved-only state. Test-only response gates now hold online
+  refresh until saved-detail assertions complete, and hold the stale cache-detail
+  failure until reconnection finishes. Account/cache implementation is unchanged.
 
 ## Official-editor layout refinement, 2026-10-06
 
