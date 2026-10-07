@@ -182,8 +182,11 @@ corresponding-source dependency notices, and measured performance against the
 same workloads in official clients. Native autofill, passkeys/security-key login,
 multiple accounts, and offline locking are separate security-sensitive features.
 Local signing is configurable without relaxing Keychain ACLs. Stable local
-signatures alone have not passed prompt-free rebuild continuity on this host;
-see docs/LOCAL_SIGNING.md. Never delete session keys to avoid authorization.
+signatures from a self-signed certificate failed prompt-free rebuild continuity
+on this host. An Apple Development identity passed the isolated synthetic probe;
+existing product-key authorization and certificate renewal remain separate
+validation steps. See docs/LOCAL_SIGNING.md. Never delete session keys to avoid
+authorization.
 
 ## Developer account validation
 

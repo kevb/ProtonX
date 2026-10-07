@@ -59,8 +59,9 @@ Choose **Explore with demo data** for Pass or **Explore demo inbox** for Mail.
 Use the visible **ProtonX** product switcher, **Products** menu, or ⌘1 / ⌘2 to
 open either window. Demo data is synthetic and never accesses a Proton account.
 
-Builds use ad-hoc signing by default. A configured identity provides stable
-signatures, but prompt-free Keychain access across rebuilds is not established.
+Builds use ad-hoc signing by default. An Apple Development identity from a free
+Xcode Personal Team passed the synthetic Keychain rebuild-continuity test on the
+development Mac; existing product keys may need initial authorization.
 See [local signing](docs/LOCAL_SIGNING.md).
 
 ### Preview, updates and Spotlight launchers
