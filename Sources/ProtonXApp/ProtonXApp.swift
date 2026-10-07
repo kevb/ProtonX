@@ -7,11 +7,11 @@ struct ProtonXApp: App {
     @FocusedValue(\.protonXProduct) private var focusedProduct
     @FocusedValue(\.protonXCanCreate) private var focusedCanCreate
     @FocusedValue(\.protonXCanRefresh) private var focusedCanRefresh
-    @StateObject private var pass = PassStore()
+    @StateObject private var workspace = SuiteWorkspace(initialProduct: ProductWindows.shared.pending)
     var body: some Scene {
-        Window("ProtonX Pass", id: "pass") {
-            PassWindow().environmentObject(pass).tint(PassTheme.accent)
-        }.defaultSize(width: 1080, height: 720)
+        Window("ProtonX", id: "suite") {
+            SuiteWindow(workspace: workspace).tint(PassTheme.accent)
+        }.defaultSize(width: 1320, height: 820)
         .commands {
             CommandGroup(replacing: .appInfo) { Button("About ProtonX…") { NSApp.orderFrontStandardAboutPanel(options: [
                 .applicationName: "ProtonX", .applicationVersion: "0.1.0", .credits: NSAttributedString(string: "Independent native clients for Proton.\nGPL-3.0-or-later. No warranty.\nCopyright © 2026 ProtonX contributors.\nIncludes Proton Pass and Mail © Proton AG.\nMail helper: AGPL-3.0-only.\nSource and license: github.com/kevb/ProtonX\nNot affiliated with Proton AG.")]) } }
@@ -21,6 +21,7 @@ struct ProtonXApp: App {
                 }.keyboardShortcut("n").disabled(focusedCanCreate != true)
             }
             CommandMenu("Products") {
+                Button("Home") { SystemIntegration.shared.openHome?() }.keyboardShortcut("0")
                 Button("Open Pass") { SystemIntegration.shared.openPass?() }.keyboardShortcut("1")
                 Button("Open Mail") { SystemIntegration.shared.openMail?() }.keyboardShortcut("2")
                 Divider()
@@ -28,9 +29,10 @@ struct ProtonXApp: App {
                 Button(focusedProduct == .mail ? "Search Mail" : "Search Pass") {
                     if focusedProduct == .mail { NotificationCenter.default.post(name: .protonXFocusMailSearch, object: nil) }
                     else { SystemIntegration.shared.openPass?(); NotificationCenter.default.post(name: .protonXFocusSearch, object: nil) }
-                }.keyboardShortcut("f")
+                }.keyboardShortcut("f").disabled(workspace.selected == nil ||
+                    (workspace.selected == .pass ? workspace.pass?.phase != .open : workspace.mail?.phase != .open || workspace.mail?.draft != nil))
                 Button(focusedProduct == .mail ? "Refresh Mail" : "Refresh Pass") {
-                    if focusedProduct == .mail { NotificationCenter.default.post(name: .protonXRefreshMail, object: nil) } else { pass.refresh() }
+                    if focusedProduct == .mail { NotificationCenter.default.post(name: .protonXRefreshMail, object: nil) } else { workspace.pass?.refresh() }
                 }.keyboardShortcut("r").disabled(focusedCanRefresh != true)
             }
             CommandGroup(replacing: .help) {
@@ -38,9 +40,6 @@ struct ProtonXApp: App {
                 Link("Report an Issue", destination: URL(string: "https://github.com/kevb/ProtonX/issues")!)
             }
         }
-        Window("ProtonX Mail", id: "mail") {
-            MailWindow(previewOnly: pass.previewOnly).tint(MailTheme.accent)
-        }.defaultSize(width: 1240, height: 800)
         Settings { SettingsView() }
     }
 }
@@ -49,6 +48,7 @@ struct SettingsView: View {
     @AppStorage("menuBarEnabled") private var menuBarEnabled = true
     @AppStorage("quickAccessEnabled") private var quickAccessEnabled = false
     @AppStorage("autoLockSeconds") private var autoLockSeconds = 300
+    @AppStorage("suiteStartup") private var suiteStartup = "last"
     var body: some View {
         Form {
             Section("Mac integration") {
@@ -56,7 +56,11 @@ struct SettingsView: View {
                     .onChange(of: menuBarEnabled) { _, _ in SystemIntegration.shared.updateMenuBar() }
                 Toggle("Quick access with ⌃⌥P", isOn: $quickAccessEnabled)
                     .onChange(of: quickAccessEnabled) { _, _ in SystemIntegration.shared.updateHotKey() }
-                Text("Mail and Pass keep separate windows. Closing a window keeps ProtonX available; use Quit to stop it.").font(.caption).foregroundStyle(.secondary)
+                Picker("On launch", selection: $suiteStartup) {
+                    Text("Last product").tag("last"); Text("Home").tag("home")
+                    Text("Pass").tag("pass"); Text("Mail").tag("mail")
+                }
+                Text("Mail and Pass keep their place in one ProtonX window. Spotlight product launchers go straight to the requested product. Closing the window locks both products; use Quit to stop ProtonX.").font(.caption).foregroundStyle(.secondary)
             }
             Section("Security") {
                 Picker("Lock after inactivity", selection: $autoLockSeconds) {

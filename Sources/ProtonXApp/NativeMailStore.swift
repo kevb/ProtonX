@@ -26,7 +26,13 @@ final class NativeMailStore: ObservableObject {
     @Published var selectedItem: UInt64?
     @Published var query = ""
     @Published var error: String?
-    @Published private(set) var draft: NativeMailDraft?
+    @Published private(set) var draft: NativeMailDraft? {
+        didSet {
+            guard let draft else { editorState = nil; return }
+            if editorState?.token != draft.token { editorState = MailEditorState(draft: draft) }
+        }
+    }
+    @Published private(set) var editorState: MailEditorState?
     @Published private(set) var composeStatus: String?
     @Published private(set) var notice: String?
     @Published private(set) var messageActions: [NativeMailAction] = []

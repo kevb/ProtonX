@@ -2,6 +2,7 @@ import SwiftUI
 import ProtonXCore
 
 struct PassWindow: View {
+    var isActive = true
     @EnvironmentObject var store: PassStore
     @Environment(\.openSettings) private var openSettings
     @State private var showingCreate = false
@@ -12,11 +13,8 @@ struct PassWindow: View {
         Group {
             if store.phase == .open { workspace } else { WelcomeView() }
         }
-        .focusedSceneValue(\.protonXProduct, .pass)
-        .focusedSceneValue(\.protonXCanCreate, store.canCreate)
-        .focusedSceneValue(\.protonXCanRefresh, store.phase == .open && !store.busy && !store.isDemo)
+        .disabled(!isActive)
         .frame(minWidth: 820, minHeight: 540)
-        .toolbar { ToolbarItem(placement: .navigation) { SuiteProductSwitcher(current: "pass") } }
         .preferredColorScheme(previewColorScheme)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if let error = store.error {
@@ -39,14 +37,8 @@ struct PassWindow: View {
         .onChange(of: store.phase) { _, phase in
             if phase != .open { showingCreate = false; showingEdit = false; confirmTrash = false }
         }
-        .onReceive(NotificationCenter.default.publisher(for: .protonXNewItem)) { _ in if store.canCreate { showingCreate = true } }
-        .productWindow(.pass)
-        .onAppear {
-            SystemIntegration.shared.lockSuite = { store.lock(); NotificationCenter.default.post(name: .protonXLock, object: nil) }
-            SystemIntegration.shared.openSettings = { openSettings(); NSApp.activate(ignoringOtherApps: true) }
-            SystemIntegration.shared.configure()
-            if store.previewOnly || ProcessInfo.processInfo.arguments.contains("--demo") { store.enterDemo() }
-        }
+        .onReceive(NotificationCenter.default.publisher(for: .protonXNewItem)) { _ in if isActive && store.canCreate { showingCreate = true } }
+
     }
     private var workspace: some View {
         NavigationSplitView {
@@ -166,16 +158,7 @@ struct PassWindow: View {
             } else { ContentUnavailableView("Your vault, at home on Mac", systemImage: "key", description: Text("Choose an item to view its details.")) }
         }
         .background(PassTheme.canvas)
-        .navigationTitle("ProtonX Pass")
-        .toolbar {
-            ToolbarItemGroup(placement: .primaryAction) {
-                NativeSearchField(text: $store.query).frame(width: 280)
-                if store.busy { ProgressView().controlSize(.small).accessibilityLabel("Working") }
-                Button { store.refresh() } label: { Label("Refresh", systemImage: "arrow.clockwise") }.disabled(store.busy || store.isDemo)
-                Button { showingCreate = true } label: { HStack(spacing: 7) { Image(systemName: "plus"); Text("Create item") }.fixedSize() }
-                    .buttonStyle(PassPillStyle(primary: true)).disabled(!store.canCreate).accessibilityLabel("Create item").accessibilityIdentifier("newItem")
-            }
-        }
+
     }
     private var previewColorScheme: ColorScheme? {
         #if PROTONX_DESIGN_LIGHT
@@ -366,26 +349,46 @@ struct ItemDetailView: View {
 
 struct NativeSearchField: NSViewRepresentable {
     @Binding var text: String
-    func makeCoordinator() -> Coordinator { Coordinator(text: $text) }
+    @Binding var focusRequested: Bool
+    init(text: Binding<String>, focusRequested: Binding<Bool> = .constant(false)) {
+        _text = text; _focusRequested = focusRequested
+    }
+    func makeCoordinator() -> Coordinator { Coordinator(text: $text, focusRequested: $focusRequested) }
     func makeNSView(context: Context) -> NSSearchField {
-        let field = NSSearchField()
+        let field = SearchField()
         field.placeholderString = "Search Pass"
         field.setAccessibilityLabel("Search Pass")
         field.delegate = context.coordinator
         context.coordinator.field = field
         context.coordinator.observe()
+        field.didAttach = { [weak coordinator = context.coordinator] in coordinator?.focusIfRequested() }
         return field
     }
     func updateNSView(_ field: NSSearchField, context: Context) {
         context.coordinator.text = $text
+        context.coordinator.focusRequested = $focusRequested
         if field.stringValue != text { field.stringValue = text }
+        context.coordinator.focusIfRequested()
     }
     static func dismantleNSView(_ view: NSSearchField, coordinator: Coordinator) { coordinator.stopObserving() }
+    final class SearchField: NSSearchField {
+        var didAttach: (() -> Void)?
+        override func viewDidMoveToWindow() { super.viewDidMoveToWindow(); didAttach?() }
+    }
     @MainActor final class Coordinator: NSObject, NSSearchFieldDelegate {
         var text: Binding<String>
+        var focusRequested: Binding<Bool>
         weak var field: NSSearchField?
         var observer: NSObjectProtocol?
-        init(text: Binding<String>) { self.text = text }
+        init(text: Binding<String>, focusRequested: Binding<Bool>) { self.text = text; self.focusRequested = focusRequested }
+        func focusIfRequested() {
+            guard focusRequested.wrappedValue, let field, let window = field.window else { return }
+            // A global request may arrive before the lazy workspace/toolbar is
+            // attached. Consume it only when the native field can take focus.
+            if window.makeFirstResponder(field) {
+                DispatchQueue.main.async { [weak self] in self?.focusRequested.wrappedValue = false }
+            }
+        }
         func observe() {
             observer = NotificationCenter.default.addObserver(forName: .protonXFocusSearch, object: nil, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated {

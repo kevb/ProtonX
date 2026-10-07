@@ -124,8 +124,9 @@ include passwords, tokens, real message bodies or vault exports in public issues
   Unknown delivery never triggers another app-level send; the underlying core's
   queue can continue on restore. Lock/close does not cancel remote delivery.
   New text is limited to 32 KiB, recipients to 100 distinct addresses and subjects
-  to 998 bytes without control characters. Editor text is not persisted in
-  preferences. Save explicitly before lock; unsaved UI text is discarded.
+  to 998 bytes without control characters. Editor text belongs to a Mail-session
+  model and stays in memory across product switches; it is never persisted in preferences. Save explicitly before lock;
+  lock, sign-out, draft close and suite-window close release unsaved editor state.
 - Native Mail preserves HTML structure using Proton's pinned whitelist/CSS
   sanitizer in the helper, with depth/node/output bounds and a text fallback.
   The selected sanitized body is displayed in an ephemeral local WKWebView, with
@@ -214,3 +215,18 @@ identities/signatures, refuses running installed binaries, swaps directories
 atomically and retains previous bundles. It does not change Keychain ACLs, session
 keys or account profiles; stable local signing does not guarantee prompt-free
 Keychain access or notarization.
+
+## Suite workspace navigation
+
+One native window hosts lazy Pass and Mail workspaces. A product switch keeps
+selection, search, scroll and unsaved Mail editor state in the existing product
+objects; it does not unlock, restore or merge sessions. Shared defaults contain
+only startup/last-product navigation preferences. Home does not start product
+helpers, and the preview ignores real startup preferences. The product rail
+excludes hidden content from input/accessibility and uses selected-product
+capabilities for commands. Mail authentication-field values clear on switching
+away. Suite-window close, screen/inactivity lock and Quit lock both products,
+including hidden ones; late helper replies remain subject to existing epochs.
+Public product links still accept only the two closed routes defined above and
+select the product before activating the same suite window. No account data is
+accepted in routes, and no global account/session cache is introduced.

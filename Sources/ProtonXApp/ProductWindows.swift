@@ -18,6 +18,7 @@ import ProtonXCore
     }
     private var windows: [ProductRoute: Reference] = [:]
     private var opener: ((ProductRoute) -> Void)?
+    private var selector: ((ProductRoute) -> Void)?
     private var launchFinished = false
     private var generation = 0
     private(set) var pending: ProductRoute?
@@ -35,6 +36,10 @@ import ProtonXCore
         launchFinished = true
         openPending()
     }
+    func installSelector(_ selector: @escaping (ProductRoute) -> Void) {
+        self.selector = selector
+        openPending()
+    }
     func open(_ product: ProductRoute) {
         generation += 1
         pending = product
@@ -44,6 +49,10 @@ import ProtonXCore
         // The last valid product is the user's latest intent. No account or
         // session data is accepted in these links.
         if let product = urls.compactMap({ ProductRoute(url: $0) }).last { open(product) }
+    }
+    func showSuite() {
+        if let target = windows[.pass]?.target, target.isAvailable { target.bringForward() }
+        else { opener?(.pass) }
     }
     func register(_ target: any ProductWindowTarget, for product: ProductRoute) {
         windows[product] = Reference(target)
@@ -62,8 +71,32 @@ import ProtonXCore
         enqueue { [weak self] in
             guard let self, self.generation == ticket, self.pending == product,
                   let window = self.windows[product]?.target, window.isAvailable else { return }
+            self.selector?(product)
             window.bringForward()
             self.pending = nil
+        }
+    }
+}
+
+/// Both product launch links address the same suite window. Selection is owned
+/// by the workspace, not whichever product happened to be visible at launch.
+struct SuiteWindowRegistration: NSViewRepresentable {
+    let onClose: @MainActor () -> Void
+    func makeNSView(context: Context) -> RegistrationView { RegistrationView(onClose: onClose) }
+    func updateNSView(_ view: RegistrationView, context: Context) { view.registerWindow() }
+    final class RegistrationView: NSView {
+        private var target: NativeProductWindow?
+        let onClose: @MainActor () -> Void
+        init(onClose: @escaping @MainActor () -> Void) { self.onClose = onClose; super.init(frame: .zero) }
+        required init?(coder: NSCoder) { fatalError("init(coder:) is unavailable") }
+        override func viewDidMoveToWindow() { super.viewDidMoveToWindow(); registerWindow() }
+        func registerWindow() {
+            guard let window else { target = nil; return }
+            if target?.window === window && target?.isAvailable == true { return }
+            let target = NativeProductWindow(window, onClose: onClose)
+            self.target = target
+            ProductWindows.shared.register(target, for: .pass)
+            ProductWindows.shared.register(target, for: .mail)
         }
     }
 }
@@ -74,10 +107,10 @@ import ProtonXCore
     // Only read in deinit outside MainActor; notification removal is thread safe.
     nonisolated(unsafe) private var closeObserver: NSObjectProtocol?
     var isAvailable: Bool { window != nil && !closed }
-    init(_ window: NSWindow) {
+    init(_ window: NSWindow, onClose: (@MainActor () -> Void)? = nil) {
         self.window = window
         closeObserver = NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.closed = true }
+            MainActor.assumeIsolated { self?.closed = true; onClose?() }
         }
     }
     deinit { if let closeObserver { NotificationCenter.default.removeObserver(closeObserver) } }
@@ -87,37 +120,4 @@ import ProtonXCore
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
     }
-}
-
-private struct ProductWindowRegistration: NSViewRepresentable {
-    let product: ProductRoute
-    func makeNSView(context: Context) -> RegistrationView { RegistrationView(product: product) }
-    func updateNSView(_ nsView: RegistrationView, context: Context) { nsView.registerWindow() }
-    final class RegistrationView: NSView {
-        let product: ProductRoute
-        private var target: NativeProductWindow?
-        init(product: ProductRoute) { self.product = product; super.init(frame: .zero) }
-        required init?(coder: NSCoder) { fatalError("init(coder:) is unavailable") }
-        override func viewDidMoveToWindow() { super.viewDidMoveToWindow(); registerWindow() }
-        func registerWindow() {
-            guard let window else { target = nil; return }
-            if target?.window === window && target?.isAvailable == true { return }
-            let target = NativeProductWindow(window)
-            self.target = target
-            ProductWindows.shared.register(target, for: product)
-        }
-    }
-}
-
-private struct ProductWindowNavigation: ViewModifier {
-    let product: ProductRoute
-    @Environment(\.openWindow) private var openWindow
-    func body(content: Content) -> some View {
-        content.background(ProductWindowRegistration(product: product).frame(width: 0, height: 0))
-            .onAppear { ProductWindows.shared.installOpener { openWindow(id: $0.rawValue) } }
-    }
-}
-
-extension View {
-    func productWindow(_ product: ProductRoute) -> some View { modifier(ProductWindowNavigation(product: product)) }
 }

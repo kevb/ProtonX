@@ -23,12 +23,13 @@ end-to-end workflow come before additional products.
    undo and SDK conversation reading are implemented with synthetic/public upstream
    tests. Accept cross-client conversation behavior and add attachment viewing/sending.
    Preserve drafts and distinguish confirmed delivery from uncertain send outcomes.
-4. **Accept installed suite navigation.** A visible product switcher, window-aware
-   keyboard commands, verified atomic app installation and **ProtonX Mail** /
-   **ProtonX Pass** Spotlight launchers are implemented. Synthetic UI checks cover
-   cold/warm routing and minimized/closed windows. Complete minimum-OS/runtime
-   checks and update Keychain continuity. Keep independent
-   product windows/sessions and the optional single shared menu-bar item.
+4. **Accept the shared suite workspace.** One ProtonX window now provides Home,
+   a labelled product rail, lazy Pass/Mail workspaces and a nonmodal Mail composer.
+   Product switches preserve selection/search and unsaved draft contents. Native
+   **ProtonX Mail** / **ProtonX Pass** Spotlight launchers select that product in
+   the suite. Validate installed cold/warm routing, focus, minimum-OS/runtime and
+   Keychain continuity. Keep product sessions separate and one optional menu-bar
+   item; detachable windows remain later work.
 
 Safari website AutoFill remains covered by the standalone official extension.
 A ProtonX credential provider for system/native-app integration is optional later
@@ -98,16 +99,20 @@ remain separate gates.
 - Measure total memory/CPU (including Bridge and transient helpers) before publishing
   any reduction percentages.
 - Native Spotlight launchers named **ProtonX Mail** and **ProtonX Pass**
-  open the corresponding window in the shared app, alongside a visible
-  product switcher and an opt-in verified Applications installer. Validate the
+  select the corresponding workspace in the shared app, alongside a labelled
+  product rail and an opt-in verified Applications installer. Validate the
   installed routing and stable signing/Keychain behavior; see
   [the installation guide](DAILY_USE_UPDATE.md).
 
-## Suite workspace proposal
+## Suite workspace
 
-Status: design proposal, not implemented. The current build retains independent
-Pass and Mail windows. Evaluate a primary ProtonX workspace before changing that
-default; keep the existing product sessions and helper boundaries separate.
+The initial implementation has one window with Home and a labelled Pass/Mail rail.
+Product stores are created on first use and retained across switches. Startup
+preferences select Home, the last product, Pass or Mail; explicit launcher routes
+override them. Unsaved Mail content belongs to its Mail editor model and the
+composer is nonmodal. Lock/close clears both product workspaces and unsaved drafts.
+The following describes the broader direction and remaining acceptance, not a
+claim that detached windows, Calendar or contextual inspectors are implemented.
 
 - Provide a narrow product icon rail for Pass, Mail and, when implemented,
   Calendar/Drive. Give icons accessible names, tooltips, a clear selected state
@@ -173,42 +178,72 @@ visible feature in the official client is not evidence of its availability on
 every plan. Screenshots used for design review must not be copied into public
 assets; public captures and fixtures use synthetic content.
 
-### Mail
+### Mail parity inventory
 
-- Rich-text composition: font/size, emphasis, lists, alignment, links, quotations,
-  inline images and clear formatting; retain a plain-text option and light paper
-  in dark appearance. Add attachment viewing/sending and forward separately.
-- Nonmodal/minimizable/pop-out composers, multiple drafts, automatic saving and
-  a reliable saved/pending/failed indicator; preserve editing across navigation.
-- Contact picking/autocomplete, optional Cc/Bcc expansion, scheduling, Undo Send,
-  password-protected external mail and expiry controls. From selection and Cc/Bcc
-  already exist; do not count them as missing.
-- Row versus split reading layouts, density and composer-size preferences;
-  category enable/manage controls and mailing-list/newsletter views; folder/label
-  creation and management, starring, bulk actions and full search/filter controls.
-- Broader keyboard actions with a discoverable shortcut reference; current
-  new/search/refresh/product and selected-message shortcuts remain supported.
-- Quick settings with a route to full settings, explicit theme override while
-  retaining system sync, default-mail-app registration, product-scoped local-data
-  reset/recovery and a redacted diagnostic export. A reset must explain its scope
-  and protect unsaved drafts and uncertain sends.
-- Contacts and Calendar contextual access; account/security tools can initially
-  link to the official account site. Optional writing assistance is a later
-  feasibility/privacy decision, including local versus server processing, not a
-  reason to embed the web client or substitute a different provider silently.
+| Area | Missing capability or current limitation |
+| --- | --- |
+| Authentication/recovery | Human verification, FIDO-only/security-key login, password-change and wider account recovery/challenge flows. Existing native password/TOTP/second-password login and saved-session unlock must remain intact. |
+| Attachments | List, download/open/preview and export attachments; upload/remove/drag-drop in drafts; embedded CID and inline images. Counts and SDK retention are not attachment management. |
+| Composition | Forward; rich text (font/size/colour, emphasis, lists, alignment, links, quotations, inline images, clear formatting); plain-text option. Multiple/minimizable/pop-out drafts and automatic saving remain; initial nonmodal composing and tab-switch draft retention are implemented. |
+| Sending controls | Undo Send, scheduled send with edit/cancel, read-receipt request/response, password-protected external messages and expiry. Preserve existing queued/confirmed/failed/unknown status handling. |
+| Contacts | Contact book, picker/autocomplete, create/edit/delete, groups and group addressing, CSV/vCard import/export. To/Cc/Bcc and From selection already exist. |
+| Search | Full-mailbox metadata/body search, recipient/date/attachment and other advanced filters. Current search covers only loaded subjects/senders, within the bounded message window. |
+| Organisation | Star/unstar, snooze, arbitrary folder moves, label application, folder/label creation/edit/deletion/colours/subfolders. Existing custom folders can be browsed. |
+| Bulk/conversation actions | Multi-selection, whole-thread actions, permanent deletion and empty Trash. Existing read/unread and Archive/Trash/Inbox actions and move undo target one message. Permanent deletion requires an explicit helper/policy review. |
+| Spam and automation | Spam/phishing reporting, block/allow lists, simple filters/Sieve, automatic forwarding and out-of-office replies. |
+| Inbox views | Category enable/manage controls and Primary/Social/Promotions/etc. views; mailing-list/newsletter management and unsubscribe controls. Availability can depend on rollout. |
+| Reader privacy/images | Proton image proxy and tracker/pixel protection, tracking-link cleanup, persistent remote/embedded-image preferences and sender logos. Current raster-image opt-in fetches directly without Proton's proxy. |
+| Message inspection | Full headers/original source, encryption/security indicators/details, external PGP key/trust/address-verification controls. Existing Proton encryption is not a missing feature. |
+| Print/export/import | Print/PDF, individual EML export and native mailbox import/migration workflows. |
+| Background/macOS | New-mail notifications, unread Dock badge, reliable background refresh, opt-in launch at login and default-mail-app/mailto registration. |
+| Settings | Row/split layouts, density/composer size, explicit theme override, shortcut reference and broader keyboard actions; defaults/signatures/display names per sending identity; address/domain/linked-account setup or appropriate official settings links. Enabled Proton/custom-domain/Gmail identities already work. |
+| Support/recovery | Product-scoped local-data reset with draft/uncertain-send safeguards, redacted diagnostic export, full settings/account/support entry points and storage/plan presentation. |
+| Calendar/contextual tools | Calendar product and Mail invitation/RSVP integration; Calendar/Contacts inspectors; appropriate account/security links. See the staged Calendar plan above. |
+| Optional writing assistance | Scribe-style drafting/proofreading/expand/shorten. Investigate availability, native integration and explicit local/server processing choices before selecting an implementation; do not silently substitute another provider. |
 
-### Pass
+### Pass parity inventory
 
-- Generated-password history, separate from item revision history, with a bounded
-  retention period, explicit clearing and reviewed encrypted storage. The
-  desktop reference exposes two-week generated-password retention.
-- Item duplication, pinning and version history, plus desktop Auto-Type; add
-  per-item monitoring exclusions with Pass Monitor rather than a nonfunctional toggle.
-- Access-token management through the appropriate pinned Proton protocol and
-  product policy; tokens must never enter logs or command arguments/environment.
-- Plan/storage presentation and convenient account/support/mobile-app links.
-  Manual refresh, lock and sign-out already exist; broader settings, import/export,
-  alias management and monitoring remain gaps.
+| Area | Missing capability or current limitation |
+| --- | --- |
+| Authentication/recovery | Broader native challenge/recovery and security-key flows; first-vault setup and expiry/revocation interoperability. Experimental native login and handoff exist; preserve CLI eligibility and desktop protocol policy. |
+| Item editors | Create/edit cards, identities, Wi-Fi credentials, SSH keys and other supported custom item kinds. Login/note editing already exists; other kinds have limited viewing. |
+| Custom fields | Editors for additional field types, including custom TOTP; current text/hidden editors preserve unsupported fields. |
+| TOTP | Live code/countdown, QR import/scanning and raw-secret convenience. Primary TOTP setup/replacement/removal and code copy exist; preserve entitlement checks. |
+| Generator | Length/character controls, memorable passphrases, standalone generator and strength feedback. The existing Generate action uses one default configuration. |
+| Generated-password history | Separate from item versions: bounded two-week history in the desktop reference, explicit clearing and reviewed encrypted storage. |
+| Search/sorting | Username/email, URL and note search; relevance, oldest-first and recently-used sorting. Current search is title-only with name/recently-changed ordering. |
+| Vault management | Create/rename/delete, icon/colour, hiding/reordering, ownership controls and moving items between vaults. Permissions are respected but not administered. |
+| Item organisation | Folders, pinning, duplication, bulk selection/move/Trash/restore, permanent deletion and empty Trash; review deletion policy before expanding the helper. Newer organisation features may be rollout-dependent. |
+| Item history/recovery | View/compare previous revisions and restore an earlier version. Trash/restore already exists. |
+| Attachments | Upload/download/open/preview/remove; encrypted file handling, quota and temporary-file lifecycle. Current UI exposes counts only. |
+| Sharing | Invitations, member/role/access management, ownership transfer and secure item links with expiry/revocation. Shared-vault operation guards already exist. |
+| Aliases | Create/manage/disable, forwarding mailboxes, custom domains, alias contacts and associated SimpleLogin controls. Existing aliases can be displayed. |
+| Monitor | Weak/reused/breached passwords, missing 2FA, dark-web alerts and per-item monitoring exclusions. |
+| Import/export | Native import, plain/encrypted exports and migration workflows with explicit disclosure controls. |
+| Desktop integrations | Auto-Type and SSH-agent UI; quick access currently opens the ordinary Pass workspace. System/native-app credential provider remains optional, not installed. |
+| Passkeys | Detailed view/management and native credential-provider operations. Current counts/preservation do not provide operations; browser use remains covered by the separate official extension. |
+| Lock/preferences | PIN configuration, enable/change/reset extra password, configurable clipboard expiry and broader preferences/favicon/localisation/theme controls. Existing extra-password challenges and macOS local unlock are supported. |
+| Access tokens | Management through the appropriate pinned Proton protocol and product policy; never put tokens in logs, argv or environment. Desktop helper policy currently excludes CLI automation/PAT commands. |
+| Offline/background | Broader policy-aware offline functionality and continuous refresh; current saved vault is read-only, personal-paid-policy limited, maximum 24 hours, excluding attachments and offline TOTP generation. No blind write replay. |
+| Account/support | Plan/storage display, account/support/mobile-app links and appropriate organisation/SSO/admin settings access. A dedicated account switcher requires explicitly isolated product profiles; server restrictions must remain authoritative. |
+
+### Shared release and account tools
+
+- Developer ID signing/notarized downloads, authenticated automatic updates and
+  source-compliant releases; minimum-OS/accessibility and measured resource usage.
+- Full localisation, consistent themes and opt-in launch-at-login preferences.
+- Account recovery/emergency access, wider security settings and business
+  administration can initially use official account-site links; distinguish these
+  web account tools from native product functionality.
+- Safari browser autofill/autosave and browser passkeys remain with the independent
+  official extension; duplicating it is not a suite release gate.
+- Existing threading, sending/reply, Trash restoration and session recovery are
+  implementations with separate validation gates, not wholesale missing features.
+
+Reference baselines: Proton's [Mail desktop guide](https://proton.me/support/mail-desktop-app),
+[Pass desktop guide](https://proton.me/support/how-to-use-proton-pass-desktop-app),
+[side-panel guide](https://proton.me/support/side-panel) and pinned upstream source
+in `upstream.lock.json`. Product settings and capabilities remain plan-dependent.
 
 ## Local storage and faster opening
 

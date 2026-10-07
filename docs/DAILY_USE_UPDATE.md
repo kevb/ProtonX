@@ -15,12 +15,22 @@ SDK-offered destinations, and excludes permanent deletion/bulk actions. The UI
 keeps the selected body on failure and clears actions/undo on lock. Narrow reader
 columns put organisation and reply controls on separate rows.
 
-Both windows have a visible **ProtonX** product switcher. Opening a product brings
-its existing window forward; it keeps its own session. **⌘1** opens Pass and **⌘2**
-opens Mail. New (**⌘N**), Search (**⌘F**) and Refresh (**⌘R**) follow the front window.
+One **ProtonX** window has a labelled product rail and a Home screen. **⌘0** opens
+Home, **⌘1** selects Pass and **⌘2** selects Mail. Switching products retains
+selection, searches, scroll positions and unsaved Mail text. The Mail composer is
+nonmodal, so it stays intact while using Pass. Product stores are created on first
+use; merely visiting Home does not start a helper or unlock a session.
+
+New (**⌘N**), Search (**⌘F**) and Refresh (**⌘R**) follow the selected product.
 Mail also uses **⇧⌘U** for read/unread, **⌘E** for archive and **⌘Delete** for Trash.
-The default text-field Undo remains available; moving mail has an explicit Undo
-button. The suite still owns one optional menu-bar item and one Dock/⌘Tab identity.
+Settings select startup behaviour: Home, last product, Pass or Mail. Explicit
+Spotlight product launchers override that preference and select the requested
+product before activating the suite. There is one optional menu-bar item and one
+Dock/⌘Tab identity. Separate/detachable product windows are later work.
+
+Closing the suite window locks both products and discards unsaved Mail text;
+**Save & Close** before closing or locking. Switching a rail tab alone does not
+lock or send. Screen/inactivity lock and Quit also clear hidden workspace content.
 
 ## Build and install on a development Mac
 
@@ -35,9 +45,9 @@ them. It must not be used to package old helper commands with new UI source.
 
 This installs **ProtonX.app**, **ProtonX Mail.app** and **ProtonX Pass.app** in
 `/Applications` and registers them with Launch Services. Spotlight indexing may
-take time. The two launchers only select the right window in the shared app. They
+take time. The two launchers only select the requested workspace in the shared window. They
 exit after handing over and add no persistent process, account state or menu-bar
-icon. Existing product windows remain open. Quit any running development copy
+icon. Existing product workspace state remains available. Quit any running development copy
 before launching the installed app; the launcher explains this if necessary.
 
 For a user-owned install directory, call the installer directly with
@@ -77,3 +87,22 @@ network-failure and reconnect coverage. The remaining real disconnected
 restart/Keychain-update acceptance is in [OFFLINE_DESIGN.md](OFFLINE_DESIGN.md).
 Automation must use fixtures rather than disconnecting a development Mac or reading real
 vault entries.
+
+## Navigation acceptance
+
+Use synthetic preview content for repeatable automated/UI checks. In the installed
+app, check navigation without making server mutations:
+
+1. Open ProtonX. First launch shows Home; choose Pass or Mail from a card or rail.
+2. Select an item/message, enter a search, switch products and return; the workspace
+   should keep its place without another sign-in or loading reset.
+3. Start a Mail draft, enter fictional text, switch to Pass/Home and return.
+   Confirm the unsaved text remains; save or discard explicitly.
+4. Try ⌘0/⌘1/⌘2 and verify ⌘N/⌘F/⌘R target the visible product only.
+5. Launch ProtonX Mail/Pass from Spotlight while the suite is open or minimised.
+   Each should select its product in the same window. Also test after Quit.
+6. Save drafts, lock/close the suite, then reopen; both products must require
+   their own local unlock and hidden secrets/unsaved text must not reappear.
+
+Calendar, detachable windows, multiple/minimised composers and autosave are not
+part of this navigation build. The existing storage/release gates still apply.

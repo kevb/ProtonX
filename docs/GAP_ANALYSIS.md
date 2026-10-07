@@ -3,7 +3,7 @@
 Review date: 2026-10-07. This compares ProtonX's implemented behavior with pinned
 official source and the linked product documentation. Implementation, automated
 synthetic coverage and manual account acceptance are separate evidence categories.
-The [roadmap](ROADMAP.md) tracks priorities; [validation](VALIDATION.md) records
+The [roadmap](ROADMAP.md) tracks priorities and the complete Mail/Pass parity inventory; [validation](VALIDATION.md) records
 technical results. Use synthetic content in public tests and screenshots.
 
 ## Current progress
@@ -28,9 +28,10 @@ technical results. Use synthetic content in public tests and screenshots.
   selected-message actions. Manual acceptance covers sign-in and reading; live
   send/reply delivery and account recovery remain pending. Secure Mail storage and
   migration are release blockers in ordinary builds.
-- Separate windows, a visible product switcher, front-window keyboard commands
-  and native Spotlight launchers share one optional menu-bar item. Synthetic UI
-  checks cover cold/warm routing and restoring minimized or closed windows.
+- One suite window with Home and a labelled Pass/Mail rail retains lazy product
+  stores, selection/search and unsaved nonmodal Mail drafts. Native Spotlight
+  launchers select a product in that window; sessions remain separate, with one
+  optional menu-bar item. Detached windows are later work.
 - Safari website filling remains with the official standalone extension. The
   compile-only ProtonX credential-provider probe has no credential disclosure or
   installed extension. Native-app/system integration is optional future work.
@@ -85,7 +86,7 @@ unconditional feature on every account.
 | Area | Assessment and next step |
 | --- | --- |
 | Menu bar | One optional ProtonX item is implemented. Direct Mail needs no external Bridge; the optional compatibility path can retain Bridge’s own item. Do not claim one icon for all Proton processes or change official-app settings automatically. Validate no-icon operation, narrow/notched displays and quick access. |
-| Product structure | Keep separate Pass/Mail windows and sessions, with shared window commands and OS integration. This preserves each task's shape without multiplying tray items. Consider separate signed processes/sandboxes when extensions or privilege boundaries justify them. |
+| Product structure | One shared window retains independent Pass/Mail stores and sessions. Home and a product rail are implemented; detached windows and Calendar are planned. Consider separate signed processes/sandboxes when privilege boundaries justify them. |
 | Keychain and unlock | Keychain is already used, but local UI unlock is not a security audit or proof of authenticated-session recovery. Test genuine restart/unlock, screen lock, sleep, user switching and owned-clipboard clearing. Official macOS Pass already offers biometrics; Touch ID alone is not a differentiator. |
 | Navigation | Complete keyboard-only search, selection, editing, Trash/restore and VoiceOver checks. Ensure native menus expose the same enabled actions as buttons. Clear stale details when filters/selection change. |
 | Background behaviour | No automatic refresh/login item yet. Closing a window keeps the suite alive. Add opt-in launch at login only after recovery is reliable; a closed window must not trigger needless polling or leave an interactive helper running. |

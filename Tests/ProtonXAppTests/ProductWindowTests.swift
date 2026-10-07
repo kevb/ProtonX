@@ -121,3 +121,26 @@ import ProtonXCore
         #expect(router.pending == .pass)
     }
 }
+
+@Suite @MainActor struct SuiteRoutingTests {
+    @Test func sharedWindowSelectsLatestProductAndWarmRoutesNeverCreateAnotherWindow() {
+        let queue = DeferredProductActions()
+        let router = ProductWindows(enqueue: { queue.actions.append($0) })
+        let window = SyntheticProductWindow()
+        var selected: [ProductRoute] = [], opened: [ProductRoute] = []
+        router.installSelector { product in
+            // Selection must happen before the shared window is activated.
+            #expect(window.focusCount == selected.count)
+            selected.append(product)
+        }
+        router.installOpener { opened.append($0) }
+        router.didFinishLaunching()
+        router.register(window, for: .pass); router.register(window, for: .mail)
+        router.open(.pass); router.open(.mail); queue.drain()
+        #expect(selected == [.mail] && window.focusCount == 1 && opened.isEmpty)
+        router.open(.pass); queue.drain()
+        #expect(selected == [.mail, .pass] && window.focusCount == 2 && opened.isEmpty)
+        router.showSuite()
+        #expect(selected == [.mail, .pass] && window.focusCount == 3)
+    }
+}

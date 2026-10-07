@@ -2,7 +2,8 @@ import SwiftUI
 import ProtonXCore
 
 struct MailWindow: View {
-    @StateObject private var store: NativeMailStore
+    @ObservedObject private var store: NativeMailStore
+    var isActive: Bool
     @State private var username = ""
     @State private var password = ""
     @State private var code = ""
@@ -10,19 +11,26 @@ struct MailWindow: View {
     @State private var confirmSignOut = false
     @State private var readerExpanded = false
     @FocusState private var focus: String?
-    init(previewOnly: Bool = false) { _store = StateObject(wrappedValue: NativeMailStore(previewOnly: previewOnly)) }
+    init(store: NativeMailStore, isActive: Bool = true) { self.store = store; self.isActive = isActive }
     var body: some View {
         Group {
-            if store.phase == .open { workspace }
+            if store.phase == .open {
+                ZStack {
+                    workspace.opacity(store.draft == nil ? 1 : 0).allowsHitTesting(store.draft == nil)
+                        .disabled(store.draft != nil).accessibilityElement(children: store.draft == nil ? .contain : .ignore)
+                        .accessibilityHidden(store.draft != nil)
+                    if let draft = store.draft, let editor = store.editorState {
+                        MailComposer(store: store, draft: draft, editor: editor)
+                            .id(draft.token).frame(maxWidth: .infinity, maxHeight: .infinity).background(MailTheme.canvas)
+                    }
+                }
+            }
             else { authentication }
         }
         .background(MailTheme.collection)
         .preferredColorScheme(designAppearance)
-        .focusedSceneValue(\.protonXProduct, .mail)
-        .focusedSceneValue(\.protonXCanCreate, store.phase == .open && !store.busy && store.draft == nil)
-        .focusedSceneValue(\.protonXCanRefresh, store.phase == .open && !store.busy && !store.demo)
+        .disabled(!isActive)
         .frame(minWidth: 860, minHeight: 580)
-        .toolbar { ToolbarItem(placement: .navigation) { SuiteProductSwitcher(current: "mail") } }
         .safeAreaInset(edge: .bottom) {
             if let error = store.error {
                 HStack(alignment: .top, spacing: 12) {
@@ -43,20 +51,19 @@ struct MailWindow: View {
                 }.padding(12).background(MailTheme.accent.opacity(0.12))
             }
         }
-        .sheet(isPresented: Binding(get: { store.draft != nil }, set: { _ in })) {
-            if let draft = store.draft { MailComposer(store: store, draft: draft) }
-        }
         .sheet(isPresented: $bridge) { BridgeMailWindow().frame(width: 1050, height: 740) }
         .confirmationDialog("Sign out of ProtonX Mail?", isPresented: $confirmSignOut) {
             Button("Sign Out", role: .destructive) { clearCredentials(); store.signOut() }
         } message: { Text("End this app’s Mail session and remove its local account data. Your messages remain with Proton.") }
-        .onReceive(NotificationCenter.default.publisher(for: .protonXNewMessage)) { _ in store.compose() }
-        .onReceive(NotificationCenter.default.publisher(for: .protonXRefreshMail)) { _ in store.refresh() }
-        .onReceive(NotificationCenter.default.publisher(for: .protonXFocusMailSearch)) { _ in focus = "search" }
-        .onReceive(NotificationCenter.default.publisher(for: .protonXLock)) { _ in clearCredentials(); store.lock(); bridge = false }
-        .productWindow(.mail)
+        .onReceive(NotificationCenter.default.publisher(for: .protonXNewMessage)) { _ in if isActive { store.compose() } }
+        .onReceive(NotificationCenter.default.publisher(for: .protonXRefreshMail)) { _ in if isActive { store.refresh() } }
+        .onReceive(NotificationCenter.default.publisher(for: .protonXFocusMailSearch)) { _ in if isActive { focus = "search" } }
+        .onReceive(NotificationCenter.default.publisher(for: .protonXLock)) { _ in clearCredentials(); bridge = false }
         .onAppear { focus = "username" }
-        .onDisappear { clearCredentials(); store.lock() }
+        .onDisappear { clearCredentials() }
+        .onChange(of: isActive) { _, active in
+            if !active { clearCredentials(); focus = nil }
+        }
         .onChange(of: store.phase) { _, phase in
             if phase != .welcome { password = "" }
             if phase != .open { readerExpanded = false }
@@ -134,18 +141,7 @@ struct MailWindow: View {
         }
         .onChange(of: store.selectedItem) { _, selected in if selected == nil { readerExpanded = false } }
         .onChange(of: store.conversationView) { _, _ in store.reconcileSelection(); store.select() }
-        .navigationTitle("ProtonX Mail")
-        .toolbar {
-            ToolbarItem { if store.busy { ProgressView().controlSize(.small) } }
-            ToolbarItem {
-                Picker("Mail view", selection: $store.conversationView) {
-                    Text("Conversations").tag(true)
-                    Text("Messages").tag(false)
-                }.pickerStyle(.menu).accessibilityIdentifier("mailConversationView")
-            }
-            ToolbarItem { Button { store.compose() } label: { Label("New message", systemImage: "square.and.pencil") }.disabled(store.busy || store.draft != nil) }
-            ToolbarItem { Button { store.refresh() } label: { Label("Refresh Mail", systemImage: "arrow.clockwise") }.disabled(store.busy || store.demo) }
-        }
+
     }
     private var mailboxLayout: some View {
         NavigationSplitView {

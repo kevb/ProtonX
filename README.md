@@ -16,8 +16,8 @@ interface or contribute. Signed, notarized binary releases are not yet available
 | Mail | Native username/password, TOTP and second-password sign-in; independent Keychain-backed session; folders and paged inbox; SDK conversation grouping with expandable message cards; formatted HTML reading on light paper; per-message image loading; read/unread, Archive/Trash/Inbox and move undo; compose, reply and reply-all; sending identity selection and draft saving | Live send/reply delivery and account recovery are acceptance gates. No human verification/FIDO-only login, file upload/viewing, rich-text editing or push UI. Search covers loaded subjects and senders, capped at 1,000 messages. |
 | Drive | Planned | No Drive client implemented. |
 
-Pass and Mail share window navigation and macOS integration, while keeping their
-sessions and data separate. Keyboard commands follow the active product window.
+Pass and Mail share one native workspace with Home and a product rail, while keeping their
+sessions and data separate. Keyboard commands follow the selected product.
 Optional quick access, Touch ID/Mac-password unlock, screen-lock handling and
 expiring password copies support everyday Mac workflows.
 
@@ -76,9 +76,9 @@ or global shortcut. Quit the installed app before updating or opening another
 account-capable build. The installer verifies signatures, refuses running
 binaries and retains previous builds.
 
-**ProtonX Mail** and **ProtonX Pass** are native Spotlight launchers. Each opens
-and focuses its product window in the shared ProtonX app, including minimized or
-closed windows. See the [installation guide](docs/DAILY_USE_UPDATE.md).
+**ProtonX Mail** and **ProtonX Pass** are native Spotlight launchers. Each selects
+and focuses its product workspace in the shared ProtonX window, including when
+that window is minimized or closed. See the [installation guide](docs/DAILY_USE_UPDATE.md).
 
 ## Sign in
 
@@ -137,13 +137,13 @@ public certificate, subject to Bridge's product limits.
 
 ## Keyboard and menu bar
 
-- ⌘1 / ⌘2: open Pass / Mail.
+- ⌘0 / ⌘1 / ⌘2: Home / Pass / Mail.
 - ⌘N / ⌘F / ⌘R: create, search and refresh in the front product window.
 - In Mail: ⇧⌘U read/unread, ⌘E archive, ⌘Delete Trash, ⌘Return review before sending.
 - ⌘L: lock both products. ⌘,: settings. ⌘Q: quit.
 - Optional ⌃⌥P: bring Pass forward and focus search.
 - Settings can hide the menu-bar icon. The Dock and Window menu remain available.
-  Closing windows keeps the suite running; Quit ends it.
+  Closing the suite window locks both products and keeps ProtonX running; Quit ends it.
 
 ## Contribute
 

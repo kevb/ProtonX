@@ -15,10 +15,38 @@ are excluded from public artifacts.
 | Mail secure storage | Opt-in database/file encryption and resumable database/attachment staging contracts | Cache path rebasing/activation, whole-profile cutover and pending-send/draft recovery before enabling ordinary builds |
 | Product launchers | Synthetic native UI checks for cold/warm requests, minimized/closed windows and reverse product selection; signed installer checks | Minimum-OS runtime and update/Keychain continuity |
 
-The latest local Swift run passed 129 tests (65 core, 64 app); five synthetic
-atomic-install tests passed. These are local results, not a statement about the
+The latest local Swift run passed 138 tests; five synthetic atomic-install tests
+passed at the prior installer milestone. These are local results, not a statement about the
 latest GitHub run. Dated entries below record milestone-specific test scope and
 historical limitations. The README and roadmap describe the current feature set.
+
+## Suite workspace, 2026-10-07
+
+- One native scene provides Home and a labelled product rail. Product stores are
+  lazy and retain their identity, navigation and unsaved Mail editor model across
+  switches. Shared defaults contain only startup/last-product choices. Spotlight
+  routes select the product before focusing the same window.
+- All 137 Swift tests passed, including new lazy initialization, startup-route
+  precedence, preview preference isolation, search/selection/draft retention,
+  draft lifecycle, hidden-product locking, lazy quick-access focus and shared-window
+  routing contracts.
+- The pinned Pass desktop and native Mail identity/privacy/source checks passed.
+  No helper protocol, upstream crypto, storage format or signing ACL was changed.
+- Synthetic native preview checks exercised Home, rail and ⌘1/⌘2 switching,
+  unsaved recipient/subject/body retention through Pass and Home, refusal of hidden
+  Mail's Send shortcut from Pass, clearing both visible/hidden workspaces on suite
+  lock and draft removal on close/reopen. Hidden inbox controls are excluded
+  from accessibility while composing; the Conversations/Messages control remains. No real
+  mailbox/vault was read and no mail was delivered.
+- Normal and synthetic preview release bundles built and passed nested signature
+  verification. The atomic installer updated ProtonX and both Spotlight launchers;
+  installed bundle contents match their staged builds. Installed locked-session
+  UI checks verified Home, a cold Mail launch, warm Pass routing and restoring a
+  minimised suite through the Mail launcher. No product unlock/helper operation
+  was performed; the normal app was left on Home.
+- Full VoiceOver/minimum-OS checks, account-capable acceptance and Keychain update
+  continuity remain separate gates. Calendar, detached windows, multiple/minimised
+  composers and automatic draft saving are not implemented in this change.
 
 ## Mail conversations, 2026-10-07
 

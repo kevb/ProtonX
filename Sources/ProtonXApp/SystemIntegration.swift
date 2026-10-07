@@ -15,6 +15,8 @@ extension Notification.Name {
 @MainActor
 final class SystemIntegration: NSObject {
     static let shared = SystemIntegration()
+    var openHome: (() -> Void)?
+    var openPassForSearch: (() -> Void)?
     var openPass: (() -> Void)? = { ProductWindows.shared.open(.pass) }
     var openMail: (() -> Void)? = { ProductWindows.shared.open(.mail) }
     var openSettings: (() -> Void)?
@@ -62,6 +64,7 @@ final class SystemIntegration: NSObject {
         item.button?.image = NSImage(systemSymbolName: "shield.lefthalf.filled", accessibilityDescription: "ProtonX")
         item.button?.toolTip = "ProtonX · Pass and Mail"
         let menu = NSMenu()
+        menu.addItem(actionItem("Open ProtonX", #selector(showHome)))
         menu.addItem(actionItem("Open Pass", #selector(showPass)))
         menu.addItem(actionItem("Open Mail", #selector(showMail)))
         menu.addItem(.separator())
@@ -75,6 +78,7 @@ final class SystemIntegration: NSObject {
         let item = NSMenuItem(title: title, action: action, keyEquivalent: ""); item.target = self; return item
     }
     @objc private func showPass() { openPass?(); lastActivity = ProcessInfo.processInfo.systemUptime }
+    @objc private func showHome() { openHome?(); lastActivity = ProcessInfo.processInfo.systemUptime }
     @objc private func showMail() { openMail?(); lastActivity = ProcessInfo.processInfo.systemUptime }
     @objc private func showSettings() { openSettings?() }
     @objc private func lockNow() { lockSuite?() }
@@ -87,8 +91,7 @@ final class SystemIntegration: NSObject {
             var type = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
             InstallEventHandler(GetApplicationEventTarget(), { _, _, _ in
                 Task { @MainActor in
-                    SystemIntegration.shared.showPass()
-                    NotificationCenter.default.post(name: .protonXFocusSearch, object: nil)
+                    SystemIntegration.shared.openPassForSearch?()
                 }; return noErr
             }, 1, &type, nil, &hotKeyHandler)
         }
@@ -107,6 +110,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ProductWindows.shared.open(urls: urls)
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        MainActor.assumeIsolated { ProductWindows.shared.showSuite() }
+        return false
+    }
     func applicationWillTerminate(_ notification: Notification) {
         MainActor.assumeIsolated { SystemIntegration.shared.lockSuite?() }
     }
