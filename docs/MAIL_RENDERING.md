@@ -7,7 +7,9 @@ special case for Proton notifications or any sender/domain.
 
 The existing pinned `mail-html-transformer` performs whitelist and CSS sanitation,
 disables remote and embedded content, adds link referrer protection and retains
-style sheets in the returned body. The helper sends `sanitizedHTML` alongside its
+style sheets in the returned body. The helper restores validated HTTP(S) image
+addresses only as inert attributes, with credential-bearing and embedded URLs
+excluded. The helper sends `sanitizedHTML` alongside its
 text fallback over private IPC. Plain-text MIME is never interpreted as markup.
 Both representations are limited to 2 MiB; HTML is limited to depth 128 and 50,000
 nodes before recursive serialization. Unsupported MIME fails explicitly.
@@ -16,16 +18,35 @@ SwiftUI/AppKit continues to own navigation, account access and composition. Only
 the selected HTML body uses macOS WebKit; no web product UI is embedded. A fresh
 nonpersistent view loads an in-memory document, with no file base URL or account
 credentials. Content JavaScript is disabled, CSP denies resources except inline
-styles, and a compiled block-all content rule must succeed before any body loads.
+styles, and a compiled resource rule list must succeed before any body loads.
+The default policy blocks all resources; image opt-in admits only the dedicated
+native image scheme.
 Frames, forms, media, popups, downloads and automatic navigation are refused.
 The whitelist is the first boundary; these WebKit rules are independent defenses.
 
 The shell follows macOS appearance; message paper uses light appearance while
 retaining sender styles. Trusted constant code in an isolated client content world
-measures body height on load and width changes. Height is bounded to 50,000 points;
-very long/wide content can use the body view's own scrolling. Images remain blocked,
-including embedded/attachment images; logos may therefore be absent. No automatic
-dark conversion, remote-image opt-in, attachment loading or rich composer is added.
+measures body height on load, width changes and later layout/image growth. Vertical
+wheel/trackpad gestures over a full-height body route to the outer message scroll
+view. Height is bounded to 50,000 points; exceptionally tall content retains its
+own WebKit overflow scrolling. This preserves text selection, links and horizontal
+scrolling while making the whole message reachable.
+
+**Load images** enables external raster images for the selected message only.
+**Block images** recreates the blocked reader; changing message, closing or locking
+also discards the choice. The tooltip explains that direct requests can reveal IP
+and open activity to the sender. This is not Proton's image proxy. A fresh,
+nonpersistent native downloader supplies image bytes through a private WebKit
+scheme. It has no cookies, referrer, credential storage or disk cache; permits
+only HTTP(S), retains standard TLS validation and rejects HTTPS downgrades.
+Raster MIME types, 4 MiB per-image bounds, a conservative 16 MiB message budget,
+64-request limit and transport timeouts bound the operation. Discarding the view
+cancels downloads. Embedded/CID/SVG images, CSS backgrounds, external styles/fonts,
+frames and scripts stay blocked. No sender-wide preference is saved.
+
+Trusted constant code in the isolated client world activates only inert image
+attributes and reports numeric layout heights through a dedicated weak handler.
+It has no account/helper bridge. Content JavaScript remains disabled throughout.
 
 HTTP(S)/mailto links require confirmation showing the destination, then open
 through macOS. Other schemes, credential-bearing URLs and automatic opens are
@@ -42,4 +63,11 @@ Synthetic contracts cover styled newsletters, tables, headings, lists, quotes,
 entities, malformed HTML, literal plaintext, dangerous tags/attributes/URLs,
 image/CSS disabling, bounds, old IPC compatibility and lock/late-result handling.
 Native WebKit tests also verify actual structure, disabled message scripts, light
-paper, content replacement and zero requests to a disposable local test endpoint.
+paper, content replacement and zero requests by default to a disposable local
+endpoint. An in-process synthetic image transport exercises real scheme/image
+loading, cookie/referrer exclusion, per-message reset, rejected active/oversized
+responses and cancellation. Native scrolling and late layout growth have contracts.
+
+The image-only resource boundary uses WebKit's
+[content rule mechanism](https://webkit.org/blog/3476/content-blockers-first-look/);
+no ATS exceptions or certificate-validation bypass are added.

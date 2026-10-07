@@ -41,7 +41,9 @@ rm "$PROTONX_SOURCE/mail-helper/vendor-config.toml.bak"
 cat "$PROTONX_SOURCE/mail-helper/vendor-config.toml" >> "$PROTONX_SOURCE/mail-helper/.cargo/config.toml"
 sed -i.bak 's|directory = ".*"|directory = "vendor"|' "$PROTONX_SOURCE/helper/vendor-config.toml"
 rm "$PROTONX_SOURCE/helper/vendor-config.toml.bak"
-(cd "$PROTONX_SOURCE/helper" && git apply "$PROTONX_ROOT/patches/pass-cli.patch")
+# Resources/PassHelper.lock above is already the exact patched build lockfile.
+# Apply the source changes without trying to patch that lockfile a second time.
+(cd "$PROTONX_SOURCE/helper" && git apply --exclude=Cargo.lock "$PROTONX_ROOT/patches/pass-cli.patch")
 # Corresponding source must match every tracked file of the built helper,
 # including new patched modules, rather than merely compiling an upstream CLI.
 python3 - "$PROTONX_ROOT" "$PROTONX_SOURCE/helper" <<'PYCHECK'

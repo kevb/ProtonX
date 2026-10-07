@@ -28,7 +28,27 @@ pub fn prepare(raw: &str, mime: MimeType) -> Result<(String, Option<String>), &'
         pending.extend(node.children().map(|child| (child, depth + 1)));
     }
     html.strip_whitelist(StripStyleSheets::No);
+    // Preserve only ordinary image addresses as inert attributes. All network
+    // resources (including CSS backgrounds/imports) still pass through upstream
+    // disabling. Only the native per-message opt-in can activate these images.
+    let images: Vec<_> = html.document().select("img").map_err(|_| "message_failed")?
+        .filter_map(|image| {
+            let mut attributes = image.attributes.borrow_mut();
+            attributes.remove("data-protonx-remote-src");
+            let source = attributes.get("src")?.to_owned();
+            let url = url::Url::parse(&source).ok()?;
+            if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none()
+                || !url.username().is_empty() || url.password().is_some() || source.len() > 8192 {
+                return None;
+            }
+            Some((image.as_node().clone(), url.to_string()))
+        }).collect();
     html.disable_content(true, true);
+    for (image, source) in images {
+        if let Some(element) = image.as_element() {
+            element.attributes.borrow_mut().insert("data-protonx-remote-src", source);
+        }
+    }
     html.add_noreferrer();
     html.move_styles_to_body();
     let sanitized = html.extract_body();
@@ -76,13 +96,24 @@ mod tests {
             "<input",
             "onclick=",
             "javascript:",
-            "src=\"https://",
+            " src=\"https://",
             "src=\"cid:",
             "url(https://",
         ] {
             assert!(!html.contains(marker), "{marker}: {html}");
         }
         assert!(html.contains("Safe"));
+    }
+    #[test]
+    fn image_opt_in_keeps_only_inert_credential_free_http_images() {
+        let (_, html) = prepare("<img src='https://example.com/a?x=1&amp;y=2'><img src='http://example.com/b'><img src='cid:private'><img src='data:image/png,abc'><img src='https://user:password@example.com/x'><img src='javascript:bad()'><img data-protonx-remote-src='https://example.com/forged'><div style='background:url(https://example.com/css)'>Safe</div>", MimeType::TextHtml).unwrap();
+        let html = html.unwrap();
+        assert!(html.contains("data-protonx-remote-src=\"https://example.com/a?x=1&amp;y=2\""));
+        assert!(html.contains("data-protonx-remote-src=\"http://example.com/b\""));
+        assert_eq!(html.matches("data-protonx-remote-src=").count(), 2);
+        assert!(!html.contains(" src=\"https://"));
+        assert!(!html.contains("example.com/css"));
+        assert!(!html.contains("example.com/forged"));
     }
     #[test]
     fn plaintext_is_literal_and_malformed_html_is_normalized() {

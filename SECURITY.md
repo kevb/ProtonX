@@ -124,13 +124,24 @@ include passwords, tokens, real message bodies or vault exports in public issues
 - Native Mail preserves HTML structure using Proton's pinned whitelist/CSS
   sanitizer in the helper, with depth/node/output bounds and a text fallback.
   The selected sanitized body is displayed in an ephemeral local WKWebView, with
-  content JavaScript disabled, a deny-by-default CSP and a compiled block-all
-  resource rule installed before loading. No file base URL, account session,
-  cookies or helper API bridge is provided. Frames/forms/media and remote/embedded
-  images remain disabled. Navigation is refused except for the app's in-memory
+  content JavaScript disabled, a deny-by-default CSP and compiled resource rules
+  installed before loading. No file base URL, account session or helper API is
+  provided. Remote images start blocked. A per-message Load images action enables
+  only inert, credential-free HTTP(S) image addresses preserved by the helper.
+  WebKit still has no general HTTP access: a dedicated image scheme uses an
+  ephemeral native downloader with no cookies, credential storage, referrer or
+  disk cache. It accepts only supported raster image MIME types, limits each image
+  to 4 MiB, conservatively caps a message at 16 MiB/64 requests, keeps TLS validation
+  and refuses HTTPS-to-HTTP redirects. Blocking images, changing selection or locking
+  cancels those downloads. Consent is not saved across messages/reopen. Requests go
+  directly to the image host (not Proton's proxy) and can reveal IP/open activity;
+  the control explains this in its tooltip. Frames/forms/media, CSS images/imports
+  and embedded images remain disabled. Navigation is refused except for the app's in-memory
   document; allowed HTTP(S)/mailto links require a user-confirmed external open.
   The reader uses fixed light paper; it does not attempt automatic dark recolouring.
-  Trusted constant layout code runs only in WebKit's isolated client content world.
+  Trusted constant layout/image activation code runs only in WebKit's isolated
+  client content world. Its only script-message handler accepts bounded numeric
+  layout heights; it cannot access accounts or invoke helper commands.
   Lock/selection change destroys the selected view and rejects late body results;
   this is not a WebKit process-memory zeroization guarantee. The SDK owns MIME
   and decryption. Bridge retains its limited bounded-recursion plain-text MIME
