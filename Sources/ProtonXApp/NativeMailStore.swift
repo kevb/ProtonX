@@ -4,6 +4,17 @@ import ProtonXCore
 
 @MainActor
 final class NativeMailStore: ObservableObject {
+    struct TrashIntent {
+        let item: UInt64
+        let folder: UInt64
+        let conversation: UInt64?
+        let subject: String
+        fileprivate let session: UInt64
+        fileprivate let selection: UInt64?
+        fileprivate let conversations: Bool
+        var title: String { conversation == nil ? "Move message to Trash?" : "Move this whole conversation to Trash?" }
+        var actionTitle: String { conversation == nil ? "Move message to Trash" : "Move conversation to Trash" }
+    }
     enum Phase: Equatable { case welcome, locked, signingIn, totp, mailboxPassword, securityKey, open }
     @Published private(set) var phase: Phase = .welcome
     @Published private(set) var folders: [NativeMailFolder] = []
@@ -248,6 +259,48 @@ final class NativeMailStore: ObservableObject {
         body = next; sanitizedHTML = result.sanitizedHTML; messageActions = result.actions ?? []
     }
     var canUndoAction: Bool { undoToken != nil && (undoExpiry ?? .distantPast) > Date() && !busy && !mustRefreshBeforeActions && draft == nil }
+    func trashIntent(for item: UInt64?) -> TrashIntent? {
+        guard phase == .open, !busy, !mustRefreshBeforeActions, draft == nil,
+              let folder = selectedFolder, let item,
+              folders.first(where: { $0.id == folder })?.name.lowercased() != "trash",
+              let message = visibleConversations.flatMap(\.messages).first(where: { $0.id == item }) else { return nil }
+        return TrashIntent(item: item, folder: folder, conversation: conversationView ? message.conversationID.flatMap { $0 > 0 ? $0 : nil } : nil,
+                           subject: message.subject.isEmpty ? "(No subject)" : message.subject,
+                           session: epoch.value, selection: selectedItem, conversations: conversationView)
+    }
+    func trashFromList(_ intent: TrashIntent) {
+        guard epoch.accepts(intent.session), selectedItem == intent.selection,
+              selectedFolder == intent.folder, conversationView == intent.conversations,
+              let current = trashIntent(for: intent.item), current.conversation == intent.conversation else { return }
+        clearActionUndo()
+        selectionEpoch.invalidate(); selection?.cancel()
+        if demo {
+            let previous = (messages: demoMessages, locations: demoLocations)
+            let items = demoMessages.filter { message in
+                if let conversation = intent.conversation { return message.conversationID == conversation }
+                return message.id == intent.item
+            }
+            for message in items { demoLocations[message.id] = 4 }
+            messages = demoMessages.filter { demoLocations[$0.id] == selectedFolder }
+            reconcileSelection(); if selectedAnchor != nil { select() }; setDemoActions()
+            setActionUndo(1); demoUndo = previous
+            notice = intent.actionTitle + " · demo"; return
+        }
+        perform { [self] captured in
+            mustRefreshBeforeActions = true
+            let command = intent.conversation.map { NativeMailCommand("conversation_trash", folder: intent.folder, item: intent.item, conversation: $0) }
+                ?? NativeMailCommand("message_action", folder: intent.folder, item: intent.item, action: .trash)
+            let result = try await runner.request(command)
+            try check(captured)
+            guard result.queued == true, result.id == intent.item,
+                  result.conversationID == intent.conversation else { throw ProtonXError.invalidResponse }
+            mustRefreshBeforeActions = false
+            if let token = result.undoToken { setActionUndo(token) }
+            notice = intent.actionTitle + " queued for sync"
+            try await load(captured: captured)
+            if selectedAnchor != nil && selectedFolder == intent.folder { select(preservingContent: true) }
+        }
+    }
     func canPerform(_ action: NativeMailAction) -> Bool {
         phase == .open && !busy && !threadLoading && !mustRefreshBeforeActions && draft == nil && selectedMessage != nil && messageActions.contains(action)
     }

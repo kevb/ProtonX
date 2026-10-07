@@ -403,6 +403,82 @@ private let threadChild = NativeMailMessage(id: 13, subject: "Re: Synthetic conv
 private let threadSnapshot = NativeMailResult(folders: [NativeMailFolder(id: 1,name: "Inbox"),NativeMailFolder(id: 2,name: "Sent")], folder: 1,messages: [threadAnchor],loading: false,email: "alex@example.com")
 private let threadResult = NativeMailResult(thread: NativeMailThread(anchor: 11,conversationID: 70,messages: [threadAnchor,threadChild]))
 
+@Test @MainActor func demoListTrashMovesOneWholeConversationAcrossFoldersAndUndoRestoresIt() throws {
+    let runner = SyntheticMailRunner([]), store = mailStore(runner,preview: true)
+    store.selectedItem = 12; store.select()
+    let intent = try #require(store.trashIntent(for: 12))
+    #expect(intent.conversation == 1200)
+    // Preparing or cancelling confirmation never queues a change.
+    #expect(store.messages.count == 2 && !store.canUndoAction)
+    store.trashFromList(intent)
+    #expect(store.messages.map(\.id) == [11]); #expect(store.canUndoAction)
+    store.selectedFolder = 4; store.changeFolder()
+    #expect(Set(store.messages.map(\.id)) == [12,13,14])
+    #expect(store.trashIntent(for: 12) == nil) // No permanent delete in Trash.
+    store.undoMessageAction(); #expect(store.messages.isEmpty)
+    store.selectedFolder = 2; store.changeFolder()
+    #expect(Set(store.messages.map(\.id)) == [13,14])
+    #expect(runner.calls.isEmpty); store.lock()
+}
+
+@Test @MainActor func listTrashConfirmationCannotSurviveSelectionModeFolderOrSessionChange() throws {
+    for change in ["selection", "mode", "folder", "lock"] {
+        let store = mailStore(SyntheticMailRunner([]),preview: true)
+        store.selectedItem = 12; store.select()
+        let intent = try #require(store.trashIntent(for: 12))
+        switch change {
+        case "selection": store.selectedItem = 11
+        case "mode": store.conversationView = false
+        case "folder": store.selectedFolder = 2; store.changeFolder()
+        default: store.lock(); store.enterDemo()
+        }
+        store.trashFromList(intent)
+        #expect(!store.canUndoAction)
+        store.selectedFolder = 4; store.changeFolder(); #expect(store.messages.isEmpty)
+        store.lock()
+    }
+}
+
+@Test @MainActor func nativeConversationTrashQueuesOneSDKOperationAndSupportsUndo() async throws {
+    let empty = NativeMailResult(folders: threadSnapshot.folders,folder: 1,messages: [],loading: false)
+    let runner = SyntheticMailRunner([
+        .init(method: "restore",result: .init(phase: .connected)), .init(method: "snapshot",result: threadSnapshot),
+        .init(method: "conversation_trash",result: .init(id: 11,queued: true,undoToken: 7,conversationID: 70)),
+        .init(method: "snapshot",result: empty),
+        .init(method: "undo_action",result: .init(queued: true)), .init(method: "snapshot",result: threadSnapshot)
+    ])
+    let store = mailStore(runner,saved: true)
+    store.unlock(); await waitForMail { !store.busy }
+    store.selectedItem = 11
+    store.trashFromList(try #require(store.trashIntent(for: 11))); await waitForMail { !store.busy }
+    #expect(store.messages.isEmpty && store.canUndoAction)
+    let command = try #require(runner.payloads.first(where: { $0.method == "conversation_trash" }))
+    #expect(command.item == 11 && command.folder == 1 && command.conversation == 70)
+    #expect(runner.calls.filter { $0 == "conversation_trash" }.count == 1)
+    #expect(!runner.calls.contains("message_action"))
+    store.undoMessageAction(); await waitForMail { !store.busy }
+    #expect(store.messages.map(\.id) == [11]); #expect(runner.payloads.first(where: { $0.method == "undo_action" })?.token == 7)
+    store.lock()
+}
+
+@Test @MainActor func uncertainConversationTrashBlocksReplayAndWrongAcknowledgementFailsClosed() async throws {
+    for wrongReply in [false,true] {
+        let runner = SyntheticMailRunner([
+            .init(method: "restore",result: .init(phase: .connected)), .init(method: "snapshot",result: threadSnapshot),
+            .init(method: "conversation_trash",result: .init(id: 11,queued: true,conversationID: 71),failure: wrongReply ? nil : .actionUncertain)
+        ])
+        let store = mailStore(runner,saved: true)
+        store.unlock(); await waitForMail { !store.busy }; store.selectedItem = 11
+        let intent = try #require(store.trashIntent(for: 11))
+        store.trashFromList(intent); await waitForMail { !store.busy }
+        #expect(store.mustRefreshBeforeActions && store.error != nil)
+        #expect(store.trashIntent(for: 11) == nil)
+        store.trashFromList(intent)
+        #expect(runner.calls.filter { $0 == "conversation_trash" }.count == 1)
+        store.lock()
+    }
+}
+
 @Test @MainActor func mailThreadIncludesSentMemberAndReplyTargetsExpandedMessage() async {
     let runner = SyntheticMailRunner([
         .init(method: "restore",result: .init(phase: .connected)), .init(method: "snapshot",result: threadSnapshot),

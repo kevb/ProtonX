@@ -1,5 +1,5 @@
 // Copyright (c) 2026 ProtonX contributors. SPDX-License-Identifier: AGPL-3.0-only
-// Single-message SDK queue actions. No permanent delete, bulk edits or app replay.
+// SDK queue actions for one message or one disclosed conversation. No permanent delete or app replay.
 use super::*;
 use mail_uniffi::mail::datatypes::{ListActions, MoveDestination, Undo};
 use mail_uniffi::mail::datatypes::system_folder::MovableSystemFolder;
@@ -47,6 +47,35 @@ pub fn available(mailbox: Arc<Mailbox>, id: Id) -> Result<Options, &'static str>
     Ok(options)
 }
 impl Backend {
+    pub(crate) fn conversation_trash(&mut self, folder: u64, item: u64, expected: u64) -> Result<Value, &'static str> {
+        if self.action_state.uncertain { return Err("action_uncertain"); }
+        if self.composer.is_some() || self.folder != Some(folder) { return Err("invalid_selection"); }
+        // A conversation is derived ONLY from a currently disclosed folder row.
+        // The caller's expected identity is a stale-confirmation check, not authority.
+        let conversation = conversation_for_row(&self.listing.0.lock().unwrap().items.iter()
+            .map(|m| (m.id.as_u64(), m.conversation_id.as_u64())).collect::<Vec<_>>(), item, expected)?;
+        let mailbox = self.mailbox.clone().ok_or("invalid_state")?;
+        let destinations = sdk_result!(mail_uniffi::mail::conversations::AvailableMoveToDestinationsForConversationsResult,
+            block_on(mail_uniffi::mail::conversations::available_move_to_destinations_for_conversations(mailbox.clone(), vec![Id::from(conversation)])))
+            .map_err(|e| action_failure(e, "message_failed"))?;
+        let trash = destinations.into_iter().find_map(|d| match d {
+            MoveDestination::SystemFolder(value) if value.name == MovableSystemFolder::Trash => Some(value.local_id),
+            _ => None,
+        }).ok_or("action_unavailable")?;
+        self.action_state.uncertain = true;
+        self.action_state.undo = None;
+        let undo = sdk_result!(mail_uniffi::mail::conversations::MoveConversationsResult,
+            block_on(mail_uniffi::mail::conversations::move_conversations(mailbox, trash, vec![Id::from(conversation)])))
+            .map_err(|e| action_failure(e, "action_uncertain"))?;
+        self.action_state.uncertain = false;
+        let token = if let Some(undo) = undo {
+            self.action_state.next = self.action_state.next.checked_add(1).ok_or("invalid_state")?;
+            let token = self.action_state.next;
+            self.action_state.undo = Some((token, Instant::now(), undo));
+            Some(token)
+        } else { None };
+        Ok(json!({"id":item,"conversationID":conversation,"queued":true,"undoToken":token}))
+    }
     pub(crate) fn message_action(&mut self, folder: u64, item: u64, action: Action) -> Result<Value, &'static str> {
         if self.action_state.uncertain { return Err("action_uncertain"); }
         if self.composer.is_some() { return Err("invalid_selection"); }
@@ -83,9 +112,26 @@ impl Backend {
         Ok(json!({"queued":true}))
     }
 }
+fn conversation_for_row(listing: &[(u64, u64)], item: u64, expected: u64) -> Result<u64, &'static str> {
+    listing.iter().find(|(id, conversation)| *id == item && *conversation == expected && expected > 0)
+        .map(|(_, conversation)| *conversation).ok_or("invalid_selection")
+}
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn conversation_trash_requires_disclosed_anchor_and_expected_identity() {
+        assert_eq!(conversation_for_row(&[(11, 70)], 11, 70), Ok(70));
+        for (listing, item, expected) in [(vec![],11,70), (vec![(11,70)],12,70), (vec![(11,70)],11,71), (vec![(11,0)],11,0)] {
+            assert_eq!(conversation_for_row(&listing,item,expected), Err("invalid_selection"));
+        }
+        assert!(serde_json::from_value::<Request>(json!({"schema":1,"id":1,"command":{"method":"conversation_trash","folder":1,"item":11,"conversation":70}})).is_ok());
+        for extra in ["items", "destination", "permanent", "show_all"] {
+            let mut value = json!({"schema":1,"id":1,"command":{"method":"conversation_trash","folder":1,"item":11,"conversation":70}});
+            value["command"][extra] = json!(true);
+            assert!(serde_json::from_value::<Request>(value).is_err());
+        }
+    }
     #[test]
     fn closed_action_schema_rejects_bulk_and_permanent_deletion() {
         for method in ["delete", "permanent_delete", "all", "spam", "move"] { assert!(serde_json::from_value::<Action>(json!(method)).is_err()); }

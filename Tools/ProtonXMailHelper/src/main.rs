@@ -132,6 +132,7 @@ enum Command {
         token: u64,
     },
     MessageAction { folder: u64, item: u64, action: inbox_actions::Action },
+    ConversationTrash { folder: u64, item: u64, conversation: u64 },
     UndoAction { token: u64 },
     SignOut,
 }
@@ -671,6 +672,7 @@ impl Backend {
                 )
             }
             Command::MessageAction { folder, item, action } => self.message_action(folder, item, action),
+            Command::ConversationTrash { folder, item, conversation } => self.conversation_trash(folder, item, conversation),
             Command::UndoAction { token } => self.undo_action(token),
             Command::Compose { mode, folder, item } => self.compose(&mode, folder, item),
             Command::SaveDraft { token, content } => {

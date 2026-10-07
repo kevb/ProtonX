@@ -202,7 +202,7 @@ environment variables, repository files or a chat message.
 
 ## Mail inbox actions and launchers
 
-Mail changes target one selected, previously disclosed local message ID. The helper
+Reader actions target one selected, previously disclosed local message ID. The helper
 accepts conversation requests only from an anchor in the current folder snapshot,
 derives the conversation ID itself and preserves the SDK's Trash visibility rules.
 A disclosed child from that selected conversation can be read, replied to or
@@ -211,8 +211,16 @@ Changing folder or signing out clears this scope; a failed conversation switch
 cannot retain the previous scope. The UI decrypts one body at a time and clears
 its remote-image consent on message changes. The helper
 rechecks Proton's action capabilities and local destination IDs before queueing
-read/unread or a move to Archive, Trash or Inbox. Permanent and bulk deletion are
-absent. Queue acknowledgement is not proof of completed server sync. Ambiguous
+read/unread or a move to Archive, Trash or Inbox. A list context-menu Trash action
+targets one disclosed conversation through the SDK's conversation move operation;
+Delete/Backspace in the list requires an explicit whole-conversation confirmation.
+The helper derives its identity from the current folder row, checks the caller's
+expected identity and rechecks the SDK's allowed Trash destination. No arbitrary
+conversation IDs, arrays of targets, destinations or permanent-delete flags are
+accepted. Confirmations bind to session, folder, selection and view mode; stale
+confirmations cannot dispatch. Reader-card Trash remains single-message scoped.
+Permanent deletion and multi-selection changes are absent. Queue acknowledgement
+is not proof of completed server sync. Ambiguous
 results block another app action until refresh; no app-level retry or replay is
 added. Proton's durable action queue may still finish after lock/restore. Move undo
 uses the SDK's original one-use undo object, with a 30-second native lifetime. Lock

@@ -10,6 +10,7 @@ struct MailWindow: View {
     @State private var bridge = false
     @State private var confirmSignOut = false
     @State private var readerExpanded = false
+    @State private var pendingTrash: NativeMailStore.TrashIntent?
     @FocusState private var focus: String?
     init(store: NativeMailStore, isActive: Bool = true) { self.store = store; self.isActive = isActive }
     var body: some View {
@@ -52,6 +53,13 @@ struct MailWindow: View {
             }
         }
         .sheet(isPresented: $bridge) { BridgeMailWindow().frame(width: 1050, height: 740) }
+        .alert(pendingTrash?.title ?? "Move to Trash?", isPresented: Binding(get: { pendingTrash != nil }, set: { if !$0 { pendingTrash = nil } }), presenting: pendingTrash) { intent in
+            Button("Cancel", role: .cancel) { pendingTrash = nil }
+            Button(intent.actionTitle, role: .destructive) { store.trashFromList(intent); pendingTrash = nil }
+        } message: { intent in
+            Text(intent.conversation == nil ? "“\(intent.subject)” will be moved to Trash. You can undo this move."
+                 : "All messages in “\(intent.subject)”, including messages in other folders, will be moved to Trash. You can undo this move.")
+        }
         .confirmationDialog("Sign out of ProtonX Mail?", isPresented: $confirmSignOut) {
             Button("Sign Out", role: .destructive) { clearCredentials(); store.signOut() }
         } message: { Text("End this app’s Mail session and remove its local account data. Your messages remain with Proton.") }
@@ -62,11 +70,11 @@ struct MailWindow: View {
         .onAppear { focus = "username" }
         .onDisappear { clearCredentials() }
         .onChange(of: isActive) { _, active in
-            if !active { clearCredentials(); focus = nil }
+            if !active { clearCredentials(); focus = nil; pendingTrash = nil }
         }
         .onChange(of: store.phase) { _, phase in
             if phase != .welcome { password = "" }
-            if phase != .open { readerExpanded = false }
+            if phase != .open { readerExpanded = false; pendingTrash = nil }
             code = ""
             focus = phase == .totp || phase == .mailboxPassword ? "challenge" : "username"
         }
@@ -245,8 +253,15 @@ struct MailWindow: View {
                                 }.font(.system(size: 10)).foregroundStyle(.secondary)
                             }
                         }.padding(.vertical, 11).tag(conversation.selectionID(store.selectedItem))
+                            .contextMenu {
+                                let intent = store.trashIntent(for: conversation.selectionID(store.selectedItem))
+                                Button(intent?.actionTitle ?? (store.conversationView ? "Move conversation to Trash" : "Move message to Trash"), systemImage: "trash") {
+                                    if let intent { store.trashFromList(intent) }
+                                }.disabled(intent == nil)
+                            }
                     }
                 }.listStyle(.plain).scrollContentBackground(.hidden)
+                    .onDeleteCommand { if isActive { pendingTrash = store.trashIntent(for: store.selectedItem) } }
                     .overlay {
                         if store.visibleConversations.isEmpty {
                             if store.isLoadingList {
@@ -287,7 +302,7 @@ struct MailWindow: View {
             mailAction(store.messageActions.contains(.read) ? .read : .unread).keyboardShortcut("u", modifiers: [.command, .shift])
             mailAction(.archive).keyboardShortcut("e", modifiers: [.command])
             if store.messageActions.contains(.inbox) { mailAction(.inbox) }
-            mailAction(.trash).keyboardShortcut(.delete, modifiers: [.command])
+            mailAction(.trash)
         }.fixedSize()
     }
     private func replyActions(_ message: NativeMailMessage) -> some View {

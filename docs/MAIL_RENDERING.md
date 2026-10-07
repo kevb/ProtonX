@@ -92,8 +92,13 @@ The reader presents chronological cards with native headers. One card is expande
 at a time, and closing it leaves all cards collapsed. Each expanded card gets its
 own existing bounded renderer, actions and reply context. Selection and session
 generation checks discard late metadata/body responses after switching or locking.
-Remote-image consent does not carry between cards. There is no whole-conversation
-read/move/delete operation; the selected message remains the unit of mutation.
+Remote-image consent does not carry between cards. Reader actions apply to the
+expanded message only. The folder-list context menu offers **Move conversation to
+Trash** in Conversations view; Delete/Backspace with list focus asks for explicit
+confirmation that includes the cross-folder scope. The helper queues one SDK
+conversation move, with its existing move Undo, rather than looping over loaded
+messages. Messages view and summaries without a conversation ID target one message.
+Trash never offers permanent deletion. Other conversation actions remain pending.
 
 Synthetic contracts cover cross-folder members, grouping/search, reply and action
 targets, fallback, malformed/oversized membership and lock/folder-switch races.

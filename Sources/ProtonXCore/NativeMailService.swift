@@ -59,13 +59,14 @@ public struct NativeMailResult: Codable, Sendable {
     public var queued: Bool?
     public var undoToken: UInt64?
     public var thread: NativeMailThread?
-    public init(phase: NativeMailPhase? = nil, folders: [NativeMailFolder]? = nil, folder: UInt64? = nil, messages: [NativeMailMessage]? = nil, loading: Bool? = nil, email: String? = nil, id: UInt64? = nil, body: String? = nil, sanitizedHTML: String? = nil, attachments: Int? = nil, draft: NativeMailDraft? = nil, token: UInt64? = nil, sendState: NativeMailSendState? = nil, closed: Bool? = nil, cacheFirst: Bool? = nil, fresh: Bool? = nil, refreshFailed: Bool? = nil, actions: [NativeMailAction]? = nil, queued: Bool? = nil, undoToken: UInt64? = nil, thread: NativeMailThread? = nil) {
+    public var conversationID: UInt64?
+    public init(phase: NativeMailPhase? = nil, folders: [NativeMailFolder]? = nil, folder: UInt64? = nil, messages: [NativeMailMessage]? = nil, loading: Bool? = nil, email: String? = nil, id: UInt64? = nil, body: String? = nil, sanitizedHTML: String? = nil, attachments: Int? = nil, draft: NativeMailDraft? = nil, token: UInt64? = nil, sendState: NativeMailSendState? = nil, closed: Bool? = nil, cacheFirst: Bool? = nil, fresh: Bool? = nil, refreshFailed: Bool? = nil, actions: [NativeMailAction]? = nil, queued: Bool? = nil, undoToken: UInt64? = nil, thread: NativeMailThread? = nil, conversationID: UInt64? = nil) {
         self.phase = phase; self.folders = folders; self.folder = folder; self.messages = messages
         self.loading = loading; self.email = email; self.id = id; self.body = body; self.sanitizedHTML = sanitizedHTML; self.attachments = attachments
         self.draft = draft; self.token = token; self.sendState = sendState; self.closed = closed
         self.cacheFirst = cacheFirst; self.fresh = fresh; self.refreshFailed = refreshFailed
         self.actions = actions; self.queued = queued; self.undoToken = undoToken
-        self.thread = thread
+        self.thread = thread; self.conversationID = conversationID
     }
 }
 public enum NativeMailFailure: String, Codable, Error, LocalizedError, Sendable {
@@ -132,10 +133,11 @@ public struct NativeMailCommand: Encodable, Sendable {
     public var token: UInt64?
     public var content: NativeMailComposeContent?
     public var action: NativeMailAction?
-    public init(_ method: String, username: String? = nil, password: String? = nil, code: String? = nil, folder: UInt64? = nil, item: UInt64? = nil, more: Bool? = nil, mode: String? = nil, token: UInt64? = nil, content: NativeMailComposeContent? = nil, action: NativeMailAction? = nil) {
+    public var conversation: UInt64?
+    public init(_ method: String, username: String? = nil, password: String? = nil, code: String? = nil, folder: UInt64? = nil, item: UInt64? = nil, more: Bool? = nil, mode: String? = nil, token: UInt64? = nil, content: NativeMailComposeContent? = nil, action: NativeMailAction? = nil, conversation: UInt64? = nil) {
         self.method = method; self.username = username; self.password = password; self.code = code
         self.folder = folder; self.item = item; self.more = more
-        self.mode = mode; self.token = token; self.content = content; self.action = action
+        self.mode = mode; self.token = token; self.content = content; self.action = action; self.conversation = conversation
     }
 }
 public protocol NativeMailRunning: Sendable {
@@ -253,6 +255,9 @@ public final class NativeMailProcess: NativeMailRunning, @unchecked Sendable {
         guard (result.actions?.count ?? 0) <= NativeMailAction.allCases.count, result.undoToken == nil || (result.queued == true && result.undoToken! > 0) else { throw ProtonXError.invalidResponse }
         if let messages = result.messages { guard Set(messages.map(\.id)).count == messages.count else { throw ProtonXError.invalidResponse } }
         if let thread = result.thread { try thread.validate() }
+        if let conversation = result.conversationID {
+            guard conversation > 0, result.id != nil, result.queued == true else { throw ProtonXError.invalidResponse }
+        }
         if let draft = result.draft {
             guard draft.token > 0, draft.senders.count <= 256, Set(draft.senders).count == draft.senders.count,
                   draft.senders.contains(draft.sender), draft.quote.utf8.count <= 2 * 1024 * 1024,

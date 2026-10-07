@@ -15,10 +15,32 @@ are excluded from public artifacts.
 | Mail secure storage | Opt-in database/file encryption and resumable database/attachment staging contracts | Cache path rebasing/activation, whole-profile cutover and pending-send/draft recovery before enabling ordinary builds |
 | Product launchers | Synthetic native UI checks for cold/warm requests, minimized/closed windows and reverse product selection; signed installer checks | Minimum-OS runtime and update/Keychain continuity |
 
-The latest local Swift run passed 147 tests; five synthetic atomic-install tests
+The latest local Swift run passed 152 tests; five synthetic atomic-install tests
 passed at the prior installer milestone. These are local results, not a statement about the
 latest GitHub run. Dated entries below record milestone-specific test scope and
 historical limitations. The README and roadmap describe the current feature set.
+
+## Mail conversation Trash, 2026-10-07
+
+- The list context menu moves one conversation to Trash using the pinned SDK's
+  conversation queue and Undo. Delete and Backspace first confirm the scope,
+  including messages in other folders. Messages view targets one message; reader
+  actions continue to target the expanded message.
+- All 152 Swift tests and 22 helper tests passed. Synthetic tests cover cancellation,
+  stale session/selection/folder/view confirmations, cross-folder Trash and Undo,
+  one queued conversation operation, mismatched acknowledgements and refusal to
+  replay an uncertain action. The helper rejects undisclosed anchors, mismatched
+  identities and extra bulk/destination/permanent-delete command fields.
+- The native preview verified right-click targeting with a different selected row,
+  conversation Trash and Undo, both Delete keys, cancellation, message-only
+  confirmation and move, and ordinary Backspace editing in search.
+- The public pinned SDK reading, storage, composer, action and conversation suites
+  passed, including conversation moves and Undo. The upstream attachment concurrency
+  test remains ignored. Live mailbox mutation and server interoperability for this
+  new command remain manual acceptance gates; these checks used synthetic fixtures.
+- The release app and both launchers passed strict nested signature checks and
+  atomic installation. Installed contents match the staged bundles; the app and
+  helpers retain the configured local signing team. Keychain ACLs are unchanged.
 
 ## Embedded local unlock, 2026-10-07
 
