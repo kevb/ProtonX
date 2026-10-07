@@ -67,6 +67,7 @@ macro_rules! sdk_void {
 }
 
 mod inbox_actions;
+mod threads;
 
 const MAX_INPUT: usize = 64 * 1024;
 const MAX_OUTPUT: usize = 8 * 1024 * 1024;
@@ -101,6 +102,10 @@ enum Command {
         mode: SnapshotMode,
     },
     Message {
+        folder: u64,
+        item: u64,
+    },
+    Thread {
         folder: u64,
         item: u64,
     },
@@ -449,6 +454,7 @@ struct Backend {
     composer: Option<Composer>,
     next_composer: u64,
     action_state: inbox_actions::State,
+    thread: Option<threads::SelectedThread>,
 }
 impl Backend {
     fn new(directory: PathBuf) -> Result<Self, &'static str> {
@@ -501,6 +507,7 @@ impl Backend {
             composer: None,
             next_composer: 0,
             action_state: inbox_actions::State::default(),
+            thread: None,
         })
     }
     fn login_failure(&self, error: LoginError) -> &'static str {
@@ -641,22 +648,9 @@ impl Backend {
                 self.finish_login()
             }
             Command::Snapshot { folder, more, mode } => self.snapshot(folder, more, mode),
+            Command::Thread { folder, item } => self.load_thread(folder, item),
             Command::Message { folder, item } => {
-                if self.folder != Some(folder) {
-                    return Err("invalid_selection");
-                }
-                // A local selected item must have been disclosed in this folder's bounded snapshot.
-                if !self
-                    .listing
-                    .0
-                    .lock()
-                    .unwrap()
-                    .items
-                    .iter()
-                    .any(|m| m.id.as_u64() == item)
-                {
-                    return Err("invalid_selection");
-                }
+                self.selected_message(folder, item)?;
                 let mailbox = self.mailbox.as_ref().ok_or("invalid_state")?;
                 let message = sdk_result!(
                     mail_uniffi::mail::messages::GetMessageBodyResult,
@@ -757,6 +751,7 @@ impl Backend {
                 )
                 .map_err(|_| "sign_out_failed")?;
                 self.user = None;
+                self.thread = None;
                 self.mailbox = None;
                 self.scroller = None;
                 self.flow = None;
@@ -781,19 +776,7 @@ impl Backend {
         let user = self.user.clone().ok_or("invalid_state")?;
         if mode != "new" {
             let item = item.ok_or("invalid_selection")?;
-            if self.folder != folder {
-                return Err("invalid_selection");
-            }
-            let original = self
-                .listing
-                .0
-                .lock()
-                .unwrap()
-                .items
-                .iter()
-                .find(|m| m.id.as_u64() == item)
-                .cloned()
-                .ok_or("invalid_selection")?;
+            let original = self.selected_message(folder.ok_or("invalid_selection")?, item)?;
             if mode == "open" {
                 if !original.is_draft || original.is_scheduled {
                     return Err("draft_unsupported");
@@ -1011,6 +994,7 @@ impl Backend {
         let selected = mailbox.label_id().as_u64();
         let changed = self.folder != Some(selected);
         if changed {
+            self.thread = None;
             self.scroller = None;
             self.mailbox = Some(mailbox.clone());
             self.folder = Some(selected);
@@ -1102,7 +1086,7 @@ impl Backend {
                 return Err(failure);
             }
         }
-        let messages:Vec<Value>=state.items.iter().take(1000).map(|m|json!({"id":m.id.as_u64(),"subject":m.subject,"sender":m.sender.address,"senderName":m.sender.name,"recipient":m.to_list.iter().map(|r|r.address.as_str()).collect::<Vec<_>>().join(", "),"date":m.time.0,"unread":m.unread,"attachments":m.num_attachments,"isDraft":m.is_draft,"canReply":m.can_reply,"isScheduled":m.is_scheduled})).collect();
+        let messages:Vec<Value>=state.items.iter().take(1000).map(threads::message_value).collect();
         let loading = state.loading || (!state.received_list && state.failed.is_none());
         let fresh =
             mode != SnapshotMode::Local && state.fresh && !loading && state.failed.is_none();

@@ -22,9 +22,10 @@ public struct NativeMailMessage: Codable, Identifiable, Equatable, Sendable {
     public let isDraft: Bool?
     public let canReply: Bool?
     public let isScheduled: Bool?
-    public init(id: UInt64, subject: String, sender: String, senderName: String = "", recipient: String = "", date: UInt64 = 0, unread: Bool = false, attachments: Int = 0, isDraft: Bool = false, canReply: Bool = true, isScheduled: Bool = false) {
+    public let conversationID: UInt64?
+    public init(id: UInt64, subject: String, sender: String, senderName: String = "", recipient: String = "", date: UInt64 = 0, unread: Bool = false, attachments: Int = 0, isDraft: Bool = false, canReply: Bool = true, isScheduled: Bool = false, conversationID: UInt64? = nil) {
         self.id = id; self.subject = subject; self.sender = sender; self.senderName = senderName
-        self.recipient = recipient; self.date = date; self.unread = unread; self.attachments = attachments; self.isDraft = isDraft; self.canReply = canReply; self.isScheduled = isScheduled
+        self.recipient = recipient; self.date = date; self.unread = unread; self.attachments = attachments; self.isDraft = isDraft; self.canReply = canReply; self.isScheduled = isScheduled; self.conversationID = conversationID
     }
 }
 public enum NativeMailAction: String, Codable, CaseIterable, Sendable {
@@ -57,12 +58,14 @@ public struct NativeMailResult: Codable, Sendable {
     public var actions: [NativeMailAction]?
     public var queued: Bool?
     public var undoToken: UInt64?
-    public init(phase: NativeMailPhase? = nil, folders: [NativeMailFolder]? = nil, folder: UInt64? = nil, messages: [NativeMailMessage]? = nil, loading: Bool? = nil, email: String? = nil, id: UInt64? = nil, body: String? = nil, sanitizedHTML: String? = nil, attachments: Int? = nil, draft: NativeMailDraft? = nil, token: UInt64? = nil, sendState: NativeMailSendState? = nil, closed: Bool? = nil, cacheFirst: Bool? = nil, fresh: Bool? = nil, refreshFailed: Bool? = nil, actions: [NativeMailAction]? = nil, queued: Bool? = nil, undoToken: UInt64? = nil) {
+    public var thread: NativeMailThread?
+    public init(phase: NativeMailPhase? = nil, folders: [NativeMailFolder]? = nil, folder: UInt64? = nil, messages: [NativeMailMessage]? = nil, loading: Bool? = nil, email: String? = nil, id: UInt64? = nil, body: String? = nil, sanitizedHTML: String? = nil, attachments: Int? = nil, draft: NativeMailDraft? = nil, token: UInt64? = nil, sendState: NativeMailSendState? = nil, closed: Bool? = nil, cacheFirst: Bool? = nil, fresh: Bool? = nil, refreshFailed: Bool? = nil, actions: [NativeMailAction]? = nil, queued: Bool? = nil, undoToken: UInt64? = nil, thread: NativeMailThread? = nil) {
         self.phase = phase; self.folders = folders; self.folder = folder; self.messages = messages
         self.loading = loading; self.email = email; self.id = id; self.body = body; self.sanitizedHTML = sanitizedHTML; self.attachments = attachments
         self.draft = draft; self.token = token; self.sendState = sendState; self.closed = closed
         self.cacheFirst = cacheFirst; self.fresh = fresh; self.refreshFailed = refreshFailed
         self.actions = actions; self.queued = queued; self.undoToken = undoToken
+        self.thread = thread
     }
 }
 public enum NativeMailFailure: String, Codable, Error, LocalizedError, Sendable {
@@ -74,12 +77,15 @@ public enum NativeMailFailure: String, Codable, Error, LocalizedError, Sendable 
     case sessionFailed = "session_failed", sessionExpired = "session_expired", signOutFailed = "sign_out_failed"
     case invalidSelection = "invalid_selection", messageFailed = "message_failed", decryptionFailed = "decryption_failed"
     case messageTooLarge = "message_too_large", snapshotFailed = "snapshot_failed", pageLimit = "page_limit"
+    case threadFailed = "thread_failed", threadTooLarge = "thread_too_large"
     case draftFailed = "draft_failed", draftUnsupported = "draft_unsupported", senderUnavailable = "sender_unavailable"
     case sendUncertain = "send_uncertain", sendRejected = "send_rejected"
     case storageUnavailable = "storage_unavailable", storageKeyMissing = "storage_key_missing", storageUpgradeRequired = "storage_upgrade_required"
     case storageMigrationPending = "storage_migration_pending", storageVersionUnsupported = "storage_version_unsupported"
     public var errorDescription: String? {
         switch self {
+        case .threadFailed: "Could not load the conversation. You can still read this message or retry."
+        case .threadTooLarge: "This conversation exceeds the current thread limit. Use Messages view to read individual messages."
         case .actionUnavailable: "That Mail action is no longer available. Refresh and try again."
         case .actionUncertain: "The Mail change could not be confirmed. It may still sync through Proton’s queue. Refresh before making another change; ProtonX will not repeat it automatically."
         case .storageMigrationPending: "Mail’s storage upgrade needs recovery before this profile can open. Your original files and staged upgrade have been retained."
@@ -246,6 +252,7 @@ public final class NativeMailProcess: NativeMailRunning, @unchecked Sendable {
         guard result.fresh != true || (result.loading != true && result.refreshFailed != true) else { throw ProtonXError.invalidResponse }
         guard (result.actions?.count ?? 0) <= NativeMailAction.allCases.count, result.undoToken == nil || (result.queued == true && result.undoToken! > 0) else { throw ProtonXError.invalidResponse }
         if let messages = result.messages { guard Set(messages.map(\.id)).count == messages.count else { throw ProtonXError.invalidResponse } }
+        if let thread = result.thread { try thread.validate() }
         if let draft = result.draft {
             guard draft.token > 0, draft.senders.count <= 256, Set(draft.senders).count == draft.senders.count,
                   draft.senders.contains(draft.sender), draft.quote.utf8.count <= 2 * 1024 * 1024,

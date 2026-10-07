@@ -24,3 +24,7 @@ cargo test --locked -p mail-common --test draft_change_sender --test draft_const
 
 # Everyday inbox actions: genuine upstream queues, mock API, local/remote undo.
 cargo test --locked -p mail-common --test actions_read_unread --test message_read_unread --test message_move --test attachment --profile mail-macos-debug
+
+# Conversation identity, cross-folder members, Trash visibility and paging use
+# the pinned SDK's genuine local/mock fixtures, without production credentials.
+cargo test --locked -p mail-common --test mailbox_conversation --test conversation_mail_scroller --profile mail-macos-debug

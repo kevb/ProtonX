@@ -43,7 +43,8 @@ technical results. Use synthetic content in public tests and screenshots.
 2. Finish disconnected Pass acceptance, upgrade/Keychain continuity, real session
    expiry/revocation and broader unsupported-field round trips.
 3. Verify Mail new-message/reply/reply-all delivery, sending identities and draft
-   recovery from another client; then add threading and attachment handling.
+   recovery from another client; accept conversation interoperability and add
+   attachment viewing/sending.
 4. Extend permission-aware Pass editors and vault management, with independent
    client verification and draft/conflict safeguards.
 5. Complete accessibility/minimum-OS checks, matched performance measurements,
@@ -108,7 +109,8 @@ draft saving and queued/confirmed/failed/unknown send states. Linked-Gmail
 sender selection has synthetic coverage; real delivery and recovery remain
 unverified. Read/unread, Archive/Trash/Inbox and move undo are implemented with
 synthetic coverage. Human verification and FIDO-only states are unsupported;
-threading, file upload/viewing and push UI remain gaps. See
+SDK conversation grouping and expandable cross-folder cards have synthetic
+coverage. File upload/viewing and push UI remain gaps. See
 [the native Mail decision](MAIL_NATIVE_SIGN_IN.md) and
 [composer references and Gmail acceptance tests](MAIL_COMPOSER.md).
 The advanced Bridge compatibility path retains its separate

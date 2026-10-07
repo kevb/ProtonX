@@ -13,7 +13,7 @@ interface or contribute. Signed, notarized binary releases are not yet available
 | Product | Available | Current limitations |
 | --- | --- | --- |
 | Pass | Account sign-in and local unlock; vault and Trash browsing; search and sorting; password copy/reveal; TOTP copy/setup/edit; login and note editing with multiple websites and custom fields; revision conflict protection; Trash/restore; encrypted saved-first loading and read-only offline browsing for eligible personal paid accounts | No native browser autofill, passkey operations, attachment handling, sharing UI or account switching. Other item types are readable but have no native editor. Managed accounts stay online-only. |
-| Mail | Native username/password, TOTP and second-password sign-in; independent Keychain-backed session; folders and paged inbox; formatted HTML reading on light paper; per-message image loading; read/unread, Archive/Trash/Inbox and move undo; compose, reply and reply-all; sending identity selection and draft saving | Live send/reply delivery and account recovery are acceptance gates. No human verification/FIDO-only login, conversation threading, file upload/viewing, rich-text editing or push UI. Search covers loaded subjects and senders, capped at 1,000 messages. |
+| Mail | Native username/password, TOTP and second-password sign-in; independent Keychain-backed session; folders and paged inbox; SDK conversation grouping with expandable message cards; formatted HTML reading on light paper; per-message image loading; read/unread, Archive/Trash/Inbox and move undo; compose, reply and reply-all; sending identity selection and draft saving | Live send/reply delivery and account recovery are acceptance gates. No human verification/FIDO-only login, file upload/viewing, rich-text editing or push UI. Search covers loaded subjects and senders, capped at 1,000 messages. |
 | Drive | Planned | No Drive client implemented. |
 
 Pass and Mail share window navigation and macOS integration, while keeping their
@@ -110,6 +110,14 @@ flows are currently unsupported; use the official client for those accounts.
 **Unlock Mail** restores Mail's own session after local authentication. Locking
 clears the interface and stops its helper; **Sign Out** ends the SDK account
 session. Mail and Pass do not share authentication.
+
+**Conversations** groups loaded folder messages using Proton's conversation IDs.
+Opening a conversation fetches its message summaries, including sent replies,
+with Proton's Trash visibility rules. Expand a card to read or reply to that
+message; only one body is open at a time. The toolbar offers **Messages** for
+individual browsing. Actions still affect one message. Conversations over 200
+messages fall back to the selected message rather than showing a partial thread.
+Search and list counts cover loaded folder messages, not the whole conversation.
 
 The composer offers only sending identities provided by Proton's core, including
 connected Gmail addresses where enabled. Queued, confirmed, failed and unknown

@@ -9,6 +9,7 @@ private final class SyntheticMailRunner: NativeMailRunning, @unchecked Sendable 
         let result: NativeMailResult
         var failure: NativeMailFailure?
         var delay: Duration = .zero
+        var gate: MailReplyGate?
     }
     private let lock = NSLock()
     private var steps: [Step]
@@ -24,9 +25,19 @@ private final class SyntheticMailRunner: NativeMailRunning, @unchecked Sendable 
         #expect(command.method == step.method)
         // Simulate a network reply arriving after the caller has cancelled/locked.
         if step.delay > .zero { await Task.detached { try? await Task.sleep(for: step.delay) }.value }
+        if let gate = step.gate { await gate.wait() }
         if let failure = step.failure { throw failure }
         return step.result
     }
+}
+private actor MailReplyGate {
+    private var released = false
+    private var continuation: CheckedContinuation<Void, Never>?
+    func wait() async {
+        if released { return }
+        await withCheckedContinuation { continuation = $0 }
+    }
+    func release() { released = true; continuation?.resume(); continuation = nil }
 }
 private let mailSnapshot = NativeMailResult(folders: [NativeMailFolder(id: 1, name: "Inbox"), NativeMailFolder(id: 2, name: "Sent")], folder: 1,
     messages: [NativeMailMessage(id: 11, subject: "Synthetic message", sender: "demo@example.com")], loading: false, email: "alex@example.com")
@@ -143,7 +154,7 @@ private let mailSnapshot = NativeMailResult(folders: [NativeMailFolder(id: 1, na
     let runner = SyntheticMailRunner([]), store = mailStore(runner, preview: true)
     #expect(store.phase == .open); #expect(store.body != nil)
     store.signIn(username: "demo@example.com", password: "SYNTHETIC"); store.unlock(); store.signOut(); store.refresh()
-    store.selectedFolder = 2; store.changeFolder(); #expect(store.messages.isEmpty); #expect(store.body == nil)
+    store.selectedFolder = 2; store.changeFolder(); #expect(store.messages.count == 2); #expect(store.body == nil)
     store.selectedFolder = 1; store.changeFolder(); #expect(store.messages.count == 2)
     store.lock(); #expect(store.body == nil); #expect(runner.calls.isEmpty)
 }
@@ -385,4 +396,119 @@ private let linkedDraft = NativeMailDraft(token: 3, sender: "alex.demo@gmail.com
     store.selectedItem = 11; store.select(); store.actOnMessage(.inbox); #expect(store.messages.isEmpty)
     store.selectedFolder = 1; store.changeFolder(); #expect(store.messages.count == 2)
     #expect(runner.calls.isEmpty); store.lock()
+}
+
+private let threadAnchor = NativeMailMessage(id: 11, subject: "Synthetic conversation", sender: "sam@example.com", recipient: "alex@example.com", date: 1, conversationID: 70)
+private let threadChild = NativeMailMessage(id: 13, subject: "Re: Synthetic conversation", sender: "alex@example.com", recipient: "sam@example.com", date: 2, conversationID: 70)
+private let threadSnapshot = NativeMailResult(folders: [NativeMailFolder(id: 1,name: "Inbox"),NativeMailFolder(id: 2,name: "Sent")], folder: 1,messages: [threadAnchor],loading: false,email: "alex@example.com")
+private let threadResult = NativeMailResult(thread: NativeMailThread(anchor: 11,conversationID: 70,messages: [threadAnchor,threadChild]))
+
+@Test @MainActor func mailThreadIncludesSentMemberAndReplyTargetsExpandedMessage() async {
+    let runner = SyntheticMailRunner([
+        .init(method: "restore",result: .init(phase: .connected)), .init(method: "snapshot",result: threadSnapshot),
+        .init(method: "thread",result: threadResult), .init(method: "message",result: .init(id: 11,body: "SYNTHETIC received",actions: [.read])),
+        .init(method: "message",result: .init(id: 13,body: "SYNTHETIC sent",actions: [.unread])),
+        .init(method: "compose",result: .init(draft: linkedDraft))
+    ])
+    let store = mailStore(runner,saved: true)
+    store.unlock(); await waitForMail { !store.busy }
+    store.selectedItem = 11; store.select(); await waitForMail { store.body != nil }
+    #expect(store.thread?.messages.map(\.id) == [11,13]); #expect(store.messages.map(\.id) == [11])
+    store.expandThreadMessage(13); await waitForMail { store.body == "SYNTHETIC sent" }
+    #expect(store.selectedItem == 11); #expect(store.selectedMessage?.id == 13); #expect(store.canPerform(.unread))
+    store.compose("reply"); await waitForMail { !store.busy }
+    #expect(runner.payloads.last?.method == "compose"); #expect(runner.payloads.last?.item == 13)
+    store.lock(); #expect(store.thread == nil); #expect(store.expandedThreadItem == nil); #expect(store.body == nil)
+}
+
+@Test @MainActor func mailThreadActionIsSingleMessageAndRefreshKeepsExpandedChild() async {
+    let runner = SyntheticMailRunner([
+        .init(method: "restore",result: .init(phase: .connected)), .init(method: "snapshot",result: threadSnapshot),
+        .init(method: "thread",result: threadResult), .init(method: "message",result: .init(id: 11,body: "anchor")),
+        .init(method: "message",result: .init(id: 13,body: "child",actions: [.archive])),
+        .init(method: "message_action",result: .init(id: 13,queued: true,undoToken: 1)), .init(method: "snapshot",result: threadSnapshot),
+        .init(method: "thread",result: threadResult), .init(method: "message",result: .init(id: 13,body: "child refreshed",actions: [.read])),
+        .init(method: "undo_action",result: .init(queued: true)), .init(method: "snapshot",result: threadSnapshot),
+        .init(method: "thread",result: threadResult), .init(method: "message",result: .init(id: 13,body: "child restored",actions: [.archive]))
+    ])
+    let store = mailStore(runner,saved: true)
+    store.unlock(); await waitForMail { !store.busy }
+    store.selectedItem = 11; store.select(); await waitForMail { store.body == "anchor" }
+    store.expandThreadMessage(13); await waitForMail { store.body == "child" }
+    store.actOnMessage(.archive); await waitForMail { store.body == "child refreshed" && !store.busy }
+    #expect(runner.payloads.first(where: { $0.method == "message_action" })?.item == 13)
+    #expect(store.selectedMessage?.id == 13); #expect(store.canPerform(.read)); #expect(store.canUndoAction)
+    store.undoMessageAction(); await waitForMail { store.body == "child restored" && !store.busy }
+    #expect(store.selectedMessage?.id == 13); #expect(store.canPerform(.archive))
+    #expect(runner.payloads.first(where: { $0.method == "undo_action" })?.token == 1); store.lock()
+}
+
+@Test @MainActor func failedOrInvalidThreadStillAllowsAnchorButNeverDisclosesOtherBodies() async {
+    for invalid in [false,true] {
+        let bad = NativeMailResult(thread: NativeMailThread(anchor: 11,conversationID: 99,messages: [threadChild]))
+        let runner = SyntheticMailRunner([
+            .init(method: "restore",result: .init(phase: .connected)), .init(method: "snapshot",result: threadSnapshot),
+            .init(method: "thread",result: invalid ? bad : .init(),failure: invalid ? nil : .threadTooLarge),
+            .init(method: "message",result: .init(id: 11,body: "only anchor")),
+            .init(method: "message",result: .init(id: 11,body: "individual mode"))
+        ])
+        let store = mailStore(runner,saved: true)
+        store.unlock(); await waitForMail { !store.busy }
+        store.selectedItem = 11; store.select(); await waitForMail { store.body != nil }
+        #expect(store.thread == nil); #expect(store.threadError != nil); #expect(store.expandedThreadItem == 11)
+        store.expandThreadMessage(13); #expect(store.selectedMessage?.id == 11)
+        store.conversationView = false; store.select(); await waitForMail { store.body == "individual mode" }
+        #expect(runner.calls.filter { $0 == "thread" }.count == 1)
+        #expect(runner.payloads.filter { $0.method == "message" }.allSatisfy { $0.item == 11 }); store.lock()
+    }
+}
+
+@Test @MainActor func lockingDuringThreadFetchCannotReopenOrDecryptLateMembers() async {
+    let gate = MailReplyGate()
+    let runner = SyntheticMailRunner([
+        .init(method: "restore",result: .init(phase: .connected)), .init(method: "snapshot",result: threadSnapshot),
+        .init(method: "thread",result: threadResult,gate: gate)
+    ])
+    let store = mailStore(runner,saved: true)
+    store.unlock(); await waitForMail { !store.busy }
+    store.selectedItem = 11; store.select(); await waitForMail { runner.calls.count == 3 }
+    #expect(store.threadLoading); store.lock(); await gate.release()
+    // Give the already-scheduled late continuation its turn, without network timing assumptions.
+    for _ in 0..<20 { await Task.yield() }
+    #expect(store.thread == nil); #expect(store.body == nil); #expect(store.phase == .locked)
+    #expect(runner.calls == ["restore","snapshot","thread"])
+}
+
+@Test @MainActor func folderSwitchRejectsLateThreadMessageAndClearsThreadScope() async {
+    let gate = MailReplyGate()
+    let runner = SyntheticMailRunner([
+        .init(method: "restore",result: .init(phase: .connected)), .init(method: "snapshot",result: threadSnapshot),
+        .init(method: "thread",result: threadResult), .init(method: "message",result: .init(id: 11,body: "anchor")),
+        .init(method: "message",result: .init(id: 13,body: "LATE synthetic body"),gate: gate),
+        .init(method: "snapshot",result: .init(folders: [NativeMailFolder(id: 1,name: "Inbox"),NativeMailFolder(id: 2,name: "Sent")],folder: 2,messages: [],loading: false))
+    ])
+    let store = mailStore(runner,saved: true)
+    store.unlock(); await waitForMail { !store.busy }
+    store.selectedItem = 11; store.select(); await waitForMail { store.body == "anchor" }
+    store.expandThreadMessage(13); await waitForMail { runner.calls.count == 5 }
+    store.selectedFolder = 2; store.changeFolder(); await waitForMail { !store.busy }
+    await gate.release(); for _ in 0..<20 { await Task.yield() }
+    #expect(store.thread == nil); #expect(store.body == nil); #expect(store.selectedItem == nil)
+    #expect(store.selectedFolder == 2); store.lock()
+}
+
+@Test @MainActor func previewThreadTraversesFoldersCollapsesAndNeverStartsHelper() {
+    let runner = SyntheticMailRunner([]), store = mailStore(runner,preview: true)
+    store.selectedItem = 12; store.select()
+    #expect(store.thread?.messages.map(\.id) == [12,13,14])
+    store.expandThreadMessage(13); #expect(store.body?.contains("Saturday sounds good") == true)
+    store.compose("reply")
+    #expect(store.draft?.sender == "alex.demo@gmail.com"); #expect(store.draft?.to == ["sam@example.com"])
+    #expect(store.draft?.subject == "Re: Coffee this weekend?"); #expect(store.draft?.quote.contains("Shall we meet at ten?") == true)
+    store.discardDraft()
+    store.expandThreadMessage(13); #expect(store.body == nil); #expect(store.expandedThreadItem == nil); #expect(!store.canPerform(.read))
+    store.compose("reply"); #expect(store.draft == nil)
+    store.selectedFolder = 2; store.changeFolder(); #expect(store.visibleConversations.count == 1)
+    store.conversationView = false; #expect(store.visibleConversations.count == 2)
+    store.lock(); #expect(runner.calls.isEmpty)
 }

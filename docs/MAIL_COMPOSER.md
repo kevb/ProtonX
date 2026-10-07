@@ -84,7 +84,10 @@ server rejection and restart without duplicate delivery. No private mailbox or
 real recipient is used by the synthetic test suite.
 
 Read/unread, Archive/Trash/Inbox and move undo are now implemented with synthetic
-coverage. Next functionality: conversation view, attachment upload/viewing,
+coverage. The [conversation reader](MAIL_RENDERING.md) is implemented. Replies, draft opening
+and message actions target the expanded card, including a message outside the
+current folder when disclosed by the selected SDK conversation. Next functionality:
+attachment upload/viewing,
 recipient completion, rich text and confirmed draft
 sync/auto-save recovery. Gmail read/unread/folder changes are not mirrored back
 to Gmail by Proton's connection; do not promise two-way state synchronization.

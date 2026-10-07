@@ -20,9 +20,9 @@ end-to-end workflow come before additional products.
    [automation and acceptance plan](PASS_RELIABILITY.md).
 3. **Complete Mail's everyday workflow.** Validate actual send/reply delivery and
    enabled Gmail sending identities. Read/unread, Archive/Trash/Inbox and SDK move
-   undo are implemented with synthetic/public upstream tests; add threading and
-   attachments. Preserve drafts and distinguish confirmed delivery from uncertain
-   send outcomes.
+   undo and SDK conversation reading are implemented with synthetic/public upstream
+   tests. Accept cross-client conversation behavior and add attachment viewing/sending.
+   Preserve drafts and distinguish confirmed delivery from uncertain send outcomes.
 4. **Accept installed suite navigation.** A visible product switcher, window-aware
    keyboard commands, verified atomic app installation and **ProtonX Mail** /
    **ProtonX Pass** Spotlight launchers are implemented. Synthetic UI checks cover
@@ -84,8 +84,9 @@ remain separate gates.
 - Verify send/reply delivery, including enabled Gmail sending identities, on a
   designated test account. Do not infer successful delivery from composer UI.
 - Read/unread, Archive/Trash/Inbox and move undo are implemented through the pinned
-  SDK; threading, attachment UI and rich-text composition remain. Sanitized HTML
-  reading now preserves structure alongside a text fallback.
+  SDK. Conversation grouping, cross-folder cards and individual-message mode are
+  implemented with synthetic coverage; attachment UI and rich-text composition
+  remain. Sanitized HTML reading preserves structure alongside a text fallback.
 - Test interrupted sends, ambiguous delivery and draft recovery across upgrades.
 - Retain Bridge as an optional prototype/compatibility path. Its lifecycle work
   is secondary to proving direct native Mail onboarding.

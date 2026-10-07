@@ -108,7 +108,9 @@ include passwords, tokens, real message bodies or vault exports in public issues
   hostname/certificate checks are mandatory, using an explicitly imported public
   certificate. Private-key imports are refused. Mail credentials go only to Bridge.
 - Native Mail has a closed command schema, 64 KiB requests, 8 MiB replies, a
-  1,000-message window limit and 2 MiB rendered-body limit. No raw SDK errors,
+  1,000-message window limit and 2 MiB rendered-body limit. Selected conversation
+  metadata is bounded to 200 messages and 4 MiB, with unique IDs and matching
+  SDK conversation identity. No raw SDK errors,
   helper stderr or credentials are logged. Its opt-in SDK feature disables the
   logger and telemetry; automatic issue reports are discarded. Production API
   transport, authentication, account limits and decryption remain in Proton's core.
@@ -189,6 +191,13 @@ environment variables, repository files or a chat message.
 ## Mail inbox actions and launchers
 
 Mail changes target one selected, previously disclosed local message ID. The helper
+accepts conversation requests only from an anchor in the current folder snapshot,
+derives the conversation ID itself and preserves the SDK's Trash visibility rules.
+A disclosed child from that selected conversation can be read, replied to or
+changed only while its matching anchor remains in the current folder snapshot.
+Changing folder or signing out clears this scope; a failed conversation switch
+cannot retain the previous scope. The UI decrypts one body at a time and clears
+its remote-image consent on message changes. The helper
 rechecks Proton's action capabilities and local destination IDs before queueing
 read/unread or a move to Archive, Trash or Inbox. Permanent and bulk deletion are
 absent. Queue acknowledgement is not proof of completed server sync. Ambiguous

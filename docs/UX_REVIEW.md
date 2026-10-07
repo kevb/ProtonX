@@ -117,3 +117,15 @@ Dark and light synthetic controls passed selection, search, empty/return folder
 and lock checks; full accessibility and minimum-OS runtime coverage remain gates.
 This first direct client cannot compose/reply, manage attachments or threads,
 mark read/unread or archive. Those actions follow real sign-in/read/restart proof.
+
+
+## Conversation reading, 2026-10-07
+
+Conversations group the loaded folder list and show SDK-defined messages from
+other folders in chronological cards. A visible Conversations/Messages control
+preserves individual browsing. Collapsed cards retain sender, subject, recipient
+and date context; expanded cards use the existing light message paper and native
+reply/actions. One body is expanded at a time, keeping resource use and image
+consent local to the chosen message. Synthetic UI checks cover grouping, card
+expansion/collapse, scrolling and the individual-view switch. Attachment controls
+and deeper keyboard/accessibility checks remain follow-on work.

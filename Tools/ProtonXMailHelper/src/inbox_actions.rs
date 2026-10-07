@@ -49,7 +49,8 @@ pub fn available(mailbox: Arc<Mailbox>, id: Id) -> Result<Options, &'static str>
 impl Backend {
     pub(crate) fn message_action(&mut self, folder: u64, item: u64, action: Action) -> Result<Value, &'static str> {
         if self.action_state.uncertain { return Err("action_uncertain"); }
-        if self.folder != Some(folder) || self.composer.is_some() || !self.listing.0.lock().unwrap().items.iter().any(|m| m.id.as_u64() == item) { return Err("invalid_selection"); }
+        if self.composer.is_some() { return Err("invalid_selection"); }
+        self.selected_message(folder, item)?;
         let mailbox = self.mailbox.clone().ok_or("invalid_state")?;
         let options = available(mailbox.clone(), Id::from(item))?;
         if !options.names().contains(&action) { return Err("action_unavailable"); }

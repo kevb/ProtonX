@@ -133,9 +133,16 @@ struct MailWindow: View {
             else { mailboxLayout }
         }
         .onChange(of: store.selectedItem) { _, selected in if selected == nil { readerExpanded = false } }
+        .onChange(of: store.conversationView) { _, _ in store.reconcileSelection(); store.select() }
         .navigationTitle("ProtonX Mail")
         .toolbar {
             ToolbarItem { if store.busy { ProgressView().controlSize(.small) } }
+            ToolbarItem {
+                Picker("Mail view", selection: $store.conversationView) {
+                    Text("Conversations").tag(true)
+                    Text("Messages").tag(false)
+                }.pickerStyle(.menu).accessibilityIdentifier("mailConversationView")
+            }
             ToolbarItem { Button { store.compose() } label: { Label("New message", systemImage: "square.and.pencil") }.disabled(store.busy || store.draft != nil) }
             ToolbarItem { Button { store.refresh() } label: { Label("Refresh Mail", systemImage: "arrow.clockwise") }.disabled(store.busy || store.demo) }
         }
@@ -201,17 +208,18 @@ struct MailWindow: View {
                 HStack(alignment: .firstTextBaseline) {
                     Text(folderTitle).font(.system(size: 20, weight: .semibold))
                     Spacer()
-                    Text("\(store.visibleMessages.count) loaded").font(.caption).foregroundStyle(.secondary)
+                    Text("\(store.visibleConversations.count) loaded").font(.caption).foregroundStyle(.secondary)
                 }.padding(.horizontal, 18).padding(.bottom, 16)
                 Divider()
                 List(selection: $store.selectedItem) {
-                    ForEach(store.visibleMessages) { message in
+                    ForEach(store.visibleConversations) { conversation in
+                        let message = conversation.representative
                         HStack(alignment: .top, spacing: 11) {
                             MailSenderAvatar(name: message.senderName.isEmpty ? message.sender : message.senderName)
                             VStack(alignment: .leading, spacing: 7) {
                                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                                     Text(message.senderName.isEmpty ? message.sender : message.senderName)
-                                        .font(.system(size: 13, weight: message.unread ? .semibold : .regular)).lineLimit(1)
+                                        .font(.system(size: 13, weight: conversation.unread ? .semibold : .regular)).lineLimit(1)
                                     Spacer(minLength: 0)
                                     if message.date > 0 {
                                         Text(Date(timeIntervalSince1970: Double(message.date)), format: .dateTime.month(.abbreviated).day())
@@ -219,17 +227,18 @@ struct MailWindow: View {
                                     }
                                 }
                                 Text(message.subject.isEmpty ? "(No subject)" : message.subject)
-                                    .font(.system(size: 13, weight: message.unread ? .medium : .regular)).lineLimit(2)
+                                    .font(.system(size: 13, weight: conversation.unread ? .medium : .regular)).lineLimit(2)
                                 HStack(spacing: 6) {
-                                    if message.unread { Circle().fill(MailTheme.accent).frame(width: 6, height: 6); Text("Unread") }
+                                    if conversation.unread { Circle().fill(MailTheme.accent).frame(width: 6, height: 6); Text("Unread") }
                                     if message.attachments > 0 { Image(systemName: "paperclip"); Text("\(message.attachments)") }
+                                    if conversation.messages.count > 1 { Text("\(conversation.messages.count) messages").help("Messages loaded in this folder; open the conversation for other messages") }
                                 }.font(.system(size: 10)).foregroundStyle(.secondary)
                             }
-                        }.padding(.vertical, 11).tag(message.id)
+                        }.padding(.vertical, 11).tag(conversation.selectionID(store.selectedItem))
                     }
                 }.listStyle(.plain).scrollContentBackground(.hidden)
                     .overlay {
-                        if store.visibleMessages.isEmpty {
+                        if store.visibleConversations.isEmpty {
                             if store.isLoadingList {
                                 ProgressView("Loading your mailbox…").frame(maxWidth: .infinity, maxHeight: .infinity)
                             } else if store.initialListFailed {
@@ -279,58 +288,104 @@ struct MailWindow: View {
                 Button("Reply", systemImage: "arrowshape.turn.up.left") { store.compose("reply") }.buttonStyle(MailActionStyle())
                 Button("Reply all", systemImage: "arrowshape.turn.up.left.2") { store.compose("reply_all") }.buttonStyle(MailActionStyle())
             }
-        }.fixedSize().disabled(store.busy || store.body == nil || store.draft != nil)
+        }.fixedSize().disabled(store.busy || store.threadLoading || store.body == nil || store.draft != nil)
     }
     @ViewBuilder private var messageReader: some View {
-            if let message = store.selectedMessage {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 22) {
+        if let message = store.selectedAnchor {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 22) {
+                    HStack(alignment: .top) {
+                        Text(message.subject.isEmpty ? "(No subject)" : message.subject).font(.system(size: 25, weight: .semibold))
+                        Spacer(minLength: 12)
+                        Button { readerExpanded.toggle() } label: {
+                            Image(systemName: readerExpanded ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
+                        }.buttonStyle(.plain).foregroundStyle(.secondary)
+                            .help(readerExpanded ? "Show mailbox" : "Expand message")
+                            .accessibilityLabel(readerExpanded ? "Show mailbox" : "Expand message")
+                    }
+                    if store.threadLoading { ProgressView("Loading conversation…").controlSize(.small) }
+                    if let issue = store.threadError {
                         HStack(alignment: .top) {
-                            Text(message.subject.isEmpty ? "(No subject)" : message.subject).font(.system(size: 25, weight: .semibold))
-                            Spacer(minLength: 12)
-                            Button { readerExpanded.toggle() } label: {
-                                Image(systemName: readerExpanded ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
-                            }.buttonStyle(.plain).foregroundStyle(.secondary)
-                                .help(readerExpanded ? "Show mailbox" : "Expand message")
-                                .accessibilityLabel(readerExpanded ? "Show mailbox" : "Expand message")
+                            Image(systemName: "exclamationmark.circle")
+                            Text(issue).font(.callout)
+                            Spacer()
+                            Button("Retry") { store.select(preferred: store.expandedThreadItem, preservingContent: true) }
+                            Button("Messages view") { store.conversationView = false }
+                        }.padding(14).background(MailTheme.accent.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+                    }
+                    if let thread = store.thread {
+                        Text(thread.messages.count == 1 ? "Conversation · 1 message" : "Conversation · \(thread.messages.count) messages").font(.callout).foregroundStyle(.secondary)
+                        ForEach(thread.messages) { member in
+                            if store.expandedThreadItem == member.id { messageCard(member, collapsible: true) }
+                            else { collapsedMessage(member) }
                         }
-                        VStack(alignment: .leading, spacing: 0) {
-                            VStack(alignment: .leading, spacing: 18) {
-                                VStack(alignment: .leading, spacing: 10) {
-                                    HStack(alignment: .firstTextBaseline, spacing: 12) {
-                                        Text("From").foregroundStyle(.secondary).frame(width: 38, alignment: .leading)
-                                        Text(message.senderName.isEmpty ? message.sender : message.senderName).fontWeight(.medium)
-                                        Spacer(minLength: 0)
-                                    }
-                                    if !message.senderName.isEmpty { Text(message.sender).font(.caption).foregroundStyle(MailTheme.accent).padding(.leading, 50) }
-                                    HStack(alignment: .firstTextBaseline, spacing: 12) {
-                                        Text("To").foregroundStyle(.secondary).frame(width: 38, alignment: .leading)
-                                        Text(message.recipient).foregroundStyle(.secondary)
-                                    }
-                                    if message.date > 0 { Text(Date(timeIntervalSince1970: Double(message.date)), format: .dateTime).font(.caption).foregroundStyle(.secondary).padding(.leading, 50) }
-                                }.font(.system(size: 13)).textSelection(.enabled)
-                                ViewThatFits(in: .horizontal) {
-                                    HStack(spacing: 12) { organizationActions(message); Spacer(minLength: 8); replyActions(message) }
-                                    VStack(alignment: .leading, spacing: 12) { organizationActions(message); replyActions(message) }
-                                }
-                            }.padding(22).frame(maxWidth: .infinity, alignment: .leading)
-                            Divider()
-                            if let body = store.body { MailMessageContent(text: body, sanitizedHTML: store.sanitizedHTML).id(message.id) }
-                            else if store.error != nil { Button("Retry loading message") { store.select() }.padding(28).frame(maxWidth: .infinity) }
-                            else { ProgressView("Decrypting message…").padding(28).frame(maxWidth: .infinity) }
-                            if message.attachments > 0 {
-                                Divider()
-                                Label("\(message.attachments) attachment(s) · open with the official client for now", systemImage: "paperclip")
-                                    .font(.caption).foregroundStyle(.secondary).padding(18)
-                            }
-                        }.background(MailTheme.canvas).clipShape(RoundedRectangle(cornerRadius: 14))
-                            .overlay { RoundedRectangle(cornerRadius: 14).strokeBorder(MailTheme.border, lineWidth: 1).allowsHitTesting(false) }
-                    }.padding(26).frame(maxWidth: 940, alignment: .leading).frame(maxWidth: .infinity)
-                }.background(MailTheme.canvas)
-            } else {
-                ContentUnavailableView("Choose a message", systemImage: "envelope", description: Text("Read your mail in its own Mac window."))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity).background(MailTheme.canvas)
+                    } else { messageCard(message, collapsible: false) }
+                }.padding(26).frame(maxWidth: 940, alignment: .leading).frame(maxWidth: .infinity)
+            }.background(MailTheme.canvas)
+        } else {
+            ContentUnavailableView("Choose a message", systemImage: "envelope", description: Text("Read your mail in its own Mac window."))
+                .frame(maxWidth: .infinity, maxHeight: .infinity).background(MailTheme.canvas)
+        }
+    }
+    private func messageCard(_ message: NativeMailMessage, collapsible: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(alignment: .firstTextBaseline, spacing: 12) {
+                        Text("From").foregroundStyle(.secondary).frame(width: 38, alignment: .leading)
+                        Text(message.senderName.isEmpty ? message.sender : message.senderName).fontWeight(.medium)
+                        Spacer(minLength: 0)
+                        if collapsible { Button { store.expandThreadMessage(message.id) } label: { Image(systemName: "chevron.up") }.buttonStyle(.plain).help("Collapse message").accessibilityLabel("Collapse message") }
+                    }
+                    if !message.senderName.isEmpty { Text(message.sender).font(.caption).foregroundStyle(MailTheme.accent).padding(.leading, 50) }
+                    HStack(alignment: .firstTextBaseline, spacing: 12) {
+                        Text("To").foregroundStyle(.secondary).frame(width: 38, alignment: .leading)
+                        Text(message.recipient).foregroundStyle(.secondary)
+                    }
+                    if message.date > 0 { Text(Date(timeIntervalSince1970: Double(message.date)), format: .dateTime).font(.caption).foregroundStyle(.secondary).padding(.leading, 50) }
+                }.font(.system(size: 13)).textSelection(.enabled)
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 12) { organizationActions(message); Spacer(minLength: 8); replyActions(message) }
+                    VStack(alignment: .leading, spacing: 12) { organizationActions(message); replyActions(message) }
+                }
+            }.padding(22).frame(maxWidth: .infinity, alignment: .leading)
+            Divider()
+            if let body = store.body { MailMessageContent(text: body, sanitizedHTML: store.sanitizedHTML).id(message.id) }
+            else if store.error != nil { Button("Retry loading message") { store.select(preferred: message.id) }.padding(28).frame(maxWidth: .infinity) }
+            else { ProgressView("Decrypting message…").padding(28).frame(maxWidth: .infinity) }
+            if message.attachments > 0 {
+                Divider()
+                Label("\(message.attachments) attachment(s) · open with the official client for now", systemImage: "paperclip")
+                    .font(.caption).foregroundStyle(.secondary).padding(18)
             }
+        }.background(MailTheme.canvas).clipShape(RoundedRectangle(cornerRadius: 14))
+            .overlay { RoundedRectangle(cornerRadius: 14).strokeBorder(MailTheme.border, lineWidth: 1).allowsHitTesting(false) }
+    }
+    private func collapsedMessage(_ message: NativeMailMessage) -> some View {
+        Button { store.expandThreadMessage(message.id) } label: {
+            HStack(alignment: .top, spacing: 12) {
+                MailSenderAvatar(name: message.senderName.isEmpty ? message.sender : message.senderName)
+                VStack(alignment: .leading, spacing: 7) {
+                    HStack {
+                        Text(message.senderName.isEmpty ? message.sender : message.senderName).fontWeight(message.unread ? .semibold : .medium)
+                        Spacer()
+                        if message.unread { Circle().fill(MailTheme.accent).frame(width: 6, height: 6) }
+                        if message.attachments > 0 { Image(systemName: "paperclip"); Text("\(message.attachments)") }
+                    }
+                    Text(message.subject.isEmpty ? "(No subject)" : message.subject).foregroundStyle(.secondary).lineLimit(1)
+                    HStack {
+                        Text("To \(message.recipient)").lineLimit(1)
+                        Spacer()
+                        if message.date > 0 { Text(Date(timeIntervalSince1970: Double(message.date)), format: .dateTime.month(.abbreviated).day().hour().minute()) }
+                    }.font(.caption).foregroundStyle(.secondary)
+                }
+                Image(systemName: "chevron.down").foregroundStyle(.secondary)
+            }.font(.callout).padding(18).frame(maxWidth: .infinity, alignment: .leading)
+                .background(MailTheme.collection, in: RoundedRectangle(cornerRadius: 14))
+                .overlay { RoundedRectangle(cornerRadius: 14).strokeBorder(MailTheme.border, lineWidth: 1) }
+        }.buttonStyle(.plain).disabled(store.threadLoading)
+            .accessibilityLabel("Open message from " + (message.senderName.isEmpty ? message.sender : message.senderName))
+            .accessibilityIdentifier("mailThreadMessage.\(message.id)")
     }
     private func signIn() { let supplied = password; password = ""; store.signIn(username: username, password: supplied) }
     private func submitChallenge() { let supplied = code; code = ""; store.submitChallenge(supplied) }

@@ -71,3 +71,31 @@ responses and cancellation. Native scrolling and late layout growth have contrac
 The image-only resource boundary uses WebKit's
 [content rule mechanism](https://webkit.org/blog/3476/content-blockers-first-look/);
 no ATS exceptions or certificate-validation bypass are added.
+
+## Conversation reader
+
+The toolbar switches between **Conversations** and **Messages**. Loaded folder
+summaries group by the SDK conversation ID; matching subjects are never used to
+infer membership. Search matches any loaded member, unread styling reflects
+loaded members, and list counts do not claim a server-wide conversation total.
+Older helpers without conversation IDs retain individual-message browsing.
+
+Opening a row calls the pinned core's conversation API with the selected folder
+message as its anchor. The SDK supplies authoritative membership across folders,
+including Sent, while keeping its normal Trash visibility. Unique message IDs,
+matching conversation identity, the anchor's presence and chronological ordering
+are validated on both sides of IPC. Metadata is capped at 200 messages and 4 MiB;
+failed or oversized conversations fall back to the selected message with an
+explicit error and retry/individual-view choices.
+
+The reader presents chronological cards with native headers. One card is expanded
+at a time, and closing it leaves all cards collapsed. Each expanded card gets its
+own existing bounded renderer, actions and reply context. Selection and session
+generation checks discard late metadata/body responses after switching or locking.
+Remote-image consent does not carry between cards. There is no whole-conversation
+read/move/delete operation; the selected message remains the unit of mutation.
+
+Synthetic contracts cover cross-folder members, grouping/search, reply and action
+targets, fallback, malformed/oversized membership and lock/folder-switch races.
+Real-account conversation interoperability remains an acceptance gate. Attachment
+viewing/sending and richer conversation navigation remain follow-on work.

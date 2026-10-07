@@ -11,14 +11,44 @@ are excluded from public artifacts.
 | --- | --- | --- |
 | Pass account workflow | Manual fictional-login creation, bidirectional edit/sync with the official desktop app, conflict refusal, Trash/restore and online quit/restart | Broader item/account types, real server expiry/revocation and upgrade/Keychain continuity |
 | Pass saved/offline browsing | Synthetic encrypted-storage, policy, saved-first/reconnect and lock-race tests | Disconnected account restart and larger-vault measurements |
-| Native Mail | Manual sign-in and message reading; synthetic/public tests for reading, composer, sender selection and message actions | Live send/reply delivery, linked-Gmail delivery and account recovery |
+| Native Mail | Manual sign-in and message reading; synthetic/public tests for reading, composer, sender selection, message actions and conversations | Conversation interoperability, live send/reply delivery, linked-Gmail delivery and account recovery |
 | Mail secure storage | Opt-in database/file encryption and resumable database/attachment staging contracts | Cache path rebasing/activation, whole-profile cutover and pending-send/draft recovery before enabling ordinary builds |
 | Product launchers | Synthetic native UI checks for cold/warm requests, minimized/closed windows and reverse product selection; signed installer checks | Minimum-OS runtime and update/Keychain continuity |
 
-The latest local Swift run passed 120 tests (62 core, 58 app); five synthetic
+The latest local Swift run passed 129 tests (65 core, 64 app); five synthetic
 atomic-install tests passed. These are local results, not a statement about the
 latest GitHub run. Dated entries below record milestone-specific test scope and
 historical limitations. The README and roadmap describe the current feature set.
+
+## Mail conversations, 2026-10-07
+
+- Added SDK conversation IDs to summaries and a closed selected-conversation
+  command. Anchors must belong to the current bounded folder snapshot; the helper
+  derives identity, preserves the SDK Trash policy and validates unique membership,
+  anchor presence, a 200-message limit and a 4 MiB metadata limit.
+- Native list grouping, chronological expandable cards and a Conversations/Messages
+  switch are implemented. One body is loaded at a time; replies and actions target
+  the expanded message rather than the list anchor. Refresh retains that selection
+  if it remains in the conversation. Failed/oversized threads fall back explicitly
+  to the anchor. Lock/folder changes discard late results and clear thread state.
+- All 129 Swift tests passed (65 core, 64 app), including nine new grouping,
+  protocol, selection/action/undo, fallback and gated late-response contracts. All 21
+  helper tests passed, including three new selected-thread boundary tests.
+- All 42 public pinned SDK conversation tests passed: seven mailbox-conversation
+  tests and 35 conversation-scroller tests. The normal storage-feature and native
+  Mail identity/privacy/source contracts passed. SDK pins, dependencies and crypto
+  implementations are unchanged; encryption remains opt-in.
+- Synthetic native preview checks verified a three-message cross-folder exchange,
+  expanded/collapsed cards, reaching later messages by scrolling and replying from
+  a sent card. No account profile or real mailbox was accessed and no mail sent.
+  The Conversations/Messages switch retained selection while showing one grouped
+  Sent row or two individual messages; collapsing left all cards closed.
+  Conversation interoperability and attachment viewing/sending remain acceptance
+  and implementation work respectively.
+- Optimized native Mail helper, release app and isolated preview built and passed
+  strict nested signature verification. The verified atomic installer updated
+  ProtonX and both Spotlight launchers in Applications without opening a profile.
+  This local signature is not Developer ID notarization.
 
 ## Existing Mail attachment staging, 2026-10-07
 
