@@ -103,6 +103,9 @@ final class SystemIntegration: NSObject {
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        MainActor.assumeIsolated { NativeNotifications.shared.install() }
+    }
     func applicationDidFinishLaunching(_ notification: Notification) {
         ProductWindows.shared.didFinishLaunching()
     }

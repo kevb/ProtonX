@@ -84,6 +84,9 @@ struct Request {
 #[serde(tag = "method", rename_all = "snake_case", deny_unknown_fields)]
 enum Command {
     Initialize,
+    NotificationsStart,
+    NotificationsPoll,
+    NotificationsStop,
     Restore,
     Login {
         username: String,
@@ -567,6 +570,16 @@ impl Backend {
     }
     fn handle(&mut self, command: Command) -> Result<Value, &'static str> {
         match command {
+            Command::NotificationsStart | Command::NotificationsPoll | Command::NotificationsStop => {
+                let user = self.user.clone().ok_or("invalid_state")?;
+                let operation = match command { Command::NotificationsStop => 0, Command::NotificationsStart => 1, _ => 2 };
+                let notifications = block_on(user.protonx_notifications(operation)).map_err(|e| proton_failure(&e, "snapshot_failed"))?;
+                let sidebar = Sidebar::new(&user);
+                let systems = sdk_result!(mail_uniffi::mail::sidebar::SidebarSystemLabelsResult, block_on(sidebar.system_labels()))
+                    .map_err(|e| action_failure(e, "snapshot_failed"))?;
+                let unread = systems.iter().find(|f| inbox_actions::folder_kind(&f.description) == "inbox").map(|f| f.count).unwrap_or(0);
+                Ok(json!({"notifications":notifications, "unreadCount":unread}))
+            }
             Command::Initialize => {
                 let sessions = sdk_result!(
                     mail_uniffi::mail::MailSessionGetSessionsResult,

@@ -134,6 +134,13 @@ selected message only. Message scripts remain disabled, links require an externa
 open confirmation, and plain text is always available. See
 [reader boundaries](docs/MAIL_RENDERING.md).
 
+Native Mail alerts are opt-in under **Settings → Notifications**. Enable macOS
+permission, choose sound, an unread Dock badge and private or sender/subject
+previews, then use **Send test notification**. Alerts follow Proton's category
+and folder preferences and open the relevant message when available. ProtonX
+must be running with Mail unlocked; locking clears alerts and the badge. See
+[notification behavior](docs/NOTIFICATIONS.md).
+
 **Connect using Bridge…** remains an advanced compatibility prototype. It uses
 a separate eligible Bridge installation, generated client password and imported
 public certificate, subject to Bridge's product limits.

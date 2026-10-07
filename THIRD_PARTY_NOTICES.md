@@ -33,7 +33,9 @@ Source: https://github.com/ProtonMail/clients; revision in `upstream.lock.json`.
 `Tools/ProtonXMailHelper` supplies narrow private IPC, macOS Keychain callbacks,
 authentication/challenge orchestration and selected-message text rendering.
 `patches/mail-core.patch` exposes the existing Rust sidebar module and adds an
-opt-in feature disabling SDK logging and telemetry. Cryptography is unchanged.
+opt-in feature disabling SDK logging and telemetry. `patches/mail-notifications.patch`
+and `Tools/MailNotifications` add a bounded, read-only queue of committed
+CREATE events for native alerts. Cryptography is unchanged.
 The build excludes unpublished workspace members and uses the public crates.io
 index instead of Proton's internal mirror. `Resources/MailHelper.lock` pins all
 resolutions. The helper also uses security-framework and html2text; original

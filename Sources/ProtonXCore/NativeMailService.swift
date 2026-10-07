@@ -39,6 +39,18 @@ public enum NativeMailAction: String, Codable, CaseIterable, Sendable {
         switch self { case .read: "envelope.open"; case .unread: "envelope.badge"; case .archive: "archivebox"; case .trash: "trash"; case .inbox: "tray.and.arrow.down"; case .spam: "flame" }
     }
 }
+public struct NativeMailNotification: Codable, Equatable, Sendable {
+    public let id: UInt64
+    public let folder: UInt64
+    public let sender: String
+    public let subject: String
+    public init(id: UInt64, folder: UInt64, sender: String, subject: String) { self.id = id; self.folder = folder; self.sender = sender; self.subject = subject }
+    public func validate() throws {
+        guard id > 0, folder > 0, sender.count <= 320, subject.count <= 998,
+              !sender.unicodeScalars.contains(where: { $0.properties.generalCategory == .control }),
+              !subject.unicodeScalars.contains(where: { $0.properties.generalCategory == .control }) else { throw ProtonXError.invalidResponse }
+    }
+}
 public struct NativeMailResult: Codable, Sendable {
     public var phase: NativeMailPhase?
     public var folders: [NativeMailFolder]?
@@ -62,13 +74,16 @@ public struct NativeMailResult: Codable, Sendable {
     public var undoToken: UInt64?
     public var thread: NativeMailThread?
     public var conversationID: UInt64?
-    public init(phase: NativeMailPhase? = nil, folders: [NativeMailFolder]? = nil, folder: UInt64? = nil, messages: [NativeMailMessage]? = nil, loading: Bool? = nil, email: String? = nil, id: UInt64? = nil, body: String? = nil, sanitizedHTML: String? = nil, attachments: Int? = nil, draft: NativeMailDraft? = nil, token: UInt64? = nil, sendState: NativeMailSendState? = nil, closed: Bool? = nil, cacheFirst: Bool? = nil, fresh: Bool? = nil, refreshFailed: Bool? = nil, actions: [NativeMailAction]? = nil, queued: Bool? = nil, undoToken: UInt64? = nil, thread: NativeMailThread? = nil, conversationID: UInt64? = nil) {
+    public var notifications: [NativeMailNotification]?
+    public var unreadCount: UInt64?
+    public init(phase: NativeMailPhase? = nil, folders: [NativeMailFolder]? = nil, folder: UInt64? = nil, messages: [NativeMailMessage]? = nil, loading: Bool? = nil, email: String? = nil, id: UInt64? = nil, body: String? = nil, sanitizedHTML: String? = nil, attachments: Int? = nil, draft: NativeMailDraft? = nil, token: UInt64? = nil, sendState: NativeMailSendState? = nil, closed: Bool? = nil, cacheFirst: Bool? = nil, fresh: Bool? = nil, refreshFailed: Bool? = nil, actions: [NativeMailAction]? = nil, queued: Bool? = nil, undoToken: UInt64? = nil, thread: NativeMailThread? = nil, conversationID: UInt64? = nil, notifications: [NativeMailNotification]? = nil, unreadCount: UInt64? = nil) {
         self.phase = phase; self.folders = folders; self.folder = folder; self.messages = messages
         self.loading = loading; self.email = email; self.id = id; self.body = body; self.sanitizedHTML = sanitizedHTML; self.attachments = attachments
         self.draft = draft; self.token = token; self.sendState = sendState; self.closed = closed
         self.cacheFirst = cacheFirst; self.fresh = fresh; self.refreshFailed = refreshFailed
         self.actions = actions; self.queued = queued; self.undoToken = undoToken
         self.thread = thread; self.conversationID = conversationID
+        self.notifications = notifications; self.unreadCount = unreadCount
     }
 }
 public enum NativeMailFailure: String, Codable, Error, LocalizedError, Sendable {
@@ -256,6 +271,11 @@ public final class NativeMailProcess: NativeMailRunning, @unchecked Sendable {
         guard result.fresh != true || (result.loading != true && result.refreshFailed != true) else { throw ProtonXError.invalidResponse }
         guard (result.actions?.count ?? 0) <= NativeMailAction.allCases.count, result.undoToken == nil || (result.queued == true && result.undoToken! > 0) else { throw ProtonXError.invalidResponse }
         if let messages = result.messages { guard Set(messages.map(\.id)).count == messages.count else { throw ProtonXError.invalidResponse } }
+        if let notifications = result.notifications {
+            guard notifications.count <= 64, Set(notifications.map(\.id)).count == notifications.count, result.unreadCount != nil else { throw ProtonXError.invalidResponse }
+            try notifications.forEach { try $0.validate() }
+        }
+        guard result.unreadCount == nil || result.unreadCount! <= UInt64(Int.max) else { throw ProtonXError.invalidResponse }
         if let thread = result.thread { try thread.validate() }
         if let conversation = result.conversationID {
             guard conversation > 0, result.id != nil, result.queued == true else { throw ProtonXError.invalidResponse }

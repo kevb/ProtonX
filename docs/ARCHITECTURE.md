@@ -174,3 +174,20 @@ with download links would not fulfill that product's job.
 The Pass helper interface is pinned, not a promise that Proton's internal API is
 stable. Schema tests and lockfiles make drift reviewable. Upgrade one revision at
 a time; inspect auth, model, encryption and license changes before adapting it.
+
+## Native notifications
+
+`NativeNotifications` owns macOS permission, delivery, Dock badges and opaque
+click tickets. Product stores remain independent; only the unlocked native Mail
+store attaches a monitor. Its five-second reads consume an in-memory SDK queue,
+not network polls or list diffs. The existing SDK event loop fetches server
+changes on its configured interval (currently 60 seconds). The feature-gated
+Mail patch records CREATE IDs after event transaction commit, then checks current
+unread/import/label/category state before projecting bounded sender/subject
+metadata. It does not alter cryptography or server writes. Both V5 and V6 hooks
+are covered by synthetic SDK fixtures.
+
+Settings and preview/lock behavior are described in [NOTIFICATIONS.md](NOTIFICATIONS.md).
+OS delivery is injected for contract tests. Real app bundles install a retained
+UserNotifications delegate before launch completes; command-line tests and
+synthetic preview bundles never instantiate the native notification center.

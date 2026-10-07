@@ -62,4 +62,12 @@ assert main.index('guard.check_startup(false)') < main.index('Backend::new(direc
 assert main.index('drop(backend)') < main.index('std::process::exit(0)')
 assert 'drop(storage_guard)' not in main
 assert 'org.kevb.ProtonX.Mail.Storage' in secure
-print("Independent native Mail protocol and privacy contracts verified")
+
+assert (native / "project/mail/rust/mail/mail-common/src/native_notifications.rs").read_bytes() == (root / "Tools/MailNotifications/native_notifications.rs").read_bytes()
+for relative in ["messages.rs", "v6/event_subscriber.rs"]:
+    assert "native_created.push(id)" in (native / "project/mail/rust/mail/mail-common/src/user_context/events" / relative).read_text()
+assert "NotificationsPoll" in helper and "protonx_notifications(operation)" in helper
+
+assert (native / "project/mail/rust/mail/mail-common/tests/protonx_notifications.rs").read_bytes() == (root / "Tools/MailContractTests/notifications.rs").read_bytes()
+
+print("Independent native Mail protocol, privacy and notification contracts verified")

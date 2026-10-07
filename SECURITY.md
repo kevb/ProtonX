@@ -255,3 +255,24 @@ including hidden ones; late helper replies remain subject to existing epochs.
 Public product links still accept only the two closed routes defined above and
 select the product before activating the same suite window. No account data is
 accepted in routes, and no global account/session cache is introduced.
+
+## Desktop notifications
+
+Mail notification monitoring is opt-in and runs only in the unlocked Mail session.
+A bounded, nonpersistent queue observes committed SDK CREATE events; no new
+push service, device token, secret store, account sharing or transport is added.
+The Swift adapter reads this queue over the existing private helper pipe. It
+never derives incoming alerts from list diffs, paging, read/unread changes or
+message bodies. Screen lock, window close, logout and session expiry stop the
+helper and clear pending/delivered app alerts and the unread Dock count.
+
+Private previews are the default. Enabling sender/subject previews explicitly
+shares that metadata with macOS Notification Center, whose OS display, Focus
+and preview settings also apply. Clearing alerts is not a promise to erase OS
+logs, screenshots or notification history after a crash. No message body,
+recipient, account identity or session token enters notification content or
+routing metadata. OS click routing uses bounded, random in-memory tickets,
+invalidated on lock and policy changes. Stale tickets only open the Mail interface, with its usual local authentication
+requirements. Valid clicks navigate only to messages disclosed by the current bounded SDK
+list and preserve an open composer. Test alerts contain synthetic text only;
+preview builds cannot request OS permission, deliver alerts or set a Dock badge.

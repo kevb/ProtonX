@@ -1,0 +1,109 @@
+--- a/project/mail/rust/mail/mail-common/Cargo.toml
++++ b/project/mail/rust/mail/mail-common/Cargo.toml
+@@ -6,6 +6,7 @@
+ license = "AGPL-3.0-only"
+ 
+ [features]
++protonx-native = []
+ default = ["sql", "events-v6"]
+ protonx-encrypted = ["dep:protonx-mail-storage", "mail-stash/protonx-encrypted"]
+ gtk = []
+--- a/project/mail/rust/mail/mail-uniffi/Cargo.toml
++++ b/project/mail/rust/mail/mail-uniffi/Cargo.toml
+@@ -66,7 +66,7 @@
+ 
+ [features]
+ # ProtonX has no diagnostics/telemetry uploads. Upstream defaults are unchanged.
+-protonx-native = ["mail-telemetry/protonx-native"]
++protonx-native = ["mail-telemetry/protonx-native", "mail-common/protonx-native"]
+ default = []
+ # Enable stdout logging for iOS (logs appear in Xcode console)
+ # Works in both debug and release builds
+--- a/project/mail/rust/mail/mail-common/src/lib.rs
++++ b/project/mail/rust/mail/mail-common/src/lib.rs
+@@ -33,6 +33,8 @@
+ mod traits;
+ mod upsell_eligibility;
+ mod user_context;
++#[cfg(feature = "protonx-native")]
++pub mod native_notifications;
+ 
+ #[cfg(feature = "test-utils")]
+ pub mod test_utils;
+--- a/project/mail/rust/mail/mail-common/src/user_context.rs
++++ b/project/mail/rust/mail/mail-common/src/user_context.rs
+@@ -372,6 +372,9 @@
+                     .with_cyclic_service(TrackerService::new)
+                     .with_cyclic_service(UpsellEligibilityService::new);
+ 
++            #[cfg(feature = "protonx-native")]
++            { builder = builder.with_service(crate::native_notifications::NativeNotifications::default()); }
++
+             // Initialize Foundation Search service with Stash connection pool
+             // Extract TaskService from the context to ensure proper lifecycle management.
+             // The TaskService is extracted from BackgroundAwareTaskService which wraps it.
+--- a/project/mail/rust/mail/mail-common/src/user_context/events/event_subscriber.rs
++++ b/project/mail/rust/mail/mail-common/src/user_context/events/event_subscriber.rs
+@@ -46,6 +46,8 @@
+ #[derive(Default)]
+ pub struct PostEventSyncData {
+     pub msg_for_prefetch: Vec<LocalMessageId>,
++    #[cfg(feature = "protonx-native")]
++    pub native_created: Vec<LocalMessageId>,
+     pub cnv_for_prefetch: Vec<LocalConversationId>,
+     queue_incoming_default: bool,
+ }
+@@ -59,6 +61,8 @@
+         ctx: &Arc<MailUserContext>,
+         tether: &Tether,
+     ) -> Result<(), MailContextError> {
++        #[cfg(feature = "protonx-native")]
++        ctx.get_service::<crate::native_notifications::NativeNotifications>().record(self.native_created);
+         let label_id = SystemLabel::AllMail.local_id(tether).await?.unwrap();
+ 
+         let conversation_jobs = self
+--- a/project/mail/rust/mail/mail-common/src/user_context/events/messages.rs
++++ b/project/mail/rust/mail/mail-common/src/user_context/events/messages.rs
+@@ -29,6 +29,8 @@
+         .await?
+         {
+             data.msg_for_prefetch.push(id);
++            #[cfg(feature = "protonx-native")]
++            if crate::native_notifications::NativeNotifications::created(event.action) { data.native_created.push(id); }
+         }
+     }
+ 
+--- a/project/mail/rust/mail/mail-common/src/user_context/events/v6/event_subscriber.rs
++++ b/project/mail/rust/mail/mail-common/src/user_context/events/v6/event_subscriber.rs
+@@ -122,6 +122,8 @@
+                             .await?
+                             {
+                                 post_event_data.msg_for_prefetch.push(id);
++                                #[cfg(feature = "protonx-native")]
++                                if crate::native_notifications::NativeNotifications::created(event.action.into()) { post_event_data.native_created.push(id); }
+                             }
+                         }
+                     }
+--- a/project/mail/rust/mail/mail-uniffi/src/mail/user_session.rs
++++ b/project/mail/rust/mail/mail-uniffi/src/mail/user_session.rs
+@@ -46,6 +46,20 @@
+ }
+ 
+ impl MailUserSession {
++    /// Local, read-only CREATE-event projection for the ProtonX native adapter.
++    /// Not exported through UniFFI and inactive until explicitly armed.
++    #[cfg(feature = "protonx-native")]
++    pub async fn protonx_notifications(&self, operation: u8) -> Result<Vec<mail_common::native_notifications::NativeNotification>, ProtonError> {
++        let ctx = self.ctx()?;
++        let queue = ctx.get_service::<mail_common::native_notifications::NativeNotifications>();
++        match operation {
++            0 => { queue.stop(); Ok(Vec::new()) },
++            1 => { queue.start(); Ok(Vec::new()) },
++            2 => queue.drain(&ctx).await.map_err(|_| UnexpectedError::Internal.into()),
++            _ => Err(UnexpectedError::Internal.into()),
++        }
++    }
++
+     pub(crate) fn new(ctx: MailUserContextPtr) -> Arc<Self> {
+         Arc::new(Self { ctx })
+     }

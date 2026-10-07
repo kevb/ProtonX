@@ -64,6 +64,10 @@ final class NativeMailStore: ObservableObject {
     private var undoExpiration: Task<Void, Never>?
     private var demoLocations: [UInt64: UInt64] = [:]
     private var demoUndo: (messages: [NativeMailMessage], locations: [UInt64: UInt64])?
+    private var notificationTask: Task<Void, Never>?
+    private var notificationEpoch = SessionEpoch()
+    private var notifications: NativeNotifications?
+    private var notificationInterval: Duration = .seconds(5)
     private var sendPolling: Task<Void, Never>?
     let previewOnly: Bool
     private let runner: any NativeMailRunning
@@ -139,6 +143,7 @@ final class NativeMailStore: ObservableObject {
         case .securityKey: phase = .securityKey
         case .connected:
             hasSession = true; defaults.set(true, forKey: "nativeMailConnected"); phase = .open
+            restartNotifications()
             cacheFirstActive = result.cacheFirst == true
             try await load(captured: captured, mode: cacheFirstActive ? "local" : nil)
         default: throw ProtonXError.invalidResponse
@@ -547,8 +552,64 @@ final class NativeMailStore: ObservableObject {
             hasSession = false; defaults.set(false, forKey: "nativeMailConnected"); lock(); phase = .welcome
         }
     }
+    func configureNotifications(_ controller: NativeNotifications, interval: Duration = .seconds(5)) {
+        notifications = controller; notificationInterval = interval
+        controller.configurationChanged = { [weak self] in self?.restartNotifications() }
+        restartNotifications()
+    }
+    private func restartNotifications() {
+        notificationEpoch.invalidate(); notificationTask?.cancel(); notificationTask = nil
+        notifications?.clearMail()
+        guard !previewOnly, !demo, phase == .open, let notifications else { return }
+        let session = epoch.value, generation = notificationEpoch.value
+        notificationTask = Task { [weak self] in
+            await notifications.refreshPermission()
+            guard let self, !Task.isCancelled, self.epoch.accepts(session), self.notificationEpoch.accepts(generation) else { return }
+            do {
+                let result = try await self.runner.request(NativeMailCommand(notifications.active ? "notifications_start" : "notifications_stop"))
+                guard !Task.isCancelled, self.epoch.accepts(session), self.notificationEpoch.accepts(generation), notifications.active else { return }
+                notifications.beginMail()
+                await notifications.receive(result.notifications ?? [], unread: result.unreadCount ?? 0)
+                while !Task.isCancelled {
+                    try await Task.sleep(for: self.notificationInterval)
+                    await notifications.refreshPermission()
+                    guard !Task.isCancelled, self.epoch.accepts(session), self.notificationEpoch.accepts(generation), notifications.active else { return }
+                    do {
+                        let result = try await self.runner.request(NativeMailCommand("notifications_poll"))
+                        guard !Task.isCancelled, self.epoch.accepts(session), self.notificationEpoch.accepts(generation) else { return }
+                        guard let batch = result.notifications, let unread = result.unreadCount else { throw ProtonXError.invalidResponse }
+                        await notifications.receive(batch, unread: unread)
+                    } catch {
+                        if Task.isCancelled || !self.epoch.accepts(session) || !self.notificationEpoch.accepts(generation) { return }
+                        if (error as? NativeMailFailure) == .sessionExpired { self.expireSession(); return }
+                        if (error as? NativeMailFailure) == .invalidState || !(error is NativeMailFailure) {
+                            notifications.monitorUnavailable(); return
+                        }
+                        // Transient failures retain the loop; no replay of delivered alerts.
+                    }
+                }
+            } catch {
+                guard !Task.isCancelled, self.epoch.accepts(session), self.notificationEpoch.accepts(generation) else { return }
+                if (error as? NativeMailFailure) == .sessionExpired { self.expireSession() }
+                else { notifications.monitorUnavailable() }
+            }
+        }
+    }
+    func openNotification(folder: UInt64, item: UInt64) {
+        guard phase == .open, !demo, !previewOnly else { return }
+        // Navigation never replaces or discards an open composer.
+        guard draft == nil else { notice = "New mail received. Save or close your draft to view it."; return }
+        guard !busy else { notice = "New mail received. Refresh Mail when the current operation finishes."; return }
+        query = ""; selectedFolder = folder
+        perform { [self] captured in
+            try await load(captured: captured)
+            guard messages.contains(where: { $0.id == item }) else { notice = "The message is outside the current page. Your mailbox is open; refresh or load more to find it."; return }
+            selectedItem = item; select(preferred: item)
+        }
+    }
     func cancelLocalUnlock() { if localAuthentication.state == .authenticating { lock() } }
     func lock() {
+        notificationEpoch.invalidate(); notificationTask?.cancel(); notificationTask = nil; notifications?.clearMail()
         epoch.invalidate(); selectionEpoch.invalidate(); operation?.cancel(); selection?.cancel(); polling?.cancel(); sendPolling?.cancel(); localAuthentication.cancel(); runner.cancelAll()
         folders = []; messages = []; body = nil; sanitizedHTML = nil; selectedItem = nil; selectedFolder = nil; query = ""; email = ""; error = nil
         clearThread()

@@ -44,7 +44,7 @@ struct ProtonXApp: App {
     }
 }
 
-struct SettingsView: View {
+struct GeneralSettingsView: View {
     @AppStorage("menuBarEnabled") private var menuBarEnabled = true
     @AppStorage("quickAccessEnabled") private var quickAccessEnabled = false
     @AppStorage("autoLockSeconds") private var autoLockSeconds = 300
@@ -72,6 +72,15 @@ struct SettingsView: View {
                 Link("Source, license, and notices", destination: URL(string: "https://github.com/kevb/ProtonX")!)
                 Text("GPL-3.0-or-later · No warranty · Independent of Proton AG").font(.caption).foregroundStyle(.secondary)
             }
-        }.formStyle(.grouped).padding(16).frame(width: 530)
+        }.formStyle(.grouped).padding(16).frame(maxWidth: .infinity)
+    }
+}
+
+struct SettingsView: View {
+    var body: some View {
+        TabView {
+            GeneralSettingsView().tabItem { Label("General", systemImage: "gearshape") }
+            NotificationSettingsView().tabItem { Label("Notifications", systemImage: "bell") }
+        }.frame(width: 580, height: 620).tint(PassTheme.accent)
     }
 }

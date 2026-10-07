@@ -28,3 +28,7 @@ cargo test --locked -p mail-common --test actions_read_unread --test message_rea
 # Conversation identity, cross-folder members, Trash visibility and paging use
 # the pinned SDK's genuine local/mock fixtures, without production credentials.
 cargo test --locked -p mail-common --test mailbox_conversation --test conversation_mail_scroller --profile mail-macos-debug
+
+# Native alerts are driven by committed CREATE events, not list refreshes.
+cargo test --locked -p mail-common --features protonx-native --lib native_notifications --profile mail-macos-debug
+cargo test --locked -p mail-common --features protonx-native --test protonx_notifications --profile mail-macos-debug

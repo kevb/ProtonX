@@ -199,7 +199,7 @@ assets; public captures and fixtures use synthetic content.
 | Reader privacy/images | Proton image proxy and tracker/pixel protection, tracking-link cleanup, persistent remote/embedded-image preferences and sender logos. Current raster-image opt-in fetches directly without Proton's proxy. |
 | Message inspection | Full headers/original source, encryption/security indicators/details, external PGP key/trust/address-verification controls. Existing Proton encryption is not a missing feature. |
 | Print/export/import | Print/PDF, individual EML export and native mailbox import/migration workflows. |
-| Background/macOS | New-mail notifications, unread Dock badge, reliable background refresh, opt-in launch at login and default-mail-app/mailto registration. |
+| Background/macOS | Locked/quit-state push delivery, reliable background refresh, opt-in launch at login and default-mail-app/mailto registration. Native new-mail alerts, privacy/sound controls and an unread Dock badge are implemented for running, unlocked Mail. Snoozed-reminder alerts remain. |
 | Settings | Row/split layouts, density/composer size, explicit theme override, shortcut reference and broader keyboard actions; defaults/signatures/display names per sending identity; address/domain/linked-account setup or appropriate official settings links. Enabled Proton/custom-domain/Gmail identities already work. |
 | Support/recovery | Product-scoped local-data reset with draft/uncertain-send safeguards, redacted diagnostic export, full settings/account/support entry points and storage/plan presentation. |
 | Calendar/contextual tools | Calendar product and Mail invitation/RSVP integration; Calendar/Contacts inspectors; appropriate account/security links. See the staged Calendar plan above. |

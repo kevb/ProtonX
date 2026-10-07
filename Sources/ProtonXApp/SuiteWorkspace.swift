@@ -15,11 +15,12 @@ import ProtonXCore
     private let defaults: UserDefaults
     private let makePass: () -> PassStore
     private let makeMail: () -> NativeMailStore
+    private let makeNotificationsAvailable: Bool
     private var observations: Set<AnyCancellable> = []
 
     init(defaults: UserDefaults = .standard, previewOnly: Bool = Bundle.main.bundleIdentifier == "org.kevb.ProtonX.Preview",
          initialProduct: ProductRoute? = nil, makePass: (() -> PassStore)? = nil, makeMail: (() -> NativeMailStore)? = nil) {
-        self.defaults = defaults; self.previewOnly = previewOnly
+        self.defaults = defaults; self.previewOnly = previewOnly; self.makeNotificationsAvailable = makeMail == nil
         self.makePass = makePass ?? {
             let store = PassStore(previewOnly: previewOnly)
             if previewOnly || ProcessInfo.processInfo.arguments.contains("--demo") { store.enterDemo() }
@@ -57,6 +58,7 @@ import ProtonXCore
         }
         if product == .mail && mail == nil {
             let store = makeMail(); mail = store
+            if !previewOnly, makeNotificationsAvailable { store.configureNotifications(NativeNotifications.shared) }
             store.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &observations)
         }
         selected = product
@@ -139,6 +141,10 @@ struct SuiteWindow: View {
             ProductWindows.shared.installOpener { _ in openWindow(id: "suite") }
             SystemIntegration.shared.openHome = { workspace.select(nil); ProductWindows.shared.showSuite() }
             SystemIntegration.shared.openPassForSearch = { workspace.requestPassSearch(); ProductWindows.shared.open(.pass) }
+            NativeNotifications.shared.openMail = { target in
+                ProductWindows.shared.open(.mail)
+                if let target { workspace.mail?.openNotification(folder: target.folder, item: target.item) }
+            }
             SystemIntegration.shared.lockSuite = { workspace.lock() }
             SystemIntegration.shared.openSettings = { openSettings(); NSApp.activate(ignoringOtherApps: true) }
             SystemIntegration.shared.configure()
