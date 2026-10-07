@@ -307,11 +307,9 @@ struct MailWindow: View {
                     HStack(alignment: .top) {
                         Text(message.subject.isEmpty ? "(No subject)" : message.subject).font(.system(size: 25, weight: .semibold))
                         Spacer(minLength: 12)
-                        Button { readerExpanded.toggle() } label: {
-                            Image(systemName: readerExpanded ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
-                        }.buttonStyle(.plain).foregroundStyle(.secondary)
-                            .help(readerExpanded ? "Show mailbox" : "Expand message")
-                            .accessibilityLabel(readerExpanded ? "Show mailbox" : "Expand message")
+                        MailReaderControl(symbol: readerExpanded ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right",
+                                          title: readerExpanded ? "Show mailbox" : "Expand message",
+                                          identifier: "mailReaderWidth") { readerExpanded.toggle() }
                     }
                     if store.threadLoading { ProgressView("Loading conversation…").controlSize(.small) }
                     if let issue = store.threadError {
@@ -343,17 +341,21 @@ struct MailWindow: View {
                 VStack(alignment: .leading, spacing: 10) {
                     HStack(alignment: .firstTextBaseline, spacing: 12) {
                         Text("From").foregroundStyle(.secondary).frame(width: 38, alignment: .leading)
-                        Text(message.senderName.isEmpty ? message.sender : message.senderName).fontWeight(.medium)
+                        Text(message.senderName.isEmpty ? message.sender : message.senderName).fontWeight(.medium).textSelection(.enabled)
                         Spacer(minLength: 0)
-                        if collapsible { Button { store.expandThreadMessage(message.id) } label: { Image(systemName: "chevron.up") }.buttonStyle(.plain).help("Collapse message").accessibilityLabel("Collapse message") }
+                        if collapsible {
+                            MailReaderControl(symbol: "chevron.up", title: "Collapse message", identifier: "mailThreadCollapse.\(message.id)") {
+                                store.expandThreadMessage(message.id)
+                            }
+                        }
                     }
-                    if !message.senderName.isEmpty { Text(message.sender).font(.caption).foregroundStyle(MailTheme.accent).padding(.leading, 50) }
+                    if !message.senderName.isEmpty { Text(message.sender).font(.caption).foregroundStyle(MailTheme.accent).padding(.leading, 50).textSelection(.enabled) }
                     HStack(alignment: .firstTextBaseline, spacing: 12) {
                         Text("To").foregroundStyle(.secondary).frame(width: 38, alignment: .leading)
-                        Text(message.recipient).foregroundStyle(.secondary)
+                        Text(message.recipient).foregroundStyle(.secondary).textSelection(.enabled)
                     }
                     if message.date > 0 { Text(Date(timeIntervalSince1970: Double(message.date)), format: .dateTime).font(.caption).foregroundStyle(.secondary).padding(.leading, 50) }
-                }.font(.system(size: 13)).textSelection(.enabled)
+                }.font(.system(size: 13))
                 ViewThatFits(in: .horizontal) {
                     HStack(spacing: 12) { organizationActions(message); Spacer(minLength: 8); replyActions(message) }
                     VStack(alignment: .leading, spacing: 12) { organizationActions(message); replyActions(message) }
@@ -392,7 +394,8 @@ struct MailWindow: View {
                 Image(systemName: "chevron.down").foregroundStyle(.secondary)
             }.font(.callout).padding(18).frame(maxWidth: .infinity, alignment: .leading)
                 .background(MailTheme.collection, in: RoundedRectangle(cornerRadius: 14))
-                .overlay { RoundedRectangle(cornerRadius: 14).strokeBorder(MailTheme.border, lineWidth: 1) }
+                .overlay { RoundedRectangle(cornerRadius: 14).strokeBorder(MailTheme.border, lineWidth: 1).allowsHitTesting(false) }
+                .contentShape(RoundedRectangle(cornerRadius: 14))
         }.buttonStyle(.plain).disabled(store.threadLoading)
             .accessibilityLabel("Open message from " + (message.senderName.isEmpty ? message.sender : message.senderName))
             .accessibilityIdentifier("mailThreadMessage.\(message.id)")

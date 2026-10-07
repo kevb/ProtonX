@@ -50,6 +50,25 @@ struct MailSenderAvatar: View {
     }
 }
 
+/// Keep the entire control clickable, including the space around its glyph.
+struct MailReaderControl: View {
+    let symbol: String
+    let title: String
+    let identifier: String
+    let action: () -> Void
+    @State private var hovering = false
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbol).font(.system(size: 13, weight: .medium))
+                .foregroundStyle(hovering ? MailTheme.accent : .secondary)
+                .frame(width: 32, height: 32)
+                .background(MailTheme.accent.opacity(hovering ? 0.16 : 0.06), in: RoundedRectangle(cornerRadius: 8))
+                .contentShape(Rectangle())
+        }.buttonStyle(.plain).help(title).accessibilityLabel(title)
+            .accessibilityIdentifier(identifier).onHover { hovering = $0 }
+    }
+}
+
 struct MailMessagePaper: View {
     let text: String
     var body: some View {

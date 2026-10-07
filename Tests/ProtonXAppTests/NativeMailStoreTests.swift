@@ -497,6 +497,28 @@ private let threadResult = NativeMailResult(thread: NativeMailThread(anchor: 11,
     #expect(store.selectedFolder == 2); store.lock()
 }
 
+@Test @MainActor func collapsingPendingThreadBodyRejectsLateContentAndAllowsReopening() async {
+    let gate = MailReplyGate()
+    let runner = SyntheticMailRunner([
+        .init(method: "restore",result: .init(phase: .connected)), .init(method: "snapshot",result: threadSnapshot),
+        .init(method: "thread",result: threadResult), .init(method: "message",result: .init(id: 11,body: "anchor")),
+        .init(method: "message",result: .init(id: 13,body: "late synthetic body",actions: [.archive]),gate: gate),
+        .init(method: "message",result: .init(id: 13,body: "reopened synthetic body",actions: [.read]))
+    ])
+    let store = mailStore(runner,saved: true)
+    store.unlock(); await waitForMail { !store.busy }
+    store.selectedItem = 11; store.select(); await waitForMail { store.body == "anchor" }
+    store.expandThreadMessage(13); await waitForMail { runner.calls.count == 5 }
+    store.expandThreadMessage(13)
+    #expect(store.selectedItem == 11 && store.expandedThreadItem == nil && store.body == nil)
+    #expect(store.selectedMessage == nil && !store.canPerform(.archive))
+    await gate.release(); for _ in 0..<20 { await Task.yield() }
+    #expect(store.expandedThreadItem == nil && store.body == nil && !store.canPerform(.archive))
+    store.expandThreadMessage(13); await waitForMail { store.body == "reopened synthetic body" }
+    #expect(store.selectedItem == 11 && store.selectedMessage?.id == 13 && store.canPerform(.read))
+    store.lock()
+}
+
 @Test @MainActor func previewThreadTraversesFoldersCollapsesAndNeverStartsHelper() {
     let runner = SyntheticMailRunner([]), store = mailStore(runner,preview: true)
     store.selectedItem = 12; store.select()
