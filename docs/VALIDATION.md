@@ -1,9 +1,24 @@
 # Validation record
 
-Dates: 2026-10-05–06. Apple Silicon Mac, macOS 26.6.2, Xcode 27 / Swift 6.4,
-Rust 1.99.0. Automated test content is synthetic. User-driven live sign-in and
-local unlock reached a vault workspace in the morning follow-up. Only fixed UI
-states were inspected; no live vault contents were returned to the model.
+Last updated: 2026-10-07. Local validation environment: Apple Silicon Mac,
+macOS 26.6.2, Xcode 27 / Swift 6.4 and Rust 1.99.0. Automated test content is
+synthetic and uses isolated storage. Private account contents and credentials
+are excluded from public artifacts.
+
+## Current coverage
+
+| Area | Evidence | Remaining acceptance |
+| --- | --- | --- |
+| Pass account workflow | Manual fictional-login creation, bidirectional edit/sync with the official desktop app, conflict refusal, Trash/restore and online quit/restart | Broader item/account types, real server expiry/revocation and upgrade/Keychain continuity |
+| Pass saved/offline browsing | Synthetic encrypted-storage, policy, saved-first/reconnect and lock-race tests | Disconnected account restart and larger-vault measurements |
+| Native Mail | Manual sign-in and message reading; synthetic/public tests for reading, composer, sender selection and message actions | Live send/reply delivery, linked-Gmail delivery and account recovery |
+| Mail secure storage | Opt-in database/file encryption and migration-staging contracts | Whole-profile cutover, existing file migration and pending-send/draft recovery before enabling ordinary builds |
+| Product launchers | Synthetic native UI checks for cold/warm requests, minimized/closed windows and reverse product selection; signed installer checks | Minimum-OS runtime and update/Keychain continuity |
+
+The latest local Swift run passed 120 tests (62 core, 58 app); five synthetic
+atomic-install tests passed. These are local results, not a statement about the
+latest GitHub run. Dated entries below record milestone-specific test scope and
+historical limitations. The README and roadmap describe the current feature set.
 
 ## Product launcher focus correction, 2026-10-07
 
@@ -26,9 +41,10 @@ states were inspected; no live vault contents were returned to the model.
   with Pass in front), Mail over open Pass, minimized Mail restoration, closed
   Mail recreation, and the reverse Pass launcher. Preview never registers the
   production URL scheme; no real account/profile or credentials were accessed.
-- The signed update is staged at `build/ProtonX Focus Update.app`, including the
-  reader scrolling/image controls. Installation awaits the user closing the
-  installed app; its running binaries and unsaved work are left intact.
+- The signed focus/reader update and both product launchers were installed with
+  the verified atomic installer after the app closed. Installed executables match
+  the tested staged build and pass strict signature verification. One complete
+  previous build is retained for rollback; account profiles are unchanged.
 - The preceding GitHub run exposed two Pass offline-test timing races on the
   slower Intel runner: short synthetic network delays could finish before the
   test observed saved-only state. Test-only response gates now hold online
@@ -37,8 +53,8 @@ states were inspected; no live vault contents were returned to the model.
 
 ## Official-editor layout refinement, 2026-10-06
 
-- Used the supplied official Pass editor screenshot as a layout reference only;
-  it is not checked into the repository. Close and Save now remain in the header,
+- Used official Pass editor layouts as references only; reference screenshots
+  are not checked into the repository. Close and Save now remain in the header,
   title/content typography is larger, website inputs have individual outlined
   rows with remove controls, and Add website focuses the new row. Login notes
   are more compact; secure notes retain their larger writing area.
@@ -55,15 +71,15 @@ states were inspected; no live vault contents were returned to the model.
   draft. Login-edit and secure-note-create layouts were visually inspected.
 - Preview and account-capable release builds passed, with strict nested
   signature verification for `build/ProtonX Editor Update.app`. Existing helpers
-  are unchanged. No real account was accessed during this pass and the user's
-  running app was left intact. No public binary was released.
+  are unchanged. No real account was accessed during this validation and the
+  running account-capable app was left intact. No public binary was released.
 
 ## False edit-conflict correction, 2026-10-06
 
-- The user reported creating a fictional login, viewing it in the official Pass
-  desktop app, then receiving a conflict when correcting its password in ProtonX.
-  Read-only inspection confirmed blocked editing; a manual refresh restored Edit.
-  No passwords were revealed, copied or changed during that inspection.
+- Reproduction: create a fictional login, view it in the official Pass desktop
+  app without editing, then correct its password in ProtonX. Saving incorrectly
+  raises a conflict and blocks Edit until refresh. Read-only inspection confirmed
+  this failure; no passwords were revealed, copied or changed.
 - Root cause: ProtonX's checked-update guard compared the API state to `0`, while
   Proton's `ItemState::Active` is `1`. It rejected valid active items even with an
   unchanged revision. The old negative fixture also used `0`, masking the mistake.
@@ -85,19 +101,18 @@ states were inspected; no live vault contents were returned to the model.
 - The materialized helper matches the complete updated corresponding-source patch;
   dependency/source pins and notices are unchanged. A full source archive is not
   generated from the locally dirty checkout; no public binary was released.
-- Official desktop search/edit is the acceptance reference. The user's Safari
-  extension does not expose searchable browsing; website filling is separate.
+- Official desktop search/edit is the acceptance reference; Safari website
+  filling is a separate integration surface.
   The updated app was opened, local unlock completed, and the saved session
   restored the fictional login with Edit enabled. No sign-in credentials or
   hidden password were read.
-- After the correction, the user reported successful edits and sync in both
-  directions with the official Proton Pass desktop app, a passed conflict test,
-  successful Trash/restore, and successful quit/restart. These are user-observed
-  live acceptance results for the fictional test record, separate from automated
-  fixtures. They do not establish server expiry/revocation, prompt-free rebuilds,
+- Manual account acceptance after the correction passed editing/sync in both
+  directions with the official Proton Pass desktop app, conflict refusal,
+  Trash/restore and online quit/restart for the fictional test record. These are
+  limited manual account results, separate from automated fixtures. They do not establish server expiry/revocation, prompt-free rebuilds,
   encrypted offline browsing or interoperability for every item type.
 
-## Pass recovery follow-up, 2026-10-06
+## Pass recovery contracts, 2026-10-06
 
 - Added regression cases that failed before the fix: uncertain Trash/restore could
   reach the helper twice, while detail/edit/Trash/restore/post-write expiry retained
@@ -114,7 +129,7 @@ states were inspected; no live vault contents were returned to the model.
   exercise partial output/nonzero exit, fresh commands and pending prompt cleanup.
 - Saved-session tests use an isolated dummy `.session/session.json` hint and
   scripted responses, with injected local unlock. They never decode a real Proton
-  session or call the user's Keychain. They prove the app's boundary and state
+  session or access account Keychain entries. They prove the app's boundary and state
   transitions, not SDK restoration, real server expiry or prompt-free signing.
 - `scripts/test-helper.sh` passed CLI policy suites with 115 and 122 tests, plus
   228 public SDK tests and 24 field-update integration tests. Two upstream SDK
@@ -143,11 +158,11 @@ states were inspected; no live vault contents were returned to the model.
   no app was installed in Applications. No startup-speed improvement was measured.
   See [the storage correction and acceptance gates](LOCAL_STORAGE.md).
 
-## Native Mail composer follow-up, 2026-10-06
+## Native Mail composer, 2026-10-06
 
-- The user reported native account sign-in and successful message reading. No
-  private mailbox contents, addresses or messages were inspected or recorded by
-  the agent. This does not establish send/Gmail delivery, restart or recovery.
+- Manual account acceptance covers native sign-in and message reading. Public
+  artifacts contain no private mailbox contents or addresses. Send/Gmail delivery,
+  restart and account recovery remain separate acceptance gates.
 - Implemented a native plain-text composer with From/To/Cc/Bcc, new/reply/reply-all,
   ordinary draft reopening, explicit Save/Save & Close and separate send states.
   The SDK chooses the reply identity and quote, validates sending addresses and
@@ -161,7 +176,7 @@ states were inspected; no live vault contents were returned to the model.
   tests, and one added linked-Gmail sender/BYOE contract. Public coverage includes
   encrypted bodies, paging, draft construction, sender/signature changes,
   recipient validation, send results/failures and duplicate/already-sent behavior.
-  No test reads the user's Keychain or reaches a real mailbox/recipient.
+  No test reads account Keychain entries or reaches a real mailbox/recipient.
 - Independent Pass/Mail protocol checks and Mail privacy/batched-save checks
   passed. The Mail source pin, crypto implementations and dependency lock remain
   unchanged; the patch exposes existing draft modules and opts only the native
@@ -176,7 +191,7 @@ states were inspected; no live vault contents were returned to the model.
   matches the checked-in inputs byte for byte. No binary was publicly released.
 - Public official composer screenshots and pinned desktop source were used as
   references. No account screenshots are committed. See [MAIL_COMPOSER.md](MAIL_COMPOSER.md).
-- Keychain authorization prompted again for the user's updated build. Only the
+- A manual Mail update check encountered another Keychain authorization prompt. Only the
   self-signed local certificate is available. No credential workaround or ACL
   relaxation was added; the prior failed rebuild-continuity result still applies.
 
@@ -214,11 +229,12 @@ states were inspected; no live vault contents were returned to the model.
   Its item was cleaned up. No account ACLs were changed. Local signing is supported,
   but prompt-free helper updates remain unverified; see [LOCAL_SIGNING.md](LOCAL_SIGNING.md).
 - No live Mail login, mailbox contents, delivery, restart/revocation or cross-client
-  interoperability was tested. User-driven designated-account validation is next.
+  interoperability was tested in this milestone. Account acceptance followed
+  separately; see Current coverage.
   Normal Mac local unlock remains enabled. No binary is publicly distributed;
   AGPL/dependency and combined-work release review remains a gate.
 
-## Direct Mail core feasibility follow-up, 2026-10-06
+## Direct Mail core feasibility, 2026-10-06
 
 - Reviewed and pinned ProtonMail/clients `2ecb794dbc221384dc6d88840965ac144db301ad`
   as reference only. No production Mail SDK linkage or direct sign-in UI added.
@@ -239,10 +255,10 @@ states were inspected; no live vault contents were returned to the model.
   Bindings, privacy/license review and disposable-account sign-in/decryption/
   restart are still gates. See [the decision](MAIL_NATIVE_SIGN_IN.md).
 
-## Completed
+## Initial implementation, 2026-10-05
 
-The following is the overnight record; the morning follow-up below supersedes
-its desktop-handoff status.
+This records the initial implementation. The subsequent desktop-handoff
+correction supersedes its account-login limitation.
 
 - Native Swift app compiles in debug and release; release app bundle is locally
   ad-hoc signed and verifies with strict code-signature verification.
@@ -294,7 +310,7 @@ so short challenge records are handled immediately without blocking the Swift
 cooperative executor. Clipboard ownership and stale-result policies have unit
 coverage; system-level interaction is not fully automated.
 
-## Morning follow-up, 2026-10-06
+## Desktop account-handoff correction, 2026-10-06
 
 - The original desktop handoff returned HTTP 422/API 8004 before the account
   window could open. Credential-free requests with the pinned desktop identity
@@ -312,14 +328,14 @@ coverage; system-level interaction is not fully automated.
   and native app bundle rebuild passed. The corrected account handoff reached
   a connected vault workspace after user authentication and macOS local unlock,
   with creation enabled and no error alert. Only these fixed UI states were
-  inspected; no account identifiers, vault titles, item contents or credentials
-  were returned to the model. Remote synthetic-item CRUD, restart and recovery
-  still need validation. This observation does not validate the experimental
+  inspected; validation artifacts exclude account identifiers, vault titles,
+  item contents and credentials. Remote item writes and restart/recovery were
+  outside this milestone's scope; subsequent acceptance is recorded above. This observation does not validate the experimental
   direct-password flow or every account challenge.
 - The feature comparison and next acceptance gates are recorded in
   [GAP_ANALYSIS.md](GAP_ANALYSIS.md).
 
-## Native editor and UX follow-up, 2026-10-06
+## Native editor and UX, 2026-10-06
 
 - 48 Swift tests passed; one optional Bridge fixture test was skipped in the plain
   test run. Four app-store tests use injected synthetic runners and cover immediate
@@ -352,7 +368,7 @@ coverage; system-level interaction is not fully automated.
   address, and saving a new revision concealed a previously revealed password.
   Automatic inactivity lock was also
   observed in the preview. No primary-account contents were inspected or changed
-  by these checks; the supplied official screenshot was a layout reference only.
+  by these checks; official-app screenshots were layout references only.
 - The compile-only credential-provider probe passed Swift 6 typechecking with
   warnings treated as errors and 20 synthetic origin candidate cases. It is not
   embedded, installed, registered or capable of returning credentials. The offline
@@ -368,35 +384,30 @@ and [OFFLINE_DESIGN.md](OFFLINE_DESIGN.md) for the remaining acceptance gates.
 Live remote writes, restart/recovery and a matched resource benchmark are still
 unverified. Current source-archive checks remain mandatory in CI.
 
-## Not established
+## Remaining acceptance gates
 
-- Repeated desktop account-fork login and first-vault setup across account types,
-  independent cross-client verification, remote editing and vault-management workflows,
-  TOTP/second/extra-password challenges,
-  session expiry/revocation and recovery. Upstream implementation is reused but
-  does not eliminate integration risk.
-- Real Proton Bridge account interoperability, remote delivery, thread semantics,
-  arbitrary MIME/charset encodings and large/complex mailbox behavior.
-- Repeated Touch ID/Mac-password recovery after app restart with a persisted
-  desktop session. One user-driven local unlock was observed; synthetic automated
-  tests do not touch account Keychain data.
-- Automated sleep/screen-lock and user-switch tests; code listens for system
-  notifications, while synthetic UI lock was manually verified.
-- Intel GUI interaction, minimum-macOS-14 runtime, controlled memory/energy comparison,
-  independent security audit, Developer ID signing/notarization.
-- Full official-client feature parity: autofill/passkeys/attachments/sharing,
-  account switching/offline Pass UI, direct Mail auth, and Drive.
+- First-vault setup and account challenges across account types; real server
+  expiry/revocation, reauthentication and preservation of unsupported item fields.
+- Pass disconnected restart, offline policy/recovery and Keychain continuity
+  across rebuilds/upgrades. Manual online restart does not establish these.
+- Mail send/reply delivery, linked-Gmail identities, interrupted or uncertain
+  sends and pending-draft recovery; broader MIME/charset and large-mailbox cases.
+- Mail whole-profile encryption cutover, existing attachment/MIME migration and
+  file API audit before secure caching is enabled in ordinary builds.
+- Automated sleep/screen-lock/user-switch behavior, VoiceOver coverage, Intel GUI
+  and minimum-macOS-14 runtime, and matched memory/energy/startup benchmarks.
+- Dependency licensing, independent security review, Developer ID signing,
+  notarization and source-compliant binary distribution.
 
-See SECURITY.md, ROADMAP.md and PERFORMANCE.md for boundaries. A successful
-synthetic test is not a claim that a real account has been validated.
+See [SECURITY.md](../SECURITY.md), [ROADMAP.md](ROADMAP.md) and
+[PERFORMANCE.md](PERFORMANCE.md) for scope and release criteria.
 
-## User-reported workflow and design follow-up, 2026-10-06
+## Manual account acceptance and native design, 2026-10-06
 
-The user reported successfully creating, syncing and deleting a real test login
-in ProtonX. This is user-driven live validation; the agent did not inspect its
-contents or perform these writes. It does not establish editing, restore,
-permanent deletion, independent verification in another client, or restart/recovery.
-It supersedes the earlier blanket statement that no real item write was observed.
+Initial manual account acceptance passed creation, sync and deletion of a
+fictional test login. This check covered that workflow only. Cross-client editing,
+conflict refusal, Trash/restore and online restart passed later in the edit-guard
+acceptance milestone; permanent deletion is not implemented.
 
 The visual design pass passed the existing 48 Swift contracts (one optional
 Bridge test skipped), a release build and strict ad-hoc signature verification.
@@ -556,7 +567,7 @@ remains read-only after that deadline. The final desktop-helper rerun passed all
 131 tests. GitHub CI is queued; these results are local validation, not a claim
 that the new CI run has completed.
 
-## Mail design follow-up — 2026-10-06
+## Mail design — 2026-10-06
 
 - All 101 Swift contracts passed after the final Mail layout changes. Helper,
   authentication, storage and sending protocols were unchanged; the previously
@@ -603,7 +614,7 @@ that the new CI run has completed.
   table, lists and a quoted reply. The native walkthrough verified expanded-reader
   reflow, full-body scrolling, external-link confirmation/cancellation, switching
   between formatted/plain views, selecting a plaintext fixture and lock.
-  No account or private message was accessed; supplied reference screenshots were
+  No account or private message was accessed; reference screenshots were
   not copied into the repository.
 - Images (including embedded images) and attachments remain unavailable. This
   adds rich reading, not a rich editor or new sending behavior. Bridge retains

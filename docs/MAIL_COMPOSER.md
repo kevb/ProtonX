@@ -1,8 +1,8 @@
 # Native Mail composer and linked Gmail
 
-Review date: 2026-10-06. The user reported successful native Mail sign-in and
-message reading. That is useful interoperability evidence, but does not establish
-sending, restart/revocation recovery or linked-Gmail delivery.
+Review date: 2026-10-07. Manual account acceptance covers native Mail sign-in and
+message reading. Live sending, restart/revocation recovery and linked-Gmail
+delivery remain acceptance gates.
 
 ## UX references
 
@@ -39,7 +39,7 @@ The sender remains visible in the composer and is named in the Send confirmation
 If the core substitutes an unavailable receiving address, the composer warns
 about the change. Disabled/disconnected Gmail addresses fail rather than being
 invented or silently substituted by ProtonX. The exact From address should be
-verified in the received message during a user-driven linked-Gmail delivery test.
+verified in the received message during a linked-Gmail delivery acceptance test.
 
 ## Implemented behavior
 
@@ -76,15 +76,16 @@ size independently. Limits: 100 distinct recipient addresses, 998-byte subject,
 
 ## Next acceptance tests
 
-Use a designated account and deliberate user sending. Verify a new message,
+Use a designated account with explicitly authorized sends. Verify a new message,
 reply, reply-all and saved draft from another client. Verify received From and
 Reply-To for a connected Gmail address, plus disabled/disconnected and legacy
 forwarding cases. Exercise network failure, expired sessions, close during send,
 server rejection and restart without duplicate delivery. No private mailbox or
 real recipient is used by the synthetic test suite.
 
-Next functionality: read/unread, archive/trash with undo, conversation view,
-attachment upload/viewing, recipient completion, rich text and confirmed draft
+Read/unread, Archive/Trash/Inbox and move undo are now implemented with synthetic
+coverage. Next functionality: conversation view, attachment upload/viewing,
+recipient completion, rich text and confirmed draft
 sync/auto-save recovery. Gmail read/unread/folder changes are not mirrored back
 to Gmail by Proton's connection; do not promise two-way state synchronization.
 

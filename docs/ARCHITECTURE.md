@@ -94,8 +94,10 @@ An experimental direct SRP/password/TOTP path remains available. The desktop
 protocol's live attempt failed with HTTP 422 / API 8004, also observed with an
 obviously synthetic identity; the exact server-side cause is unresolved. We do
 not classify this as a wrong password or CLI entitlement issue. The corrected account-fork
-implementation reached a live workspace after user-driven authentication and
-local unlock; remote writes and recovery still need validation.
+implementation supports desktop account sign-in and local unlock. Manual
+fictional-login acceptance covers cross-client edits/sync, conflict refusal,
+Trash/restore and online restart. Broader challenge and expiry/revocation coverage
+remain acceptance gates.
 Neither branch has established full security-key/SSO/challenge parity.
 
 The desktop helper restricts its command surface to the native UI contracts.
@@ -148,8 +150,8 @@ Sidebar and messages are bounded; selected
 contents are decrypted on demand and session/selection epochs reject late replies.
 Lock/close tears down the helper. Remote sign-out is acknowledged before clearing
 the saved-session hint. Unsupported human verification/FIDO-only/password-change
-states are explicit. The user reported real sign-in and reading; delivery and
-recovery remain acceptance gates. See [composer behavior](MAIL_COMPOSER.md).
+states are explicit. Manual acceptance covers native sign-in and reading; live
+delivery and account recovery remain acceptance gates. See [composer behavior](MAIL_COMPOSER.md).
 
 `Resources/MailProtocol.json`, `Resources/MailHelper.lock` and
 `patches/mail-core.patch` pin this independent Mail implementation. The small

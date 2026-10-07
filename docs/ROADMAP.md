@@ -1,10 +1,10 @@
 # Roadmap
 
-See the [2026-10-06 official-client gap analysis](GAP_ANALYSIS.md) for the
+See the [official-client gap analysis](GAP_ANALYSIS.md) for the
 ordered Pass-first work plan and acceptance gates. Sign-in and a verified
 end-to-end workflow come before additional products.
 
-## Next priorities (2026-10-06)
+## Next priorities (2026-10-07)
 
 1. **Finish the secure-storage foundation already in progress.** The opt-in Mail
    candidate encrypts databases and new attachment/MIME cache payloads and supports
@@ -14,8 +14,8 @@ end-to-end workflow come before additional products.
    checks before promising faster opening. See [the storage review](LOCAL_STORAGE.md).
 2. **Finish Pass offline acceptance.** An encrypted, policy-aware read-only cache
    is implemented through Proton's storage layer, with synthetic restart, network
-   failure, reconnect and locking coverage. The user has confirmed cross-client
-   edits/conflicts/Trash and online restart. Validate real disconnected restart,
+   failure, reconnect and locking coverage. Manual fictional-login acceptance covers
+   cross-client editing/sync, conflict refusal, Trash/restore and online restart. Validate real disconnected restart,
    update Keychain continuity and broader item types. See the
    [automation and acceptance plan](PASS_RELIABILITY.md).
 3. **Complete Mail's everyday workflow.** Validate actual send/reply delivery and
@@ -25,8 +25,9 @@ end-to-end workflow come before additional products.
    send outcomes.
 4. **Accept installed suite navigation.** A visible product switcher, window-aware
    keyboard commands, verified atomic app installation and **ProtonX Mail** /
-   **ProtonX Pass** Spotlight launchers are implemented. Validate installed routing,
-   visual layout and update Keychain continuity. Keep independent
+   **ProtonX Pass** Spotlight launchers are implemented. Synthetic UI checks cover
+   cold/warm routing and minimized/closed windows. Complete minimum-OS/runtime
+   checks and update Keychain continuity. Keep independent
    product windows/sessions and the optional single shared menu-bar item.
 
 Safari website AutoFill remains covered by the standalone official extension.
@@ -48,10 +49,11 @@ Pass and the shared macOS experience before expanding the suite.
   activation, existing-cache migration and the full file API audit remain gates; see
   [the migration boundary](MAIL_STORAGE_MIGRATION.md).
 
-These have synthetic/source validation. The user has also reported successful
-live Pass login creation, sync and deletion, and native Mail sign-in/read access.
-That does not establish broader edit/recovery interoperability, Mail delivery or
-release readiness.
+Automated coverage uses synthetic fixtures and public upstream tests. Manual
+fictional-login acceptance covers Pass creation, cross-client editing/sync,
+conflict refusal, Trash/restore and online restart; Mail sign-in and reading have
+manual acceptance coverage. Broader recovery, Mail delivery and release readiness
+remain separate gates.
 
 ## Before a daily-use Pass release
 
@@ -75,7 +77,7 @@ release readiness.
   [the direct Mail core decision and acceptance gates](MAIL_NATIVE_SIGN_IN.md).
 - Native Mail core, private IPC, native authentication UI, separate session storage,
   paged reader, composer/reply, sending-identity selection and draft handling are
-  implemented. The user has reported live sign-in and reading; verify restart,
+  implemented. Manual account acceptance covers sign-in and reading; verify restart,
   challenge/recovery flows and release licensing separately.
 - Verify send/reply delivery, including enabled Gmail sending identities, on a
   designated test account. Do not infer successful delivery from composer UI.

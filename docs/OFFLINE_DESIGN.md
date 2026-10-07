@@ -99,7 +99,7 @@ Real-account disconnected restart, Keychain continuity across updates, larger-va
 performance and matched startup measurements remain acceptance gates. No automated
 real-account access or deliberate real session/subscription revocation is used.
 
-## User acceptance
+## Manual account acceptance
 
 1. Quit the old ProtonX bundle and open the new staged update. Unlock while online
    and refresh. Confirm **Encrypted saved vault ready** in the sidebar.

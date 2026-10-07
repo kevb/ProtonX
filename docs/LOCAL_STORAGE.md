@@ -177,4 +177,4 @@ app remains on its documented plaintext database/cache implementation. See
 Pass's read-only encrypted saved vault is now implemented and synthetic-tested;
 its older "future cache" discussion above is superseded by
 [OFFLINE_DESIGN.md](OFFLINE_DESIGN.md). Real disconnected restart and update
-Keychain continuity still need user acceptance.
+Keychain continuity still need manual account acceptance.

@@ -38,7 +38,7 @@ optional future project; this check does not establish its platform coverage.
 Before claiming end-to-end interoperability, verify a fictional test login's
 create/edit/Trash/restore cycle against the official desktop app in a designated
 test account. The installed Safari extension does not expose searchable browsing
-in the user's workflow; test its website-filling surface separately.
+in this acceptance plan; test website filling separately.
 Do not change installed extension permissions or access real vault contents as
 part of synthetic validation. See [the reliability plan](PASS_RELIABILITY.md).
 

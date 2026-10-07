@@ -37,7 +37,7 @@ extensions before treating Pass as a day-to-day replacement.
 
 ## Native UX follow-up, 2026-10-06
 
-The supplied official-app screenshot informed hierarchy and task flow only. Its
+Official-app layout references informed hierarchy and task flow only. Their
 account/item contents were not copied into fixtures or assets. Keep familiar
 three-column navigation with macOS controls and system appearance.
 
@@ -56,7 +56,7 @@ fields and notes. Notes are available for new logins; websites are editable on
 existing items. Website rows have stable identities for add/remove. Concealed
 fields remain secure inputs; existing TOTP setup is never displayed. The form
 keeps invalid/failed drafts open. Revision conflicts prevent resubmission until
-the user reopens the latest item. Confirmed saves with failed refresh close safely
+the latest item is reopened. Confirmed saves with failed refresh close safely
 and report success separately from sync failure.
 Navigation retains that warning until the vault refreshes successfully, including
 when a confirmed edit or Trash action clears the selected item.
@@ -82,7 +82,7 @@ same palette and shapes. The PX wordmark is an independent native treatment;
 no official brand assets, remote fonts or favicons were added.
 
 Native split-view resizing, list selection, search, menus and keyboard commands
-remain. Selection follows the user's macOS accent; selected icons retain contrast
+remain. Selection follows the system macOS accent; selected icons retain contrast
 on both active and inactive rows. Decorative imagery is hidden from accessibility,
 item rows include their type, and copy/reveal/create controls have explicit names.
 Card borders strengthen with increased contrast; no motion was added.
@@ -93,7 +93,7 @@ keyboard creation, confirmation and Trash/restore. The command
 preview without changing macOS settings. Its compile flag has no effect on
 real-account windows. Full VoiceOver and minimum-OS runtime coverage remain follow-ups.
 
-The supplied login/note creation references informed a second editor refinement:
+Official login/note creation layouts informed a second editor refinement:
 native inputs now sit in the same outlined cards as item details, with a prominent
 title and visible focus outline. Password generation is beside its input; secure
 notes have a larger writing area, with custom fields below. Type/vault pickers

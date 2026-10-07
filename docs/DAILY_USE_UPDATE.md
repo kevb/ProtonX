@@ -62,7 +62,7 @@ Keychain prompt continuity are still separate release gates.
   undo; normal attachment I/O compatibility; existing composer/reader tests.
 - Installer tests: atomic swap, rollback, first install and failure retention with
   disposable synthetic directory contents. Native launchers compile and signatures
-  are verified; full installed product-link navigation also needs user acceptance.
+  are verified; account-capable installed navigation remains a separate acceptance check.
 - Synthetic preview: product switching, front-window keyboard commands and
   Trash/Inbox/undo, with no helper or account access.
 
@@ -75,5 +75,5 @@ in [SECURITY.md](../SECURITY.md). No automatic conversion of your account is run
 Pass's encrypted saved vault already has automated synthetic close/reopen,
 network-failure and reconnect coverage. The remaining real disconnected
 restart/Keychain-update acceptance is in [OFFLINE_DESIGN.md](OFFLINE_DESIGN.md).
-Automation must use fixtures rather than disconnecting this Mac or reading real
+Automation must use fixtures rather than disconnecting a development Mac or reading real
 vault entries.

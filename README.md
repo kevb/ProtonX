@@ -1,41 +1,52 @@
 # ProtonX
 
-Native macOS clients for people who want the Proton suite to feel at home on Mac.
-SwiftUI and AppKit, Proton's existing cryptography, independently usable product
-windows, and **one optional menu-bar icon**. Native vault and mail UI, without a bundled Electron or Chromium runtime.
+Native macOS clients for Proton Pass and Mail. Built with SwiftUI and AppKit,
+Proton's existing Rust cores, separate product windows, and **one optional
+menu-bar icon**. No bundled Electron or Chromium runtime.
 
-**Status: 0.1 developer alpha.** Pass is the priority. This is a working native
-client built on Proton's open-source Rust Pass and Mail cores with separate
-desktop product protocols and sessions. It is not a full replacement for all official apps.
-Initial user-driven sign-in, local unlock and vault loading have been observed.
-The user reported a successful create/sync/delete test login. Editing and session
-recovery still need validation. The user reported native Mail sign-in and reading; sending and Mail recovery remain unverified. Use a disposable test
-account before trusting this alpha with your vault.
-Builds are available locally; binary publication also awaits the recorded
-[dependency license review](docs/LICENSE_REVIEW.md).
+**Developer alpha · macOS 14+ · Pass first.** ProtonX is independent of Proton AG
+and licensed under GPL-3.0-or-later. Build from source to explore the native
+interface or contribute. Signed, notarized binary releases are not yet available.
 
-ProtonX is independent of Proton AG. GPL-3.0-or-later.
+## Features
 
-## What works
-
-| Product | Implemented | Current limits |
+| Product | Available | Current limitations |
 | --- | --- | --- |
-| Pass | macOS authentication window and experimental native password prompts; atomic vault/Trash loading, title search and sorting; on-demand item details; password copy and reveal; TOTP copy/setup/edit; create/edit logins and notes with multiple websites and text/hidden custom fields; revision conflict protection; trash/restore; remote sign-out; encrypted saved-first loading and read-only offline browsing for personal paid accounts | no browser autofill, passkey operations, attachments, sharing UI or account switching; managed accounts stay online-only |
-| Mail | Direct native username/password, TOTP and second-password flow; separate Keychain-backed session restoration; folders, paged message list and selected-message decryption through Proton’s Mail SDK; sanitized HTML reader with text fallback and per-message remote-image loading; read/unread, archive, Trash/Inbox and move undo; native compose/reply/reply-all, From selection, draft saving and confirmed-send state | Sending and linked-Gmail delivery unverified; no human verification/FIDO-only login, threading, file upload/viewing, rich-text editing or push UI. Search covers loaded metadata, capped at 1,000 messages. Bridge compose remains an advanced prototype |
-| Drive | Architecture decision and planned integration boundary | No Drive client implemented |
+| Pass | Account sign-in and local unlock; vault and Trash browsing; search and sorting; password copy/reveal; TOTP copy/setup/edit; login and note editing with multiple websites and custom fields; revision conflict protection; Trash/restore; encrypted saved-first loading and read-only offline browsing for eligible personal paid accounts | No native browser autofill, passkey operations, attachment handling, sharing UI or account switching. Other item types are readable but have no native editor. Managed accounts stay online-only. |
+| Mail | Native username/password, TOTP and second-password sign-in; independent Keychain-backed session; folders and paged inbox; formatted HTML reading on light paper; per-message image loading; read/unread, Archive/Trash/Inbox and move undo; compose, reply and reply-all; sending identity selection and draft saving | Live send/reply delivery and account recovery are acceptance gates. No human verification/FIDO-only login, conversation threading, file upload/viewing, rich-text editing or push UI. Search covers loaded subjects and senders, capped at 1,000 messages. |
+| Drive | Planned | No Drive client implemented. |
 
-Native behavior: standard windows and toolbars, keyboard commands, light/dark
-appearance, VoiceOver labels, optional global quick access, local-device unlock,
-sleep/screen-lock handling, inactivity lock, and a clipboard that clears its own
-secrets after 30 seconds. Demo mode is explicitly synthetic and never connects
-to Proton or writes account credentials.
+Pass and Mail share window navigation and macOS integration, while keeping their
+sessions and data separate. Keyboard commands follow the active product window.
+Optional quick access, Touch ID/Mac-password unlock, screen-lock handling and
+expiring password copies support everyday Mac workflows.
+
+The official standalone Proton Pass Safari extension can continue to handle
+website filling and supported browser passkeys. ProtonX does not share its local
+session or lock state with that extension.
+
+## Project status
+
+Manual acceptance testing covers Pass login creation, bidirectional editing and
+sync with the official desktop app, conflict refusal, Trash/restore and online
+quit/restart. Native Mail sign-in and reading have also passed manual acceptance.
+Automated tests cover synthetic protocol, security-policy and recovery cases;
+they do not establish complete real-account interoperability.
+
+This alpha is not a full replacement for the official apps. Start with synthetic
+demo data or a disposable account. Important release gates include an independent
+security review, broader account recovery testing, dependency licensing, signing
+and notarization. **The default Mail SDK stores decoded messages in an unencrypted
+local database.** An encrypted-storage candidate exists but is not enabled in
+ordinary builds; migration and recovery remain release blockers. Read
+[SECURITY.md](SECURITY.md) and the [storage review](docs/LOCAL_STORAGE.md).
 
 ## Build and run
 
-Requires **macOS 14+**, **Xcode 16+ / Swift 6**, Python 3.11+, Git, and a stable Rust
-toolchain 1.93+ (tested with Rust 1.99). Quit ProtonX before rebuilding its bundle.
-First launch Xcode and accept its license. No
-signing account or Proton credentials are needed to build or explore demo mode.
+Requires macOS 14+, Xcode 16+ / Swift 6, Python 3.11+, Git, and Rust 1.93+
+(tested with Rust 1.99). Open Xcode and accept its license before building.
+No Proton account or Apple signing account is needed to explore demo mode.
+The build scripts do not install global dependencies.
 
 ```sh
 git clone https://github.com/kevb/ProtonX.git
@@ -44,152 +55,113 @@ cd ProtonX
 open build/ProtonX.app
 ```
 
-Choose **Explore with demo data** to inspect Pass. Use the visible **ProtonX** product switcher or **Products → Open Mail**
-to sign in or explore the separate demo inbox. Build output defaults to ad-hoc
-signing; a configured identity gives stable signatures. See
-[local signing and its measured Keychain limits](docs/LOCAL_SIGNING.md). It is not notarized. No global dependencies are installed by the build scripts.
+Choose **Explore with demo data** for Pass or **Explore demo inbox** for Mail.
+Use the visible **ProtonX** product switcher, **Products** menu, or ⌘1 / ⌘2 to
+open either window. Demo data is synthetic and never accesses a Proton account.
 
-For UX testing alongside a running session, `./scripts/build-app.sh --preview`
-builds `build/ProtonX Preview.app`: synthetic Pass/Mail data only, a separate bundle
-identity, no sign-in and no extra menu-bar item or global shortcut registration.
-`./scripts/build-app.sh --stage-update` builds `build/ProtonX Update.app` without
-replacing a running primary bundle. Quit the old app before opening the update;
-both real bundles use the same isolated ProtonX Pass profile.
+Builds use ad-hoc signing by default. A configured identity provides stable
+signatures, but prompt-free Keychain access across rebuilds is not established.
+See [local signing](docs/LOCAL_SIGNING.md).
 
-Both helpers are built from exact Proton source revisions. Pass runs for one
-operation and exits; Mail persists while its window is unlocked and stops on lock/close.
-Mail uses a separate profile and Keychain namespace; it does not import the official
-app's session. Session credentials are protected, but the pinned Mail core's local
-database can store decoded messages unencrypted. This remains a release blocker:
-see [the local storage review](docs/LOCAL_STORAGE.md).
-To download every reviewed upstream repository:
+### Preview, updates and Spotlight launchers
 
 ```sh
-python3 scripts/bootstrap.py --references
+./scripts/build-app.sh --preview       # Separate, synthetic-only preview app
+./scripts/build-app.sh --stage-update  # Stage an update alongside a running app
+./scripts/build-app.sh --install       # Install the suite and product launchers
 ```
 
-## Connect Pass
+Preview cannot sign in, restore a real session or register another menu-bar item
+or global shortcut. Quit the installed app before updating or opening another
+account-capable build. The installer verifies signatures, refuses running
+binaries and retains previous builds.
 
-Click **Sign In to Proton**. A macOS authentication window opens Proton's account
-page for a desktop session handoff. The existing Rust SDK creates, polls and
-decrypts that one-use handoff; the secret URL stays in private IPC and memory.
-The window closes when sign-in/setup completes. Cancel or locking cancels both
-it and the helper. The vault interface stays native after sign-in.
+**ProtonX Mail** and **ProtonX Pass** are native Spotlight launchers. Each opens
+and focuses its product window in the shared ProtonX app, including minimized or
+closed windows. See the [installation guide](docs/DAILY_USE_UPDATE.md).
 
-**Try direct password sign-in (experimental)** provides native password/TOTP,
-second-password and extra-password prompts. A live attempt was rejected with
-HTTP 422 / API 8004; its exact cause is not established. The earlier CLI backend
-successfully authenticated but failed CLI eligibility. Neither outcome establishes
-complete desktop vault interoperability. The corrected desktop account handoff
-has reached a live vault after user authentication and local unlock; security-key,
-SSO, verification and recovery behavior still need validation.
+## Sign in
 
-Encrypted session/cache files belong to the helper; their local encryption key
-is in macOS Keychain. ProtonX uses the pinned macOS desktop protocol and does not
-apply the CLI-specific eligibility check. Product permissions and account limits
-still apply. The API compatibility identifier comes from reviewed desktop source;
-the User-Agent identifies ProtonX. See [the backend decision](docs/ARCHITECTURE.md).
-Server failures expose only a fixed category and numeric HTTP/API codes.
+### Pass
 
-After restarting or locking, **Unlock Pass** uses Touch ID or your Mac password.
-Lock is a local UI boundary, not a server-session revocation; **Sign Out** performs
-remote logout and removes this app's local session after it succeeds.
+Choose **Sign In to Proton** to open Proton's account page in the macOS
+authentication window. Proton's Rust SDK handles the desktop session handoff;
+the vault interface remains native. Direct password sign-in is an experimental
+alternative with unresolved server rejection; use the account-window flow.
 
-Pass restores a saved encrypted vault before refreshing online. A successful refresh
-shows **Encrypted saved vault ready**; connection failures show saved/read-only
-state and the actual last-sync time. Saved access lasts up to 24 hours, subject to
-known subscription/trial expiry, and is currently limited to personal paid plans.
-Changes, verification-code generation and attachments require online access.
-See [storage boundaries and the test walkthrough](docs/OFFLINE_DESIGN.md).
+After locking or restarting, **Unlock Pass** requires Touch ID or your Mac
+password. **Sign Out** performs remote logout. ProtonX uses the pinned desktop
+protocol and respects server permissions and product limits. The original CLI
+product's eligibility policy remains separate.
 
-## Connect Mail
+Eligible personal paid accounts can restore an encrypted saved vault before
+refreshing online. Saved access is read-only and lasts at most 24 hours, shortened
+by known subscription/trial expiry. Changes, verification-code generation and
+attachments require an online connection. See [offline scope](docs/OFFLINE_DESIGN.md).
 
-Choose **Mail** in the **ProtonX** switcher (or ⌘2) and enter your Proton username/password.
-If required, enter an authenticator code or your second mailbox password in the
-native form. There are no ports, generated passwords or certificates in the
-normal onboarding. Native sign-in and reading have user-reported validation;
-sending and end-to-end account recovery still need designated-account validation.
-See [the native Mail integration and acceptance gates](docs/MAIL_NATIVE_SIGN_IN.md).
+### Mail
 
-Mail database encryption and faster saved-first loading are implemented as an
-opt-in developer candidate, disabled in ordinary app builds. It refuses existing
-plaintext profiles. New candidate attachment/MIME cache writes are encrypted,
-but existing-profile/file migration, export/staging audit and send recovery are
-still required. See
-[local storage scope and tests](docs/LOCAL_STORAGE.md).
+Open Mail and enter your Proton username/password, followed by an authenticator
+code or second mailbox password if required. Normal onboarding requires no
+Bridge installation, server ports, generated mail-client password or certificate
+import. Human verification, security-key-only challenges and password-change
+flows are currently unsupported; use the official client for those accounts.
 
-Mail keeps its own encrypted session and Keychain entries. On restart, **Unlock
-Mail** uses Touch ID or your Mac password before restoring that session. Locking
-clears the UI and stops Mail’s helper. Sign Out ends its SDK account session.
-Pass and Mail do not share authentication. Accounts requiring human verification,
-a security-key-only challenge or a password change currently receive an explicit
-unsupported state; use Proton’s official client for those flows.
+**Unlock Mail** restores Mail's own session after local authentication. Locking
+clears the interface and stops its helper; **Sign Out** ends the SDK account
+session. Mail and Pass do not share authentication.
 
-The direct client reads, composes, replies and saves drafts. The composer displays
-the core’s available From addresses, including connected Gmail where enabled.
-See [composer behavior and delivery acceptance tests](docs/MAIL_COMPOSER.md).
-Read/unread controls, archive, file upload/viewing and conversations remain next. Refresh updates the
-loaded view; search filters loaded subjects and senders. HTML messages retain
-headings, tables and styles on light paper through Proton's sanitizer and a local
-WebKit reader. Remote images and message scripts stay blocked; links open externally
-after confirmation. Plain text remains available. See [reader boundaries](docs/MAIL_RENDERING.md). **Explore demo inbox** uses synthetic data with no account access.
+The composer offers only sending identities provided by Proton's core, including
+connected Gmail addresses where enabled. Queued, confirmed, failed and unknown
+send outcomes remain distinct; an uncertain send is not automatically resubmitted
+by the app. Live delivery and recovery tests remain required. See
+[composer behavior](docs/MAIL_COMPOSER.md).
 
-**Connect using Bridge…** is an optional compatibility prototype under sign-in.
-It retains the existing local TLS reader and confirmed plain-text compose/send.
-A separate eligible Bridge installation, generated client password and imported
-public certificate are required there. It is independent of direct Mail login
-and remains subject to Bridge’s product limits. No automatic send retry is added.
+HTML messages retain headings, tables and styles on white paper in both system
+appearances. Remote images start blocked; **Load images** enables them for the
+selected message only. Message scripts remain disabled, links require an external
+open confirmation, and plain text is always available. See
+[reader boundaries](docs/MAIL_RENDERING.md).
+
+**Connect using Bridge…** remains an advanced compatibility prototype. It uses
+a separate eligible Bridge installation, generated client password and imported
+public certificate, subject to Bridge's product limits.
 
 ## Keyboard and menu bar
 
 - ⌘1 / ⌘2: open Pass / Mail.
-- ⌘N / ⌘F / ⌘R: new item/message, search and refresh in the front product window.
+- ⌘N / ⌘F / ⌘R: create, search and refresh in the front product window.
 - In Mail: ⇧⌘U read/unread, ⌘E archive, ⌘Delete Trash, ⌘Return review before sending.
 - ⌘L: lock both products. ⌘,: settings. ⌘Q: quit.
-- Optional ⌃⌥P: bring Pass forward; focus search.
-- Settings can remove the ProtonX menu-bar item entirely. The Dock and Window menu
-  remain available. Closing windows keeps the suite running; Quit ends it.
+- Optional ⌃⌥P: bring Pass forward and focus search.
+- Settings can hide the menu-bar icon. The Dock and Window menu remain available.
+  Closing windows keeps the suite running; Quit ends it.
 
-## Test
+## Contribute
+
+Contributions are welcome. Current priorities are secure Mail storage and
+migration, account recovery, broader Pass item interoperability, accessibility
+and measured startup/resource use. The [roadmap](docs/ROADMAP.md) describes scope
+and acceptance criteria; [CONTRIBUTING.md](CONTRIBUTING.md) covers development and
+review. Use synthetic content in tests, screenshots and public bug reports.
 
 ```sh
 swift test
-./scripts/test-bridge.sh        # Synthetic IMAP/SMTP servers, verified TLS
-./scripts/test-bridge.sh --starttls # Same round trip with STARTTLS
-./scripts/test-helper.sh        # Public SDK/CLI tests plus native transport contracts
-./scripts/test-mail-helper.sh   # Native Mail IPC, synthetic decryption/paging/compose/send
-./scripts/test-credential-provider.sh # Compile-only API probe and synthetic origin cases
+./scripts/test-bridge.sh             # Synthetic IMAP/SMTP with verified TLS
+./scripts/test-bridge.sh --starttls   # Same round trip with STARTTLS
+./scripts/test-helper.sh             # Public Pass SDK/CLI and native contracts
+./scripts/test-mail-helper.sh        # Native Mail IPC and public/synthetic tests
+./scripts/test-credential-provider.sh # Compile-only native AutoFill probe
 ```
 
-See [validation](docs/VALIDATION.md) for exact results and untested boundaries,
-[architecture](docs/ARCHITECTURE.md) for the separate-app/suite tradeoffs,
-[security](SECURITY.md), [UX review](docs/UX_REVIEW.md), and
-[contributing](CONTRIBUTING.md). Resource claims require measurement:
-[scripts/measure-resources.sh](scripts/measure-resources.sh) and
-[performance notes](docs/PERFORMANCE.md).
+Detailed coverage and remaining acceptance gates live in
+[validation](docs/VALIDATION.md) and [Pass reliability](docs/PASS_RELIABILITY.md).
+See [architecture](docs/ARCHITECTURE.md) for the suite/separate-app tradeoffs and
+[performance](docs/PERFORMANCE.md) for the measurement plan. Resource savings
+against official clients require matched benchmarks; no reduction percentages
+are established.
 
-## Optional designated test account
-
-Normal builds/tests need no account. For a disposable account, sign in through
-ProtonX, then run `./scripts/test-account.sh prepare` and
-`./scripts/test-account.sh session`. This performs live synthetic note
-create/read/edit/trash/restore checks in the same local Pass profile and leaves
-one clearly named synthetic note in recoverable Trash. Do not use a primary vault.
-Quit ProtonX before rebuilding; close or lock it before running the helper tests
-against its profile.
-
-For unattended **experimental direct password** validation, run `prepare`, then
-`setup`, and enter the password in the native secure field. `check` reports only
-readiness; `run` consumes the saved test credential and removes it after the
-attempt, including failure; `clear` removes it without testing. The tool is
-separate from the app bundle. See [security](SECURITY.md).
-
-Use `./scripts/build-app.sh --skip-helper "--stage-update=ProtonX Mail Update"`
-to package a named update alongside an app that is currently running. Quit the
-current real ProtonX before launching another real bundle with the same identity.
-
-For stable Applications/Spotlight installation, add `--install` to the normal app
-build. It installs ProtonX and the **ProtonX Mail** / **ProtonX Pass** native
-launchers after signature validation, retaining previous builds. See the
-[workflow and installation guide](docs/DAILY_USE_UPDATE.md). Quit the installed app
-before updating; the installer refuses to replace running binaries.
+For isolated live testing, the [test-account workflow](CONTRIBUTING.md#live-account-validation)
+provides an optional native credential form and synthetic-record checks. Never
+put credentials, session handoff URLs or private mailbox/vault content in issues
+or logs. Binary publication awaits the [dependency license review](docs/LICENSE_REVIEW.md).

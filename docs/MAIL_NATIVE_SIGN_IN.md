@@ -1,11 +1,12 @@
 # Native Mail sign-in decision
 
-Review date: 2026-10-06. The required product experience is **open Mail → enter
+Review date: 2026-10-07. The required product experience is **open Mail → enter
 Proton username/password → complete any account challenge → inbox**. On restart,
 restore Mail's own session with local unlock as appropriate. No separate Bridge
 installation, generated mail-client password, ports or certificate import should
-be required in the normal experience. The direct sign-in-to-reader slice is now implemented in local builds. The user has reported real sign-in and reading. Delivery and recovery remain
-acceptance gates. See [the native composer and linked Gmail review](MAIL_COMPOSER.md).
+be required in the normal experience. Direct native sign-in and reading are
+implemented and have manual account acceptance coverage. Live delivery and
+account recovery remain acceptance gates. See [the native composer and linked Gmail review](MAIL_COMPOSER.md).
 
 ## Decision
 
@@ -120,13 +121,16 @@ challenge transitions, private IPC, typed error retries, lock/late replies, expi
 failed logout retention and preview isolation. Proton's public message-body tests
 exercise actual decryption and MIME fixtures; its paging tests exercise local
 mock servers. Synthetic preview selection/search/folder/lock checks passed.
-The user subsequently reported successful real sign-in and reading. No private
-account data was inspected by the agent; delivery and recovery remain unverified.
+Manual account acceptance covers native sign-in and message reading. Public
+validation artifacts exclude private account data; delivery and account recovery
+remain unverified.
 
-Next: user-driven designated-account sign-in/read/restart validation, human
-verification and security-key support, expired/revoked-session recovery, then
-read/unread, archive/trash, threads, attachments and search. Compose/reply is now
-implemented with synthetic contracts; delivery still needs a user-driven test.
+Next: designated-account restart/recovery validation, human
+verification and security-key support, expired/revoked-session recovery, threads,
+attachments and broader search. Read/unread and Archive/Trash/Inbox with move undo
+are implemented with synthetic coverage. Compose/reply is now
+implemented with synthetic contracts; live delivery still needs an account
+acceptance test.
 
 ## Acceptance gates
 
