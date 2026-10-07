@@ -1,6 +1,6 @@
 # Mail database migration preparation
 
-Status: experimental database-set staging, disabled in the normal app. No account
+Status: experimental database/attachment staging, disabled in the normal app. No account
 profile is converted by startup, no migration UI exists, and no cutover is exposed.
 Read [the storage review](LOCAL_STORAGE.md) and [Security](../SECURITY.md).
 
@@ -80,10 +80,51 @@ before SDK construction. A remaining cache or format marker prevents creation of
 a replacement storage key when databases are missing. Full cache validation adds
 work to startup; its cost has not been benchmarked.
 
-Existing files and absolute cache paths have not been migrated/rebased. Remaining
-file APIs, staging and sender-image paths need an activation audit. These new-write
+Existing absolute cache paths have not been rebased or activated. Remaining
+file APIs and sender-image paths need an activation audit. The new-write and staging
 contracts do not establish whole-profile upgrade or queued-send recovery safety.
 SQLCipher uses its [documented database/key APIs](https://www.zetetic.net/sqlcipher/sqlcipher-api/).
+
+## Existing attachment staging (2026-10-07)
+
+`migration::stage_attachment_cache` first prepares/revalidates the database set
+with its original key, then prepares attachments under the same profile lock.
+It has no helper command or account-conversion UI and is exercised only on
+temporary synthetic profiles.
+
+- Inventory existing `cache/attachments` files, including embedded MIME payloads;
+  refuse symlinks, hard links, special files, unsupported paths and files over
+  32 MiB. Empty files and an absent cache are supported. File count and traversal
+  depth remain bounded by the profile inventory.
+- Write a versioned **encrypted** path/fingerprint/progress plan into a private
+  `attachment-stage` directory inside `.storage-migration`. Original filenames
+  and relative paths never enter the plaintext database manifest. Published
+  copies use generic `asset-0000.pxb` names, not original attachment names.
+- Encrypt and verify each copy using the same SQLCipher blob adapter as new SDK
+  cache writes, sync it, then atomically persist encrypted progress. Plaintext
+  exists only in memory; original files are retained, never overwritten/deleted.
+- Resume verifies the source inventory, payload fingerprints and acknowledged
+  encrypted outputs. A durable but unacknowledged output can be acknowledged
+  after verification. Missing acknowledged outputs, changed/added/removed source
+  files, wrong keys, damaged plans/payloads or unsafe stage paths stop preparation
+  and retain remaining files. Unplanned reserved outputs are refused.
+- Recheck both the cache and database sets before marking attachment staging
+  prepared. Database-only resume also checks the attachment-stage directory's
+  file types, names and private permissions. Preparation never releases the
+  startup gate: both updated helpers still refuse the profile.
+
+The encrypted plan provides source-to-stage correspondence for a future cutover.
+**SDK absolute paths remain unchanged in both original and staged databases.**
+No whole-profile cutover, export or queue replay is performed. An interruption
+before the first plan is durable leaves a recovery gate and requires explicit
+recovery; process-crash tests do not prove physical power-loss or low-disk safety.
+
+Synthetic tests cover six durable attachment transitions, idempotent resume,
+empty/absent caches, source/database changes during staging, keys, corruption,
+missing files, plan versions/traversal, extra outputs, links, bounds and permissions.
+The pinned SDK-schema fixture preserves attachment path/size metadata alongside
+body/draft/opaque queue rows and checks the staged payload without dispatching
+the queue. Path rebasing and actual SDK send recovery remain separate gates.
 
 ## Activation gates that remain
 

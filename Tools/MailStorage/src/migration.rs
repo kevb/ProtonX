@@ -1,6 +1,8 @@
 // Copyright (c) 2026 ProtonX contributors. SPDX-License-Identifier: AGPL-3.0-only
 //! Resumable database-set staging, not profile activation. Originals are retained.
-//! No Keychain/network calls, attachment conversion or send queue replay occurs.
+//! No Keychain/network calls or send queue replay occurs.
+mod cache;
+pub use cache::{AttachmentMigrationSummary, stage_attachment_cache};
 use crate::MIGRATION_DIRECTORY;
 use crate::{ProfileGuard, StorageError, database_files, is_plaintext, validate_encrypted};
 use rusqlite::{Connection, OpenFlags};
@@ -396,6 +398,10 @@ fn validate_stage_directory(directory: &Path, count: usize) -> Result<(), Storag
         }
         let child = child.map_err(|_| StorageError::Unavailable)?;
         let metadata = fs::symlink_metadata(child.path()).map_err(|_| StorageError::Unavailable)?;
+        if child.file_name() == cache::DIRECTORY {
+            cache::validate_directory(&child.path())?;
+            continue;
+        }
         if !metadata.is_file() || metadata.nlink() != 1 {
             return Err(StorageError::InvalidProfile);
         }

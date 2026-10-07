@@ -84,8 +84,14 @@ source/WAL fingerprints and acknowledged outputs, and resumes tested process-cra
 points. Both updated helpers refuse that profile even when preparation completes.
 The pinned SDK schema/body fixture also preserves draft references and opaque
 queue bytes without executing the queue. This is not whole-profile activation,
-attachment conversion, actual send recovery or secure removal of old plaintext.
+cache activation, actual send recovery or secure removal of old plaintext.
 See [the migration boundary](MAIL_STORAGE_MIGRATION.md).
+
+Existing attachment/MIME files can now be staged into verified encrypted
+containers with an encrypted source-path/progress map. Resume refuses changed
+originals or damaged acknowledged copies. Originals and SDK absolute references
+are retained; path rebasing, whole-profile cutover and recovery remain unfinished.
+Normal app builds do not invoke either staging API.
 
 The candidate advertises `cacheFirst` after authentication. Swift requests a local
 first page, then one refresh. Subsequent `poll` requests read callback status

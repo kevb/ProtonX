@@ -8,8 +8,8 @@ end-to-end workflow come before additional products.
 
 1. **Finish the secure-storage foundation already in progress.** The opt-in Mail
    candidate encrypts databases and new attachment/MIME cache payloads and supports
-   saved-first loading. The normal app does not enable it. Complete existing-file
-   migration/rebasing, export/staging audit, whole-profile cutover/recovery, preserve pending drafts/sends and
+   saved-first loading. The normal app does not enable it. Complete existing-cache
+   path rebasing/activation, export audit, whole-profile cutover/recovery, preserve pending drafts/sends and
    prevent older builds reopening a migrated profile. Measure startup integrity
    checks before promising faster opening. See [the storage review](LOCAL_STORAGE.md).
 2. **Finish Pass offline acceptance.** An encrypted, policy-aware read-only cache
@@ -44,6 +44,8 @@ Pass and the shared macOS experience before expanding the suite.
 - Login/note editing with multiple websites, notes, TOTP and text/hidden custom fields.
 - Revision conflict protection, draft retention and acknowledged-save handling.
 - Compile-only AutoFill feasibility contracts and offline storage review.
+- Existing attachment/MIME staging with encrypted filename/path maps, verified
+  payload copies and interruption recovery; original SDK references remain intact.
 - Experimental Mail encrypted database candidate and resumable database-set staging,
   with original files retained and startup guards in both updated helpers. Profile
   activation, existing-cache migration and the full file API audit remain gates; see

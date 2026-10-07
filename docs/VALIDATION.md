@@ -12,13 +12,34 @@ are excluded from public artifacts.
 | Pass account workflow | Manual fictional-login creation, bidirectional edit/sync with the official desktop app, conflict refusal, Trash/restore and online quit/restart | Broader item/account types, real server expiry/revocation and upgrade/Keychain continuity |
 | Pass saved/offline browsing | Synthetic encrypted-storage, policy, saved-first/reconnect and lock-race tests | Disconnected account restart and larger-vault measurements |
 | Native Mail | Manual sign-in and message reading; synthetic/public tests for reading, composer, sender selection and message actions | Live send/reply delivery, linked-Gmail delivery and account recovery |
-| Mail secure storage | Opt-in database/file encryption and migration-staging contracts | Whole-profile cutover, existing file migration and pending-send/draft recovery before enabling ordinary builds |
+| Mail secure storage | Opt-in database/file encryption and resumable database/attachment staging contracts | Cache path rebasing/activation, whole-profile cutover and pending-send/draft recovery before enabling ordinary builds |
 | Product launchers | Synthetic native UI checks for cold/warm requests, minimized/closed windows and reverse product selection; signed installer checks | Minimum-OS runtime and update/Keychain continuity |
 
 The latest local Swift run passed 120 tests (62 core, 58 app); five synthetic
 atomic-install tests passed. These are local results, not a statement about the
 latest GitHub run. Dated entries below record milestone-specific test scope and
 historical limitations. The README and roadmap describe the current feature set.
+
+## Existing Mail attachment staging, 2026-10-07
+
+- Added resumable encryption of existing attachment/embedded-MIME cache files,
+  retaining originals and recording source paths, hashes and progress only in an
+  encrypted plan. Generic output names and private permissions prevent staging
+  from introducing plaintext attachment filenames or contents.
+- Eleven new parent tests cover six process-death checkpoints, unchanged resume,
+  empty/absent caches, wrong keys, damaged/missing outputs, changed cache/database
+  sources, unsafe paths/links, size limits, private permissions and invalid plans.
+  Subprocess drivers are excluded from ordinary discovery and executed by their
+  parent crash tests. The pinned SDK-schema fixture now preserves attachment
+  path/size metadata alongside body/draft/opaque queue rows without execution.
+- `scripts/test-mail-storage.sh` passed 52 tests (18 helper, 34 storage/SDK), the
+  opt-in helper build and ten synthetic startup-refusal contracts. Resolved
+  dependency checks confirmed that normal helper builds do not enable SQLCipher.
+  The upstream debug-linker unwind-size warning remains; it did not fail the build.
+- Validation used isolated synthetic profiles, with no account, Keychain or
+  installed-profile migration. SDK absolute paths remain unchanged. Ordinary app
+  builds do not invoke staging; cache path rebasing, cutover/recovery and genuine
+  pending-send recovery remain activation gates.
 
 ## Product launcher focus correction, 2026-10-07
 

@@ -35,8 +35,11 @@ include passwords, tokens, real message bodies or vault exports in public issues
   The original filename stays in encrypted metadata; the cache filename is generic.
   There is no native attachment export API. Internal SDK attachment paths in this
   candidate point to ciphertext, not files another app can open directly. Existing
-  cache conversion, full file-path/export/staging audit, whole-profile cutover and
+  cache activation/path rebasing, full file-path/export/staging audit, whole-profile cutover and
   actual draft/send recovery remain release gates. See docs/MAIL_STORAGE_MIGRATION.md.
+  Synthetic-only attachment migration staging encrypts copies of existing files
+  and the source-path map; it retains originals and does not update SDK references
+  or activate the profile. Normal builds never invoke it.
   It never reuses Pass or Bridge credentials. `nativeMailConnected`
   is an untrusted Boolean hint; reopening requires local unlock and SDK restore.
   Native credentials/challenges travel on private stdin. Human verification and

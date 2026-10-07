@@ -1,18 +1,27 @@
 // Copyright (c) 2026 ProtonX contributors. SPDX-License-Identifier: AGPL-3.0-only
 // Real SDK schema/local models, synthetic opaque queue rows. No queue execution,
 // network, authentication or claim of real pending-message delivery safety.
-use mail_common::models::RawMessageBody;
+use mail_common::models::{Attachment, RawMessageBody, attachment_cache::AttachmentCacheMetadata};
 use mail_common::test_utils::db::new_test_connection_file;
 use mail_common::test_utils::scroller::{StoreLabeledModelMap, test_messages};
 use mail_crypto_inbox::message::RawDecryptedBody;
 use mail_stash::orm::Model;
-use protonx_mail_storage::{ProfileGuard, key_connection, migration::stage_databases};
+use protonx_mail_storage::{
+    ProfileGuard, key_connection, migration::stage_attachment_cache, read_blob,
+};
 use rusqlite::Connection;
 use std::{collections::HashMap, fs};
 
 #[tokio::test]
 async fn sdk_schema_body_draft_and_queue_bytes_survive_staging_without_execution() {
     const KEY: [u8; 32] = [0x71; 32];
+    const CACHE: &[u8] = b"SYNTHETIC-MIGRATED-SDK-ATTACHMENT";
+    let root = tempfile::tempdir().unwrap();
+    let cache_path = root
+        .path()
+        .join("cache/attachments/synthetic/1/private-fixture.txt");
+    fs::create_dir_all(cache_path.parent().unwrap()).unwrap();
+    fs::write(&cache_path, CACHE).unwrap();
     let (stash, source_directory) = new_test_connection_file().await;
     let mut tether = stash.connection();
     let mut data = HashMap::from([(vec!["synthetic-inbox"], test_messages(1, 0))]);
@@ -24,10 +33,29 @@ async fn sdk_schema_body_draft_and_queue_bytes_survive_staging_without_execution
         .write_tx(async |tx| body.store(id, None, tx).await)
         .await
         .unwrap();
+    let mut attachment = Attachment {
+        filename: "private-fixture.txt".into(),
+        ..Default::default()
+    };
+    tether
+        .write_tx(async |tx| {
+            attachment.save(tx).await?;
+            AttachmentCacheMetadata {
+                attachment_id: attachment.id(),
+                atime: 1,
+                ctime: 1,
+                hit_count: 0,
+                path: cache_path.to_str().unwrap().to_owned(),
+                size: CACHE.len() as u64,
+            }
+            .save(tx)
+            .await
+        })
+        .await
+        .unwrap();
     drop(tether);
     drop(stash); // Feature joins the SDK's worker connections before moving file.
 
-    let root = tempfile::tempdir().unwrap();
     let path = root.path().join("users/synthetic/mail.db");
     fs::create_dir_all(path.parent().unwrap()).unwrap();
     fs::rename(source_directory.path().join("test"), &path).unwrap();
@@ -59,11 +87,33 @@ async fn sdk_schema_body_draft_and_queue_bytes_survive_staging_without_execution
     let source_bytes = fs::read(&path).unwrap();
 
     let guard = ProfileGuard::acquire(root.path()).unwrap();
-    assert_eq!(stage_databases(&guard, &KEY).unwrap().databases, 1);
+    assert_eq!(stage_attachment_cache(&guard, &KEY).unwrap().files, 1);
     assert_eq!(fs::read(&path).unwrap(), source_bytes);
+    assert_eq!(fs::read(&cache_path).unwrap(), CACHE);
+    assert_eq!(
+        read_blob(
+            &root
+                .path()
+                .join(".storage-migration/attachment-stage/asset-0000.pxb"),
+            &KEY
+        )
+        .unwrap(),
+        CACHE
+    );
     let staged = root.path().join(".storage-migration/stage-000.db");
     let encrypted = Connection::open(&staged).unwrap();
     key_connection(&encrypted, &KEY).unwrap();
+    // Staging preserves SDK references. Updating these absolute paths belongs to
+    // a separately tested cutover; never point the retained original at a stage.
+    assert_eq!(
+        encrypted
+            .query_row("SELECT path,size FROM attachment_cache", [], |r| Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, u64>(1)?
+            )))
+            .unwrap(),
+        (cache_path.to_str().unwrap().to_owned(), CACHE.len() as u64)
+    );
     assert_eq!(
         encrypted
             .query_row("SELECT body FROM raw_message_body", [], |r| r
