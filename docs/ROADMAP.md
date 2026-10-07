@@ -103,6 +103,113 @@ remain separate gates.
   installed routing and stable signing/Keychain behavior; see
   [the installation guide](DAILY_USE_UPDATE.md).
 
+## Suite workspace proposal
+
+Status: design proposal, not implemented. The current build retains independent
+Pass and Mail windows. Evaluate a primary ProtonX workspace before changing that
+default; keep the existing product sessions and helper boundaries separate.
+
+- Provide a narrow product icon rail for Pass, Mail and, when implemented,
+  Calendar/Drive. Give icons accessible names, tooltips, a clear selected state
+  and native keyboard commands. Only expose usable products as navigation targets.
+- Preserve each product's selected item/folder, search, scroll position and draft
+  when switching products. Do not rebuild a store, relaunch a helper or refresh
+  the server merely because a tab becomes visible.
+- Move unsaved composer content out of sheet-local view state into an owned Mail
+  draft model. A modal sheet currently prevents switching products: use an inline
+  or independent composer that can remain open while consulting Calendar. Keep
+  multiple composers and draft autosave as separate acceptance gates.
+- Offer Home with large product icons on first launch and as a rail destination.
+  Subsequent ordinary launches should restore the last workspace; allow a startup
+  preference for Home or a particular product. Explicit product launches bypass Home.
+- Preserve **ProtonX Mail** and **ProtonX Pass** Spotlight launchers and product
+  links. Route them to the requested workspace or existing detached product
+  window without briefly selecting a different product.
+- Retain an explicit **Open in separate window** action for simultaneous work on
+  multiple displays. Compare a workspace-first default with separate-window mode;
+  avoid adding a large set of modes before the state/focus model is proven.
+- Keep contextual tools separate from product navigation. A Calendar/Contacts
+  inspector beside Mail may be useful later; do not overload the same icon with
+  both changing the main workspace and opening a side panel.
+- Instantiate products lazily, suspend unnecessary hidden rendering/polling and
+  measure the whole process set. Preserving navigation state must not keep revealed
+  Pass secrets alive across lock/sign-out or couple product authentication.
+- Validate tab switches with unsaved drafts, independent lock/session expiry,
+  detached windows, keyboard focus, VoiceOver, and cold/warm Spotlight routing.
+  Benchmark first use, switching, idle memory and energy before claiming savings.
+
+The official [side panel](https://proton.me/support/side-panel) opens contextual
+Calendar, Contacts and account-security tools beside the current app. It is a
+useful reference, but full product tabs are a separate ProtonX design proposal.
+
+## Calendar (planned)
+
+Calendar is not implemented. Treat it as a product/backend feasibility project,
+not just another screen in the suite. Keep Pass reliability and everyday Mail
+completion ahead of expanding the product set.
+
+- Identify a source-pinned Proton implementation for Calendar authentication,
+  key handling, encrypted event storage and sync; review licensing and helper
+  contracts before choosing a native integration. Do not invent Calendar crypto
+  or silently reuse a Mail/Pass session or export decrypted data to Apple Calendar.
+- Start with read-only calendar/event browsing: week view, date navigation,
+  Today, mini-month picker, time-zone display, multiple calendar visibility and
+  colours. Consider day/month/agenda views after the core reader is usable.
+- Add event creation/editing/deletion, recurrence, all-day events, time-zone/DST
+  handling, reminders, attendees and invitation updates through Proton's existing
+  implementation. Test recurring-event exceptions and concurrent edits explicitly.
+- Connect Mail invitations and attachments to event inspection and RSVP actions.
+  Preserve an unsaved Mail draft while switching to Calendar and returning.
+- Evaluate shared/subscribed calendars, import/export and native notifications
+  after basic event interoperability and recovery are established.
+- Keep booking-page creation, availability, links and management as later,
+  plan-aware functionality. See Proton's
+  [appointment scheduling guide](https://proton.me/support/calendar-appointment-scheduling).
+
+## Additional desktop parity backlog
+
+These are missing capabilities or extensions to narrower implementations. A
+visible feature in the official client is not evidence of its availability on
+every plan. Screenshots used for design review must not be copied into public
+assets; public captures and fixtures use synthetic content.
+
+### Mail
+
+- Rich-text composition: font/size, emphasis, lists, alignment, links, quotations,
+  inline images and clear formatting; retain a plain-text option and light paper
+  in dark appearance. Add attachment viewing/sending and forward separately.
+- Nonmodal/minimizable/pop-out composers, multiple drafts, automatic saving and
+  a reliable saved/pending/failed indicator; preserve editing across navigation.
+- Contact picking/autocomplete, optional Cc/Bcc expansion, scheduling, Undo Send,
+  password-protected external mail and expiry controls. From selection and Cc/Bcc
+  already exist; do not count them as missing.
+- Row versus split reading layouts, density and composer-size preferences;
+  category enable/manage controls and mailing-list/newsletter views; folder/label
+  creation and management, starring, bulk actions and full search/filter controls.
+- Broader keyboard actions with a discoverable shortcut reference; current
+  new/search/refresh/product and selected-message shortcuts remain supported.
+- Quick settings with a route to full settings, explicit theme override while
+  retaining system sync, default-mail-app registration, product-scoped local-data
+  reset/recovery and a redacted diagnostic export. A reset must explain its scope
+  and protect unsaved drafts and uncertain sends.
+- Contacts and Calendar contextual access; account/security tools can initially
+  link to the official account site. Optional writing assistance is a later
+  feasibility/privacy decision, including local versus server processing, not a
+  reason to embed the web client or substitute a different provider silently.
+
+### Pass
+
+- Generated-password history, separate from item revision history, with a bounded
+  retention period, explicit clearing and reviewed encrypted storage. The
+  desktop reference exposes two-week generated-password retention.
+- Item duplication, pinning and version history, plus desktop Auto-Type; add
+  per-item monitoring exclusions with Pass Monitor rather than a nonfunctional toggle.
+- Access-token management through the appropriate pinned Proton protocol and
+  product policy; tokens must never enter logs or command arguments/environment.
+- Plan/storage presentation and convenient account/support/mobile-app links.
+  Manual refresh, lock and sign-out already exist; broader settings, import/export,
+  alias management and monitoring remain gaps.
+
 ## Local storage and faster opening
 
 - Initial loading/failure and genuinely empty states are now distinct; existing
