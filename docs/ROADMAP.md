@@ -19,7 +19,7 @@ end-to-end workflow come before additional products.
    update Keychain continuity and broader item types. See the
    [automation and acceptance plan](PASS_RELIABILITY.md).
 3. **Complete Mail's everyday workflow.** Validate actual send/reply delivery and
-   enabled Gmail sending identities. Read/unread, Archive/Trash/Inbox and SDK move
+   enabled Gmail sending identities. Read/unread, Archive/Trash/Spam/Inbox and SDK move
    undo and SDK conversation reading are implemented with synthetic/public upstream
    tests. Accept cross-client conversation behavior and add attachment viewing/sending.
    Preserve drafts and distinguish confirmed delivery from uncertain send outcomes.
@@ -87,9 +87,10 @@ remain separate gates.
   challenge/recovery flows and release licensing separately.
 - Verify send/reply delivery, including enabled Gmail sending identities, on a
   designated test account. Do not infer successful delivery from composer UI.
-- Read/unread, Archive/Trash/Inbox and move undo are implemented through the pinned
-  SDK. Conversation grouping, cross-folder cards and individual-message mode are
-  implemented with synthetic coverage; attachment UI and rich-text composition
+- Read/unread, Archive/Trash/Spam/Inbox and move undo are implemented through the pinned
+  SDK for one message or one conversation. Folder-aware list context menus and
+  keyboard confirmation for whole-conversation Trash are implemented. Conversation
+  grouping, cross-folder cards and individual-message mode have synthetic coverage; attachment UI and rich-text composition
   remain. Sanitized HTML reading preserves structure alongside a text fallback.
 - Test interrupted sends, ambiguous delivery and draft recovery across upgrades.
 - Retain Bridge as an optional prototype/compatibility path. Its lifecycle work
@@ -192,7 +193,7 @@ assets; public captures and fixtures use synthetic content.
 | Contacts | Contact book, picker/autocomplete, create/edit/delete, groups and group addressing, CSV/vCard import/export. To/Cc/Bcc and From selection already exist. |
 | Search | Full-mailbox metadata/body search, recipient/date/attachment and other advanced filters. Current search covers only loaded subjects/senders, within the bounded message window. |
 | Organisation | Star/unstar, snooze, arbitrary folder moves, label application, folder/label creation/edit/deletion/colours/subfolders. Existing custom folders can be browsed. |
-| Bulk/conversation actions | Multi-selection, whole-thread actions, permanent deletion and empty Trash. Existing read/unread and Archive/Trash/Inbox actions and move undo target one message. Permanent deletion requires an explicit helper/policy review. |
+| Bulk/conversation actions | Multi-selection, permanent deletion and empty Trash. Read/unread and Archive/Trash/Spam/Inbox actions work on one message or one conversation, with SDK move undo and keyboard confirmation for whole-conversation Trash. Permanent deletion requires an explicit helper/policy review. |
 | Spam and automation | Spam/phishing reporting, block/allow lists, simple filters/Sieve, automatic forwarding and out-of-office replies. |
 | Inbox views | Category enable/manage controls and Primary/Social/Promotions/etc. views; mailing-list/newsletter management and unsubscribe controls. Availability can depend on rollout. |
 | Reader privacy/images | Proton image proxy and tracker/pixel protection, tracking-link cleanup, persistent remote/embedded-image preferences and sender logos. Current raster-image opt-in fetches directly without Proton's proxy. |

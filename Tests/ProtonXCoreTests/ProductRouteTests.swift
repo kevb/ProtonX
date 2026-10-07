@@ -11,7 +11,7 @@ import Testing
 }
 
 @Test func mailActionsHaveBoundedAcknowledgementAndClosedCapabilities() throws {
-    for result in [NativeMailResult(queued: false, undoToken: 1), NativeMailResult(queued: true, undoToken: 0), NativeMailResult(actions: Array(repeating: .trash, count: 6)),
+    for result in [NativeMailResult(queued: false, undoToken: 1), NativeMailResult(queued: true, undoToken: 0), NativeMailResult(actions: Array(repeating: .trash, count: NativeMailAction.allCases.count + 1)),
                    NativeMailResult(id: 11, queued: true, conversationID: 0), NativeMailResult(queued: true, conversationID: 70), NativeMailResult(id: 11, queued: false, conversationID: 70)] {
         struct Packet: Encodable { let schema = 1; let id = 1; let result: NativeMailResult }
         #expect(throws: ProtonXError.invalidResponse) { try NativeMailProcess.decode(JSONEncoder().encode(Packet(result: result)), expectedID: 1) }

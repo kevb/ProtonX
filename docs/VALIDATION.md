@@ -15,10 +15,42 @@ are excluded from public artifacts.
 | Mail secure storage | Opt-in database/file encryption and resumable database/attachment staging contracts | Cache path rebasing/activation, whole-profile cutover and pending-send/draft recovery before enabling ordinary builds |
 | Product launchers | Synthetic native UI checks for cold/warm requests, minimized/closed windows and reverse product selection; signed installer checks | Minimum-OS runtime and update/Keychain continuity |
 
-The latest local Swift run passed 152 tests; five synthetic atomic-install tests
+The latest local Swift run passed 156 tests; five synthetic atomic-install tests
 passed at the prior installer milestone. These are local results, not a statement about the
 latest GitHub run. Dated entries below record milestone-specific test scope and
 historical limitations. The README and roadmap describe the current feature set.
+
+## Mail folder-aware context actions, 2026-10-07
+
+- List menus offer Trash, Archive, Spam, Inbox/not-spam and read/unread using the
+  official WebClients folder policy and stable SDK folder kinds. Conversations
+  view queues one genuine SDK conversation operation; Messages view and reader
+  cards target one message. Sender blocking, unsubscribing, multi-selection and
+  permanent deletion remain separate features.
+- All 156 Swift tests and 24 helper tests passed. Added coverage checks all six
+  closed actions, translated folder names, stale intents, cross-folder scope,
+  single-message mode and SDK capability/destination projection. Existing
+  uncertain-action refusal and Delete confirmation contracts remain in the suite.
+- Two added fixtures exercise the pinned SDK with a synthetic BYOE/Gmail receiving
+  identity and a local mock Proton API: conversation Archive/Spam, Undo before and
+  after queued execution, and Spam → Inbox. Requests assert one conversation ID,
+  the system destination and the default SDK spam policy. They do not contact
+  Gmail or establish live mailbox interoperability.
+- The native synthetic preview verified context targeting of an unselected row,
+  whole-conversation Spam and Archive, not-spam, move Undo, the read/unread menu
+  toggle, and cancellation of whole-conversation Backspace confirmation.
+- All 163 selected public SDK/developer reading, storage, composer, inbox action
+  and conversation tests passed, plus eight helper storage-preflight refusals.
+  Upstream's attachment concurrency test remains ignored. Live server mutation
+  and linked-account acceptance remain separate from these local synthetic checks.
+- One earlier concurrent Swift run exceeded existing recovery-test deadlines
+  during heavy Rust compilation; the final ordinary full run passed. An exploratory
+  serial test run stalled and was terminated. Neither changed Pass behavior.
+- The optimized app and both launchers passed strict nested signature checks and
+  atomic installation in Applications. Installed file manifests match the staged
+  bundles; the app and helpers retain the configured signing team. Keychain ACLs
+  are unchanged. Both workspaces were locked before installation; no real mailbox
+  mutation was used to validate these new actions.
 
 ## Mail conversation Trash, 2026-10-07
 

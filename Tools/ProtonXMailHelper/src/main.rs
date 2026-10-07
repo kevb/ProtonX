@@ -132,7 +132,7 @@ enum Command {
         token: u64,
     },
     MessageAction { folder: u64, item: u64, action: inbox_actions::Action },
-    ConversationTrash { folder: u64, item: u64, conversation: u64 },
+    ConversationAction { folder: u64, item: u64, conversation: u64, action: inbox_actions::Action },
     UndoAction { token: u64 },
     SignOut,
 }
@@ -672,7 +672,7 @@ impl Backend {
                 )
             }
             Command::MessageAction { folder, item, action } => self.message_action(folder, item, action),
-            Command::ConversationTrash { folder, item, conversation } => self.conversation_trash(folder, item, conversation),
+            Command::ConversationAction { folder, item, conversation, action } => self.conversation_action(folder, item, conversation, action),
             Command::UndoAction { token } => self.undo_action(token),
             Command::Compose { mode, folder, item } => self.compose(&mode, folder, item),
             Command::SaveDraft { token, content } => {
@@ -971,12 +971,12 @@ impl Backend {
         let mut folders: Vec<Value> = systems
             .iter()
             .filter(|f| f.display)
-            .map(|f| json!({"id":f.id.as_u64(),"name":f.name,"count":f.count}))
+            .map(|f| json!({"id":f.id.as_u64(),"name":f.name,"count":f.count,"kind":inbox_actions::folder_kind(&f.description)}))
             .collect();
         folders.extend(
             custom
                 .iter()
-                .map(|f| json!({"id":f.id.as_u64(),"name":f.name,"count":f.total})),
+                .map(|f| json!({"id":f.id.as_u64(),"name":f.name,"count":f.total,"kind":"other"})),
         );
         let mailbox = if let Some(id) = folder {
             if !folders.iter().any(|f| f["id"].as_u64() == Some(id)) {

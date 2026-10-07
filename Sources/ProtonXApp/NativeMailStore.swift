@@ -4,7 +4,8 @@ import ProtonXCore
 
 @MainActor
 final class NativeMailStore: ObservableObject {
-    struct TrashIntent {
+    struct ListActionIntent {
+        let action: NativeMailAction
         let item: UInt64
         let folder: UInt64
         let conversation: UInt64?
@@ -13,7 +14,17 @@ final class NativeMailStore: ObservableObject {
         fileprivate let selection: UInt64?
         fileprivate let conversations: Bool
         var title: String { conversation == nil ? "Move message to Trash?" : "Move this whole conversation to Trash?" }
-        var actionTitle: String { conversation == nil ? "Move message to Trash" : "Move conversation to Trash" }
+        var actionTitle: String {
+            let scope = conversation == nil ? "message" : "conversation"
+            switch action {
+            case .read: return "Mark \(scope) as Read"
+            case .unread: return "Mark \(scope) as Unread"
+            case .archive: return "Move \(scope) to Archive"
+            case .trash: return "Move \(scope) to Trash"
+            case .spam: return "Move \(scope) to Spam"
+            case .inbox: return "Move \(scope) to Inbox"
+            }
+        }
     }
     enum Phase: Equatable { case welcome, locked, signingIn, totp, mailboxPassword, securityKey, open }
     @Published private(set) var phase: Phase = .welcome
@@ -259,19 +270,35 @@ final class NativeMailStore: ObservableObject {
         body = next; sanitizedHTML = result.sanitizedHTML; messageActions = result.actions ?? []
     }
     var canUndoAction: Bool { undoToken != nil && (undoExpiry ?? .distantPast) > Date() && !busy && !mustRefreshBeforeActions && draft == nil }
-    func trashIntent(for item: UInt64?) -> TrashIntent? {
+    // Menu presentation follows Proton WebClients' useLabelActions by SDK folder kind.
+    // This is a UI hint; every write rechecks SDK capabilities and destinations.
+    func listActions(for item: UInt64?) -> [NativeMailAction] {
+        guard let item, let row = visibleConversations.first(where: { $0.messages.contains(where: { $0.id == item }) }),
+              let folder = folders.first(where: { $0.id == selectedFolder }) else { return [] }
+        let moves: [NativeMailAction]
+        switch folder.kind ?? .other {
+        case .inbox, .other: moves = [.trash, .archive, .spam]
+        case .sent, .drafts, .pending: moves = [.trash, .archive]
+        case .archive: moves = [.trash, .inbox, .spam]
+        case .spam: moves = [.trash, .inbox]
+        case .trash: moves = [.inbox, .archive]
+        }
+        return moves + [row.unread ? .read : .unread]
+    }
+    func trashIntent(for item: UInt64?) -> ListActionIntent? { listActionIntent(for: item, action: .trash) }
+    func listActionIntent(for item: UInt64?, action: NativeMailAction) -> ListActionIntent? {
         guard phase == .open, !busy, !mustRefreshBeforeActions, draft == nil,
               let folder = selectedFolder, let item,
-              folders.first(where: { $0.id == folder })?.name.lowercased() != "trash",
+              listActions(for: item).contains(action),
               let message = visibleConversations.flatMap(\.messages).first(where: { $0.id == item }) else { return nil }
-        return TrashIntent(item: item, folder: folder, conversation: conversationView ? message.conversationID.flatMap { $0 > 0 ? $0 : nil } : nil,
+        return ListActionIntent(action: action, item: item, folder: folder, conversation: conversationView ? message.conversationID.flatMap { $0 > 0 ? $0 : nil } : nil,
                            subject: message.subject.isEmpty ? "(No subject)" : message.subject,
                            session: epoch.value, selection: selectedItem, conversations: conversationView)
     }
-    func trashFromList(_ intent: TrashIntent) {
+    func actFromList(_ intent: ListActionIntent) {
         guard epoch.accepts(intent.session), selectedItem == intent.selection,
               selectedFolder == intent.folder, conversationView == intent.conversations,
-              let current = trashIntent(for: intent.item), current.conversation == intent.conversation else { return }
+              let current = listActionIntent(for: intent.item, action: intent.action), current.conversation == intent.conversation else { return }
         clearActionUndo()
         selectionEpoch.invalidate(); selection?.cancel()
         if demo {
@@ -280,16 +307,26 @@ final class NativeMailStore: ObservableObject {
                 if let conversation = intent.conversation { return message.conversationID == conversation }
                 return message.id == intent.item
             }
-            for message in items { demoLocations[message.id] = 4 }
+            let affected = Set(items.map(\.id))
+            if intent.action == .read || intent.action == .unread || intent.action == .trash {
+                demoMessages = demoMessages.map { message in
+                    guard affected.contains(message.id) else { return message }
+                    return NativeMailMessage(id: message.id, subject: message.subject, sender: message.sender, senderName: message.senderName, recipient: message.recipient, date: message.date, unread: intent.action == .unread, attachments: message.attachments, isDraft: message.isDraft ?? false, canReply: message.canReply ?? true, isScheduled: message.isScheduled ?? false, conversationID: message.conversationID)
+                }
+            }
+            if intent.action != .read && intent.action != .unread {
+                let location: UInt64 = intent.action == .trash ? 4 : (intent.action == .archive ? 3 : (intent.action == .spam ? 5 : 1))
+                for message in items { demoLocations[message.id] = location }
+            }
             messages = demoMessages.filter { demoLocations[$0.id] == selectedFolder }
             reconcileSelection(); if selectedAnchor != nil { select() }; setDemoActions()
-            setActionUndo(1); demoUndo = previous
+            if intent.action != .read && intent.action != .unread { setActionUndo(1); demoUndo = previous }
             notice = intent.actionTitle + " · demo"; return
         }
         perform { [self] captured in
             mustRefreshBeforeActions = true
-            let command = intent.conversation.map { NativeMailCommand("conversation_trash", folder: intent.folder, item: intent.item, conversation: $0) }
-                ?? NativeMailCommand("message_action", folder: intent.folder, item: intent.item, action: .trash)
+            let command = intent.conversation.map { NativeMailCommand("conversation_action", folder: intent.folder, item: intent.item, action: intent.action, conversation: $0) }
+                ?? NativeMailCommand("message_action", folder: intent.folder, item: intent.item, action: intent.action)
             let result = try await runner.request(command)
             try check(captured)
             guard result.queued == true, result.id == intent.item,
@@ -314,7 +351,7 @@ final class NativeMailStore: ObservableObject {
                     guard message.id == item else { return message }
                     return NativeMailMessage(id: message.id, subject: message.subject, sender: message.sender, senderName: message.senderName, recipient: message.recipient, date: message.date, unread: action == .unread, attachments: message.attachments, isDraft: message.isDraft ?? false, canReply: message.canReply ?? true, isScheduled: message.isScheduled ?? false, conversationID: message.conversationID)
                 }
-            } else { demoLocations[item] = action == .trash ? 4 : (action == .archive ? 3 : 1) }
+            } else { demoLocations[item] = action == .trash ? 4 : (action == .archive ? 3 : (action == .spam ? 5 : 1)) }
             messages = demoMessages.filter { demoLocations[$0.id] == selectedFolder }
             reconcileSelection(); if selectedAnchor != nil { select(preferred: item) }; setDemoActions()
             if action != .read && action != .unread { demoUndo = previous; setActionUndo(1) }
@@ -523,7 +560,7 @@ final class NativeMailStore: ObservableObject {
     func cancelSignIn() { lock() }
     func enterDemo() {
         lock(); demo = true; phase = .open; email = "alex@example.com"
-        folders = [NativeMailFolder(id: 1, name: "Inbox", count: 2), NativeMailFolder(id: 2, name: "Sent"), NativeMailFolder(id: 3, name: "Archive"), NativeMailFolder(id: 4, name: "Trash")]; selectedFolder = 1; loadedFolder = 1
+        folders = [NativeMailFolder(id: 1, name: "Inbox", count: 2, kind: .inbox), NativeMailFolder(id: 2, name: "Sent", kind: .sent), NativeMailFolder(id: 3, name: "Archive", kind: .archive), NativeMailFolder(id: 4, name: "Trash", kind: .trash), NativeMailFolder(id: 5, name: "Spam", kind: .spam)]; selectedFolder = 1; loadedFolder = 1
         messages = [NativeMailMessage(id: 11, subject: "Welcome to your native inbox", sender: "hello@example.com", senderName: "ProtonX", recipient: "alex@example.com", date: 1791288000, unread: true, conversationID: 1100), NativeMailMessage(id: 12, subject: "Coffee this weekend?", sender: "sam@example.com", senderName: "Sam", recipient: "alex.demo@gmail.com", date: 1791201600, conversationID: 1200)]
         demoMessages = messages; demoLocations = Dictionary(uniqueKeysWithValues: messages.map { ($0.id, 1) })
         demoMessages += [
@@ -547,7 +584,8 @@ final class NativeMailStore: ObservableObject {
         let location = demoLocations[message.id] ?? selectedFolder
         if location != 3 { messageActions.append(.archive) }
         if location != 4 { messageActions.append(.trash) }
-        if location != 1 { messageActions.append(.inbox) }
+        if location != 1 && location != 2 { messageActions.append(.inbox) }
+        if location != 5 && location != 2 && location != 4 { messageActions.append(.spam) }
     }
     private func expireSession() {
         hasSession = false; defaults.set(false, forKey: "nativeMailConnected")

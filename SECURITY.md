@@ -211,14 +211,20 @@ Changing folder or signing out clears this scope; a failed conversation switch
 cannot retain the previous scope. The UI decrypts one body at a time and clears
 its remote-image consent on message changes. The helper
 rechecks Proton's action capabilities and local destination IDs before queueing
-read/unread or a move to Archive, Trash or Inbox. A list context-menu Trash action
-targets one disclosed conversation through the SDK's conversation move operation;
-Delete/Backspace in the list requires an explicit whole-conversation confirmation.
-The helper derives its identity from the current folder row, checks the caller's
-expected identity and rechecks the SDK's allowed Trash destination. No arbitrary
+read/unread or a move to Archive, Trash, Spam or Inbox. List context actions target
+one disclosed conversation through the SDK's conversation operations; Messages
+view targets one message. Menu choices follow the SDK's stable folder kind and
+the official client's folder policy, but the helper independently checks current
+capabilities and destinations. Delete/Backspace in the list requires an explicit
+whole-conversation Trash confirmation. The helper derives the identity from the
+current folder row and checks the caller's expected identity. No arbitrary
 conversation IDs, arrays of targets, destinations or permanent-delete flags are
-accepted. Confirmations bind to session, folder, selection and view mode; stale
-confirmations cannot dispatch. Reader-card Trash remains single-message scoped.
+accepted. Intent tickets bind to session, folder, selection and view mode; stale
+confirmations cannot dispatch. Reader-card actions remain single-message scoped.
+Spam uses the pinned SDK's default move policy. No separate block-sender,
+unsubscribe or Google operation is issued; this does not override Proton's
+server-side filtering behavior. Linked Gmail messages use the same Proton action
+queue as other mail.
 Permanent deletion and multi-selection changes are absent. Queue acknowledgement
 is not proof of completed server sync. Ambiguous
 results block another app action until refresh; no app-level retry or replay is

@@ -93,12 +93,21 @@ at a time, and closing it leaves all cards collapsed. Each expanded card gets it
 own existing bounded renderer, actions and reply context. Selection and session
 generation checks discard late metadata/body responses after switching or locking.
 Remote-image consent does not carry between cards. Reader actions apply to the
-expanded message only. The folder-list context menu offers **Move conversation to
-Trash** in Conversations view; Delete/Backspace with list focus asks for explicit
-confirmation that includes the cross-folder scope. The helper queues one SDK
-conversation move, with its existing move Undo, rather than looping over loaded
-messages. Messages view and summaries without a conversation ID target one message.
-Trash never offers permanent deletion. Other conversation actions remain pending.
+expanded message only. The folder-list context menu offers folder-appropriate
+Trash, Archive, Spam, Inbox and read/unread actions in Conversations view.
+Spam offers **Move conversation to Inbox (not spam)**; Sent omits Spam and Inbox.
+Delete/Backspace with list focus asks for explicit Trash confirmation that includes
+the cross-folder scope. The helper queues one SDK conversation operation rather
+than looping over loaded messages, with existing SDK move Undo. Messages view and
+summaries without a conversation ID target one message. Trash never offers
+permanent deletion; blocking senders, unsubscribing and multi-selection remain
+separate work.
+
+Linked Gmail mail uses the same Proton action queue. These operations change the
+Proton copy: folder moves and read/unread states do not sync back to Gmail, as
+[Proton documents](https://proton.me/support/troubleshooting-easy-switch).
+The Spam action retains the SDK's default spam policy; it does not independently
+invoke blocking or unsubscribe operations.
 
 Synthetic contracts cover cross-folder members, grouping/search, reply and action
 targets, fallback, malformed/oversized membership and lock/folder-switch races.

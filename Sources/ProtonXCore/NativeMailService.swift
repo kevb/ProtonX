@@ -4,11 +4,13 @@ import Darwin
 public enum NativeMailPhase: String, Codable, Sendable {
     case welcome, locked, connected, totp, mailboxPassword = "mailbox_password", securityKey = "security_key"
 }
+public enum NativeMailFolderKind: String, Codable, Sendable { case inbox, sent, drafts, pending, archive, spam, trash, other }
 public struct NativeMailFolder: Codable, Identifiable, Equatable, Sendable {
     public let id: UInt64
     public let name: String
     public let count: UInt64
-    public init(id: UInt64, name: String, count: UInt64 = 0) { self.id = id; self.name = name; self.count = count }
+    public let kind: NativeMailFolderKind?
+    public init(id: UInt64, name: String, count: UInt64 = 0, kind: NativeMailFolderKind? = nil) { self.id = id; self.name = name; self.count = count; self.kind = kind }
 }
 public struct NativeMailMessage: Codable, Identifiable, Equatable, Sendable {
     public let id: UInt64
@@ -29,12 +31,12 @@ public struct NativeMailMessage: Codable, Identifiable, Equatable, Sendable {
     }
 }
 public enum NativeMailAction: String, Codable, CaseIterable, Sendable {
-    case read, unread, archive, trash, inbox
+    case read, unread, archive, trash, inbox, spam
     public var title: String {
-        switch self { case .read: "Mark as Read"; case .unread: "Mark as Unread"; case .archive: "Archive"; case .trash: "Move to Trash"; case .inbox: "Move to Inbox" }
+        switch self { case .read: "Mark as Read"; case .unread: "Mark as Unread"; case .archive: "Archive"; case .trash: "Move to Trash"; case .inbox: "Move to Inbox"; case .spam: "Move to Spam" }
     }
     public var symbol: String {
-        switch self { case .read: "envelope.open"; case .unread: "envelope.badge"; case .archive: "archivebox"; case .trash: "trash"; case .inbox: "tray.and.arrow.down" }
+        switch self { case .read: "envelope.open"; case .unread: "envelope.badge"; case .archive: "archivebox"; case .trash: "trash"; case .inbox: "tray.and.arrow.down"; case .spam: "flame" }
     }
 }
 public struct NativeMailResult: Codable, Sendable {

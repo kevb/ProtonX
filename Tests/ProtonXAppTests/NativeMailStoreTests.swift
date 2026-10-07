@@ -410,7 +410,7 @@ private let threadResult = NativeMailResult(thread: NativeMailThread(anchor: 11,
     #expect(intent.conversation == 1200)
     // Preparing or cancelling confirmation never queues a change.
     #expect(store.messages.count == 2 && !store.canUndoAction)
-    store.trashFromList(intent)
+    store.actFromList(intent)
     #expect(store.messages.map(\.id) == [11]); #expect(store.canUndoAction)
     store.selectedFolder = 4; store.changeFolder()
     #expect(Set(store.messages.map(\.id)) == [12,13,14])
@@ -432,7 +432,7 @@ private let threadResult = NativeMailResult(thread: NativeMailThread(anchor: 11,
         case "folder": store.selectedFolder = 2; store.changeFolder()
         default: store.lock(); store.enterDemo()
         }
-        store.trashFromList(intent)
+        store.actFromList(intent)
         #expect(!store.canUndoAction)
         store.selectedFolder = 4; store.changeFolder(); #expect(store.messages.isEmpty)
         store.lock()
@@ -443,18 +443,18 @@ private let threadResult = NativeMailResult(thread: NativeMailThread(anchor: 11,
     let empty = NativeMailResult(folders: threadSnapshot.folders,folder: 1,messages: [],loading: false)
     let runner = SyntheticMailRunner([
         .init(method: "restore",result: .init(phase: .connected)), .init(method: "snapshot",result: threadSnapshot),
-        .init(method: "conversation_trash",result: .init(id: 11,queued: true,undoToken: 7,conversationID: 70)),
+        .init(method: "conversation_action",result: .init(id: 11,queued: true,undoToken: 7,conversationID: 70)),
         .init(method: "snapshot",result: empty),
         .init(method: "undo_action",result: .init(queued: true)), .init(method: "snapshot",result: threadSnapshot)
     ])
     let store = mailStore(runner,saved: true)
     store.unlock(); await waitForMail { !store.busy }
     store.selectedItem = 11
-    store.trashFromList(try #require(store.trashIntent(for: 11))); await waitForMail { !store.busy }
+    store.actFromList(try #require(store.trashIntent(for: 11))); await waitForMail { !store.busy }
     #expect(store.messages.isEmpty && store.canUndoAction)
-    let command = try #require(runner.payloads.first(where: { $0.method == "conversation_trash" }))
+    let command = try #require(runner.payloads.first(where: { $0.method == "conversation_action" }))
     #expect(command.item == 11 && command.folder == 1 && command.conversation == 70)
-    #expect(runner.calls.filter { $0 == "conversation_trash" }.count == 1)
+    #expect(runner.calls.filter { $0 == "conversation_action" }.count == 1)
     #expect(!runner.calls.contains("message_action"))
     store.undoMessageAction(); await waitForMail { !store.busy }
     #expect(store.messages.map(\.id) == [11]); #expect(runner.payloads.first(where: { $0.method == "undo_action" })?.token == 7)
@@ -465,17 +465,89 @@ private let threadResult = NativeMailResult(thread: NativeMailThread(anchor: 11,
     for wrongReply in [false,true] {
         let runner = SyntheticMailRunner([
             .init(method: "restore",result: .init(phase: .connected)), .init(method: "snapshot",result: threadSnapshot),
-            .init(method: "conversation_trash",result: .init(id: 11,queued: true,conversationID: 71),failure: wrongReply ? nil : .actionUncertain)
+            .init(method: "conversation_action",result: .init(id: 11,queued: true,conversationID: 71),failure: wrongReply ? nil : .actionUncertain)
         ])
         let store = mailStore(runner,saved: true)
         store.unlock(); await waitForMail { !store.busy }; store.selectedItem = 11
         let intent = try #require(store.trashIntent(for: 11))
-        store.trashFromList(intent); await waitForMail { !store.busy }
+        store.actFromList(intent); await waitForMail { !store.busy }
         #expect(store.mustRefreshBeforeActions && store.error != nil)
         #expect(store.trashIntent(for: 11) == nil)
-        store.trashFromList(intent)
-        #expect(runner.calls.filter { $0 == "conversation_trash" }.count == 1)
+        store.actFromList(intent)
+        #expect(runner.calls.filter { $0 == "conversation_action" }.count == 1)
         store.lock()
+    }
+}
+
+@Test @MainActor func demoConversationSpamArchiveInboxAndReadActionsKeepScopeAndUndo() throws {
+    let store = mailStore(SyntheticMailRunner([]), preview: true)
+    store.selectedItem = 12; store.select()
+    store.actFromList(try #require(store.listActionIntent(for: 12, action: .unread)))
+    #expect(!store.canUndoAction)
+    #expect(store.thread?.messages.allSatisfy(\.unread) == true)
+    store.actFromList(try #require(store.listActionIntent(for: 12, action: .read)))
+    #expect(store.thread?.messages.allSatisfy { !$0.unread } == true)
+    for (action, folder) in [(NativeMailAction.spam, UInt64(5)), (.archive, 3)] {
+        store.actFromList(try #require(store.listActionIntent(for: 12, action: action)))
+        store.selectedFolder = folder; store.changeFolder()
+        #expect(Set(store.messages.map(\.id)) == [12,13,14])
+        #expect(store.listActionIntent(for: 12, action: action) == nil)
+        store.undoMessageAction()
+        store.selectedFolder = 1; store.changeFolder(); store.selectedItem = 12; store.select()
+        #expect(store.messages.map(\.id).contains(12))
+    }
+    store.actFromList(try #require(store.listActionIntent(for: 12, action: .spam)))
+    store.selectedFolder = 5; store.changeFolder(); store.selectedItem = 12; store.select()
+    store.actFromList(try #require(store.listActionIntent(for: 12, action: .inbox)))
+    store.selectedFolder = 1; store.changeFolder()
+    #expect(Set(store.messages.map(\.id)) == [11,12,13,14])
+    store.undoMessageAction()
+    store.selectedFolder = 5; store.changeFolder()
+    #expect(Set(store.messages.map(\.id)) == [12,13,14]); store.lock()
+}
+
+@Test @MainActor func messageModeContextSpamDoesNotMoveOtherConversationMembers() throws {
+    let store = mailStore(SyntheticMailRunner([]), preview: true)
+    store.conversationView = false; store.selectedItem = 12; store.select()
+    let intent = try #require(store.listActionIntent(for: 12, action: .spam))
+    #expect(intent.conversation == nil)
+    store.actFromList(intent)
+    store.selectedFolder = 5; store.changeFolder(); #expect(store.messages.map(\.id) == [12])
+    store.selectedFolder = 2; store.changeFolder(); #expect(Set(store.messages.map(\.id)) == [13,14])
+    store.lock()
+}
+
+@Test @MainActor func contextMenuUsesSDKFolderKindsAndDisablesUnavailableOrStaleActions() async throws {
+    for (kind, moves) in [(NativeMailFolderKind.inbox, [NativeMailAction.trash,.archive,.spam]), (.sent,[.trash,.archive]), (.drafts,[.trash,.archive]), (.pending,[.trash,.archive]), (.archive,[.trash,.inbox,.spam]), (.spam,[.trash,.inbox]), (.trash,[.inbox,.archive]), (.other,[.trash,.archive,.spam])] {
+        let snapshot = NativeMailResult(folders: [.init(id: 1, name: "A custom or translated name", kind: kind)], folder: 1, messages: [threadAnchor], loading: false)
+        let runner = SyntheticMailRunner([.init(method: "restore",result: .init(phase: .connected)), .init(method: "snapshot",result: snapshot)])
+        let store = mailStore(runner,saved: true); store.unlock(); await waitForMail { !store.busy }
+        #expect(store.listActions(for: 11) == moves + [.unread])
+        #expect(store.listActions(for: 99).isEmpty)
+        for action in NativeMailAction.allCases { #expect((store.listActionIntent(for: 11, action: action) != nil) == (moves + [.unread]).contains(action)) }
+        let stale = try #require(store.listActionIntent(for: 11, action: .unread))
+        store.lock(); store.actFromList(stale)
+        #expect(!runner.calls.contains("conversation_action"))
+    }
+}
+
+@Test @MainActor func allContextActionsDispatchOneConversationThroughClosedSDKCommand() async throws {
+    for action in NativeMailAction.allCases {
+        let source: NativeMailFolderKind = action == .inbox ? .spam : .inbox
+        let message = NativeMailMessage(id: 11, subject: "Synthetic linked Gmail conversation", sender: "sam@example.com", recipient: "alex.demo@gmail.com", unread: action == .read, conversationID: 70)
+        let snapshot = NativeMailResult(folders: [.init(id: 1, name: "Synthetic", kind: source)],folder: 1,messages: [message],loading: false)
+        let runner = SyntheticMailRunner([
+            .init(method: "restore",result: .init(phase: .connected)), .init(method: "snapshot",result: snapshot),
+            .init(method: "conversation_action",result: .init(id: 11,queued: true,conversationID: 70)),
+            .init(method: "snapshot",result: .init(folders: snapshot.folders,folder: 1,messages: [],loading: false))
+        ])
+        let store = mailStore(runner,saved: true); store.unlock(); await waitForMail { !store.busy }
+        store.selectedItem = 11
+        store.actFromList(try #require(store.listActionIntent(for: 11, action: action))); await waitForMail { !store.busy }
+        let command = try #require(runner.payloads.first(where: { $0.method == "conversation_action" }))
+        #expect(command.action == action && command.item == 11 && command.conversation == 70 && command.folder == 1)
+        #expect(runner.calls.filter { $0 == "conversation_action" }.count == 1 && !runner.calls.contains("message_action"))
+        #expect(!store.mustRefreshBeforeActions && store.error == nil); store.lock()
     }
 }
 

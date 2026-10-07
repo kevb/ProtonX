@@ -48,6 +48,7 @@ for original in (root / "Tools/MailStorage").rglob("*"):
     if original.is_file():
         assert (native / "protonx-mail-storage" / original.relative_to(root / "Tools/MailStorage")).read_bytes() == original.read_bytes()
 assert (native / "protonx-mail-helper/src/secure_storage.rs").read_bytes() == (root / "Tools/ProtonXMailHelper/src/secure_storage.rs").read_bytes()
+assert (native / "project/mail/rust/mail/mail-common/tests/protonx_conversation_actions.rs").read_bytes() == (root / "Tools/MailContractTests/conversation_actions.rs").read_bytes()
 pool = (native / "project/mail/rust/shared/stash/src/connection_manager.rs").read_text()
 assert pool.index('protonx_mail_storage::initialize_sdk_connection(&c)?') < pool.index('(init_fn)(&mut c)?')
 manifest = tomllib.loads((native / "protonx-mail-helper/Cargo.toml").read_text())

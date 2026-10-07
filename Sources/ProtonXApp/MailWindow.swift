@@ -10,7 +10,7 @@ struct MailWindow: View {
     @State private var bridge = false
     @State private var confirmSignOut = false
     @State private var readerExpanded = false
-    @State private var pendingTrash: NativeMailStore.TrashIntent?
+    @State private var pendingTrash: NativeMailStore.ListActionIntent?
     @FocusState private var focus: String?
     init(store: NativeMailStore, isActive: Bool = true) { self.store = store; self.isActive = isActive }
     var body: some View {
@@ -55,7 +55,7 @@ struct MailWindow: View {
         .sheet(isPresented: $bridge) { BridgeMailWindow().frame(width: 1050, height: 740) }
         .alert(pendingTrash?.title ?? "Move to Trash?", isPresented: Binding(get: { pendingTrash != nil }, set: { if !$0 { pendingTrash = nil } }), presenting: pendingTrash) { intent in
             Button("Cancel", role: .cancel) { pendingTrash = nil }
-            Button(intent.actionTitle, role: .destructive) { store.trashFromList(intent); pendingTrash = nil }
+            Button(intent.actionTitle, role: .destructive) { store.actFromList(intent); pendingTrash = nil }
         } message: { intent in
             Text(intent.conversation == nil ? "“\(intent.subject)” will be moved to Trash. You can undo this move."
                  : "All messages in “\(intent.subject)”, including messages in other folders, will be moved to Trash. You can undo this move.")
@@ -254,10 +254,15 @@ struct MailWindow: View {
                             }
                         }.padding(.vertical, 11).tag(conversation.selectionID(store.selectedItem))
                             .contextMenu {
-                                let intent = store.trashIntent(for: conversation.selectionID(store.selectedItem))
-                                Button(intent?.actionTitle ?? (store.conversationView ? "Move conversation to Trash" : "Move message to Trash"), systemImage: "trash") {
-                                    if let intent { store.trashFromList(intent) }
-                                }.disabled(intent == nil)
+                                let item = conversation.selectionID(store.selectedItem)
+                                let actions = store.listActions(for: item)
+                                ForEach(actions.filter { $0 != .read && $0 != .unread }, id: \.self) { action in
+                                    contextAction(action, item: item)
+                                }
+                                Divider()
+                                ForEach(actions.filter { $0 == .read || $0 == .unread }, id: \.self) { action in
+                                    contextAction(action, item: item)
+                                }
                             }
                     }
                 }.listStyle(.plain).scrollContentBackground(.hidden)
@@ -303,7 +308,15 @@ struct MailWindow: View {
             mailAction(.archive).keyboardShortcut("e", modifiers: [.command])
             if store.messageActions.contains(.inbox) { mailAction(.inbox) }
             mailAction(.trash)
+            if store.messageActions.contains(.spam) { mailAction(.spam) }
         }.fixedSize()
+    }
+    private func contextAction(_ action: NativeMailAction, item: UInt64) -> some View {
+        let intent = store.listActionIntent(for: item, action: action)
+        let fromSpam = store.folders.first(where: { $0.id == store.selectedFolder })?.kind == .spam
+        return Button((intent?.actionTitle ?? action.title) + (action == .inbox && fromSpam ? " (not spam)" : ""), systemImage: action.symbol) {
+            if let current = store.listActionIntent(for: item, action: action) { store.actFromList(current) }
+        }.disabled(intent == nil)
     }
     private func replyActions(_ message: NativeMailMessage) -> some View {
         HStack(spacing: 8) {

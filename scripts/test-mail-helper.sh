@@ -23,7 +23,7 @@ cargo test --locked -p mail-common --test protonx_local_storage --profile mail-m
 cargo test --locked -p mail-common --test draft_change_sender --test draft_constructors --test draft_recipients --test draft_send --test protonx_linked_sender --profile mail-macos-debug
 
 # Everyday inbox actions: genuine upstream queues, mock API, local/remote undo.
-cargo test --locked -p mail-common --test actions_read_unread --test message_read_unread --test message_move --test attachment --profile mail-macos-debug
+cargo test --locked -p mail-common --test actions_read_unread --test message_read_unread --test message_move --test protonx_conversation_actions --test attachment --profile mail-macos-debug
 
 # Conversation identity, cross-folder members, Trash visibility and paging use
 # the pinned SDK's genuine local/mock fixtures, without production credentials.
