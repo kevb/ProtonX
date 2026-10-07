@@ -40,8 +40,7 @@ final class PassStore: ObservableObject {
     private var demoDetails: [String: ItemDetail] = [:]
     let service: PassService
     let sessionDirectory: URL
-    private var authContext: LAContext?
-    private let localUnlock: (@MainActor @Sendable () async throws -> Bool)?
+    let localAuthentication: LocalUnlockAuthentication
     private var requiresSignIn = false
     private let webAuthentication = NativeWebAuthentication()
     var filteredItems: [PassItem] { ItemSearch.filter(showingTrash ? trashedItems : items, query: query, vaultID: selectedVault, kind: kind, sort: sort) }
@@ -72,7 +71,7 @@ final class PassStore: ObservableObject {
 
     init(service: PassService? = nil, sessionDirectory: URL? = nil, previewOnly: Bool = Bundle.main.bundleIdentifier == "org.kevb.ProtonX.Preview", localUnlock: (@MainActor @Sendable () async throws -> Bool)? = nil, now: @escaping @MainActor @Sendable () -> Date = { Date() }) {
         self.previewOnly = previewOnly
-        self.localUnlock = localUnlock
+        self.localAuthentication = LocalUnlockAuthentication(evaluate: localUnlock)
         self.now = now
         self.sessionDirectory = sessionDirectory ?? FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(previewOnly ? "Library/Application Support/ProtonX/Preview" : "Library/Application Support/ProtonX/Pass", isDirectory: true)
@@ -125,16 +124,14 @@ final class PassStore: ObservableObject {
         continuation?.resume(returning: answer)
     }
     func cancelLogin() { lock() }
-    func unlock() {
+    func unlock(mode: LocalUnlockAuthentication.Mode = .system) {
+        if mode == .system && localAuthentication.state == .authenticating && localAuthentication.mode == .touchID { cancelLocalUnlock() }
         guard !busy, !previewOnly, phase == .locked else { return }
         if isDemo { enterDemo(); return }
         guard !requiresSignIn else { return }
-        let context = LAContext(); authContext = context
         let captured = epoch.value
         perform { [self] in
-            let success: Bool
-            if let localUnlock { success = try await localUnlock() }
-            else { success = try await context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: "Unlock ProtonX on this Mac") }
+            let success = try await localAuthentication.authenticate(mode, reason: "Unlock ProtonX Pass on this Mac")
             guard success else { throw ProtonXError.cancelled }
             try check(captured)
             phase = .open
@@ -158,9 +155,10 @@ final class PassStore: ObservableObject {
             selectItem()
         }
     }
+    func cancelLocalUnlock() { if localAuthentication.state == .authenticating { lock() } }
     func lock() {
         epoch.invalidate(); selectionEpoch.invalidate()
-        authContext?.invalidate(); authContext = nil
+        localAuthentication.cancel()
         webAuthentication.cancel()
         operation?.cancel(); selectionTask?.cancel(); service.cancel()
         cacheExpiryTask?.cancel(); cacheExpiryTask = nil
@@ -395,7 +393,9 @@ final class PassStore: ObservableObject {
             do { try await action() }
             catch {
                 if !Task.isCancelled && epoch.accepts(captured) {
-                    if !handleSessionFailure(error, captured: captured) { self.error = error.localizedDescription }
+                    if !handleSessionFailure(error, captured: captured) {
+                        self.error = error is LAError || (error as? ProtonXError) == .cancelled ? nil : error.localizedDescription
+                    }
                 }
             }
             if epoch.accepts(captured) { busy = false }

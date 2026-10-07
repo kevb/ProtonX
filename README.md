@@ -89,8 +89,9 @@ authentication window. Proton's Rust SDK handles the desktop session handoff;
 the vault interface remains native. Direct password sign-in is an experimental
 alternative with unresolved server rejection; use the account-window flow.
 
-After locking or restarting, **Unlock Pass** requires Touch ID or your Mac
-password. **Sign Out** performs remote logout. ProtonX uses the pinned desktop
+Opening a saved, locked Pass workspace starts Touch ID directly inside the
+window. **Use Mac password…** provides the standard macOS fallback. Explicit
+locking or cancellation leaves it locked until retry or a fresh product selection. **Sign Out** performs remote logout. ProtonX uses the pinned desktop
 protocol and respects server permissions and product limits. The original CLI
 product's eligibility policy remains separate.
 
@@ -107,7 +108,8 @@ Bridge installation, server ports, generated mail-client password or certificate
 import. Human verification, security-key-only challenges and password-change
 flows are currently unsupported; use the official client for those accounts.
 
-**Unlock Mail** restores Mail's own session after local authentication. Locking
+Mail’s saved-session lock screen also starts embedded Touch ID automatically
+when selected in the foreground, with a Mac-password fallback. Locking
 clears the interface and stops its helper; **Sign Out** ends the SDK account
 session. Mail and Pass do not share authentication.
 

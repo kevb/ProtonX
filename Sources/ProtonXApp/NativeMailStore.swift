@@ -46,10 +46,9 @@ final class NativeMailStore: ObservableObject {
     let previewOnly: Bool
     private let runner: any NativeMailRunning
     private let defaults: UserDefaults
-    private let localUnlock: (@MainActor @Sendable () async throws -> Bool)?
+    let localAuthentication: LocalUnlockAuthentication
     private var epoch = SessionEpoch(), selectionEpoch = SessionEpoch()
     private var operation: Task<Void, Never>?, selection: Task<Void, Never>?, polling: Task<Void, Never>?
-    private var auth: LAContext?
     private var hasSession: Bool
     private var loadedFolder: UInt64?
     private var cacheFirstActive = false
@@ -57,7 +56,7 @@ final class NativeMailStore: ObservableObject {
     private var demoHTML: [UInt64: String] = [:]
     private var demoBodies: [UInt64: String] = [:]
     init(runner: (any NativeMailRunning)? = nil, defaults: UserDefaults = .standard, previewOnly: Bool = false, localUnlock: (@MainActor @Sendable () async throws -> Bool)? = nil) {
-        self.defaults = defaults; self.previewOnly = previewOnly; self.localUnlock = localUnlock
+        self.defaults = defaults; self.previewOnly = previewOnly; self.localAuthentication = LocalUnlockAuthentication(evaluate: localUnlock)
         self.runner = runner ?? NativeMailProcess(executable: Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/protonx-mail"), directory: FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/ProtonX/Mail"))
         hasSession = !previewOnly && defaults.bool(forKey: "nativeMailConnected")
         phase = hasSession ? .locked : .welcome
@@ -99,14 +98,12 @@ final class NativeMailStore: ObservableObject {
             try check(captured); try await applyAuthentication(result, captured: captured)
         }
     }
-    func unlock() {
+    func unlock(mode: LocalUnlockAuthentication.Mode = .system) {
+        if mode == .system && localAuthentication.state == .authenticating && localAuthentication.mode == .touchID { cancelLocalUnlock() }
         guard !busy, !previewOnly else { return }
         if demo { enterDemo(); return }
-        let context = LAContext(); auth = context
         perform { [self] captured in
-            let allowed: Bool
-            if let localUnlock { allowed = try await localUnlock() }
-            else { allowed = try await context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: "Unlock ProtonX Mail on this Mac") }
+            let allowed = try await localAuthentication.authenticate(mode, reason: "Unlock ProtonX Mail on this Mac")
             guard allowed else { throw ProtonXError.cancelled }
             try check(captured)
             let result = try await runner.request(NativeMailCommand("restore"))
@@ -460,8 +457,9 @@ final class NativeMailStore: ObservableObject {
             hasSession = false; defaults.set(false, forKey: "nativeMailConnected"); lock(); phase = .welcome
         }
     }
+    func cancelLocalUnlock() { if localAuthentication.state == .authenticating { lock() } }
     func lock() {
-        epoch.invalidate(); selectionEpoch.invalidate(); operation?.cancel(); selection?.cancel(); polling?.cancel(); sendPolling?.cancel(); auth?.invalidate(); auth = nil; runner.cancelAll()
+        epoch.invalidate(); selectionEpoch.invalidate(); operation?.cancel(); selection?.cancel(); polling?.cancel(); sendPolling?.cancel(); localAuthentication.cancel(); runner.cancelAll()
         folders = []; messages = []; body = nil; sanitizedHTML = nil; selectedItem = nil; selectedFolder = nil; query = ""; email = ""; error = nil
         clearThread()
         draft = nil; composeStatus = nil; notice = nil; messageActions = []; mustRefreshBeforeActions = false; clearActionUndo()
@@ -517,7 +515,7 @@ final class NativeMailStore: ObservableObject {
                 if !Task.isCancelled && epoch.accepts(captured) {
                     let message = safeError(error)
                     let cancelled = (error as? ProtonXError) == .cancelled || [.userCancel, .appCancel, .systemCancel].contains((error as? LAError)?.code)
-                    self.error = cancelled ? nil : message
+                    self.error = cancelled || error is LAError ? nil : message
                     if phase == .signingIn { phase = .welcome }
                     if (error as? NativeMailFailure) == .sessionExpired { expireSession(); self.error = message }
                 }

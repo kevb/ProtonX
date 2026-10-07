@@ -40,6 +40,9 @@ Pass and the shared macOS experience before expanding the suite.
 
 ## Completed native foundations
 
+- Embedded Touch ID lock screens for Mail and Pass, foreground-only automatic
+  activation, explicit password fallback and cancellation/retry states. Physical
+  biometric and minimum-OS acceptance remain gates.
 - Atomic metadata/Trash snapshot, permission-aware actions and last-success state.
 - Native selection, filters, sorting, empty states and synthetic preview isolation.
 - Login/note editing with multiple websites, notes, TOTP and text/hidden custom fields.
@@ -222,7 +225,7 @@ assets; public captures and fixtures use synthetic content.
 | Import/export | Native import, plain/encrypted exports and migration workflows with explicit disclosure controls. |
 | Desktop integrations | Auto-Type and SSH-agent UI; quick access currently opens the ordinary Pass workspace. System/native-app credential provider remains optional, not installed. |
 | Passkeys | Detailed view/management and native credential-provider operations. Current counts/preservation do not provide operations; browser use remains covered by the separate official extension. |
-| Lock/preferences | PIN configuration, enable/change/reset extra password, configurable clipboard expiry and broader preferences/favicon/localisation/theme controls. Existing extra-password challenges and macOS local unlock are supported. |
+| Lock/preferences | PIN configuration, enable/change/reset extra password, configurable clipboard expiry and broader preferences/favicon/localisation/theme controls. Existing extra-password challenges and embedded Touch ID/macOS password unlock are supported. |
 | Access tokens | Management through the appropriate pinned Proton protocol and product policy; never put tokens in logs, argv or environment. Desktop helper policy currently excludes CLI automation/PAT commands. |
 | Offline/background | Broader policy-aware offline functionality and continuous refresh; current saved vault is read-only, personal-paid-policy limited, maximum 24 hours, excluding attachments and offline TOTP generation. No blind write replay. |
 | Account/support | Plan/storage display, account/support/mobile-app links and appropriate organisation/SSO/admin settings access. A dedicated account switcher requires explicitly isolated product profiles; server restrictions must remain authoritative. |

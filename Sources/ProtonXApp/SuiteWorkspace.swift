@@ -45,6 +45,11 @@ import ProtonXCore
         }
     }
     func select(_ product: ProductRoute?) {
+        if selected != product {
+            pass?.cancelLocalUnlock(); mail?.cancelLocalUnlock()
+            if product == .pass { pass?.localAuthentication.arm() }
+            if product == .mail { mail?.localAuthentication.arm() }
+        }
         if product != .pass { passSearchRequested = false }
         if product == .pass && pass == nil {
             let store = makePass(); pass = store
@@ -128,6 +133,8 @@ struct SuiteWindow: View {
         }
         .background(SuiteWindowRegistration(onClose: { workspace.lock() }).frame(width: 0, height: 0))
         .onAppear {
+            if workspace.selected == .pass { workspace.pass?.localAuthentication.arm() }
+            if workspace.selected == .mail { workspace.mail?.localAuthentication.arm() }
             ProductWindows.shared.installSelector { workspace.select($0) }
             ProductWindows.shared.installOpener { _ in openWindow(id: "suite") }
             SystemIntegration.shared.openHome = { workspace.select(nil); ProductWindows.shared.showSuite() }

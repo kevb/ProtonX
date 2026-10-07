@@ -512,3 +512,39 @@ private let threadResult = NativeMailResult(thread: NativeMailThread(anchor: 11,
     store.conversationView = false; #expect(store.visibleConversations.count == 2)
     store.lock(); #expect(runner.calls.isEmpty)
 }
+
+@Test @MainActor func switchingProductsCancelsMailBiometricsBeforeAnyHelperAccess() async {
+    let gate = MailReplyGate(), runner = SyntheticMailRunner([])
+    let store = mailStore(runner, saved: true, unlock: { await gate.wait(); return true })
+    let name = "ProtonXUnlockTests." + UUID().uuidString
+    let defaults = UserDefaults(suiteName: name)!; defer { defaults.removePersistentDomain(forName: name) }
+    let workspace = SuiteWorkspace(defaults: defaults, previewOnly: false, initialProduct: .mail, makeMail: { store })
+    store.unlock(mode: .touchID)
+    await waitForMail { store.localAuthentication.state == .authenticating }
+    workspace.select(nil)
+    #expect(store.phase == .locked); #expect(!store.busy)
+    await gate.release()
+    for _ in 0..<100 { await Task.yield() }
+    #expect(store.phase == .locked); #expect(runner.calls.isEmpty)
+    #expect(store.localAuthentication.state == .cancelled)
+}
+
+@Test @MainActor func passwordFallbackCancelsPendingBiometricsAndRestoresOnlyOnce() async {
+    let gate = MailReplyGate()
+    let runner = SyntheticMailRunner([.init(method: "restore", result: NativeMailResult(phase: .connected)), .init(method: "snapshot", result: mailSnapshot)])
+    var attempts = 0
+    let store = mailStore(runner, saved: true, unlock: {
+        attempts += 1
+        if attempts == 1 { await gate.wait() }
+        return true
+    })
+    store.unlock(mode: .touchID)
+    await waitForMail { attempts == 1 }
+    store.unlock(mode: .system)
+    await waitForMail { !store.busy }
+    await gate.release()
+    for _ in 0..<100 { await Task.yield() }
+    #expect(store.phase == .open); #expect(attempts == 2)
+    #expect(runner.calls == ["restore", "snapshot"])
+    store.lock()
+}

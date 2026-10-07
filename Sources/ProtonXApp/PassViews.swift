@@ -11,7 +11,7 @@ struct PassWindow: View {
     @State private var confirmSignOut = false
     var body: some View {
         Group {
-            if store.phase == .open { workspace } else { WelcomeView() }
+            if store.phase == .open { workspace } else { WelcomeView(isActive: isActive) }
         }
         .disabled(!isActive)
         .frame(minWidth: 820, minHeight: 540)
@@ -201,10 +201,23 @@ struct PassWindow: View {
 }
 
 struct WelcomeView: View {
+    var isActive = true
     @EnvironmentObject var store: PassStore
     @State private var answer = ""
     @FocusState private var focused: Bool
     var body: some View {
+        Group {
+            if store.phase == .locked && !store.isDemo && !store.previewOnly {
+                VStack(spacing: 0) {
+                    LocalUnlockCard(product: "Pass", authentication: store.localAuthentication, isActive: isActive, busy: store.busy,
+                                    unlock: { store.unlock(mode: $0) }, cancel: { store.lock() })
+                    Button("Sign In Again") { store.login() }.buttonStyle(.plain).foregroundStyle(.secondary).disabled(store.busy)
+                }.frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else { welcome }
+        }
+        .background { PassTheme.canvas; RadialGradient(colors: [PassTheme.accent.opacity(0.08), .clear], center: .top, startRadius: 0, endRadius: 600) }
+    }
+    private var welcome: some View {
         VStack(spacing: 22) {
             Image(systemName: store.phase == .locked ? "lock.shield" : "key.horizontal")
                 .font(.system(size: 40, weight: .light)).foregroundStyle(PassTheme.accent)

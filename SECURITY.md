@@ -60,8 +60,16 @@ include passwords, tokens, real message bodies or vault exports in public issues
   has its own browser process; ProtonX does not embed a persistent web product UI.
 - Desktop mode exposes only native UI commands; it rejects CLI automation,
   agents, PATs, bulk secret export, process injection and permanent deletion.
-- Local unlock uses `LAContext.deviceOwnerAuthentication`: Touch ID or the Mac
-  password. A UI lock doesn't revoke the remote session or defend against malware
+- Local unlock embeds Apple’s `LAAuthenticationView` with a per-product
+  `LAContext.deviceOwnerAuthenticationWithBiometrics` for Touch ID. One automatic
+  attempt requires a visible locked product, its attached native view and an active
+  key window. No biometric data is available to ProtonX. Password fallback uses a
+  separate context and the standard `deviceOwnerAuthentication` dialog. Cancellation
+  or explicit lock disarms automatic retries; choosing a product again or reopening
+  the window may arm a new attempt. Switching products cancels pending authentication;
+  epochs reject late success before helper access. Products retain separate gates.
+  Preview/demo workspaces never evaluate real authentication.
+  A UI lock doesn't revoke the remote session or defend against malware
   running as the same macOS user and accessing that user's login Keychain.
 - A shared app process is a shared address-space boundary, not independent product
   isolation. This build is not App Sandbox confined. Do not describe it as sandboxed.

@@ -15,10 +15,33 @@ are excluded from public artifacts.
 | Mail secure storage | Opt-in database/file encryption and resumable database/attachment staging contracts | Cache path rebasing/activation, whole-profile cutover and pending-send/draft recovery before enabling ordinary builds |
 | Product launchers | Synthetic native UI checks for cold/warm requests, minimized/closed windows and reverse product selection; signed installer checks | Minimum-OS runtime and update/Keychain continuity |
 
-The latest local Swift run passed 138 tests; five synthetic atomic-install tests
+The latest local Swift run passed 147 tests; five synthetic atomic-install tests
 passed at the prior installer milestone. These are local results, not a statement about the
 latest GitHub run. Dated entries below record milestone-specific test scope and
 historical limitations. The README and roadmap describe the current feature set.
+
+## Embedded local unlock, 2026-10-07
+
+- Mail and Pass share a native lock-screen design with Apple’s embedded Touch ID
+  control, an explicit macOS password fallback and cancellation/retry states.
+  Automatic evaluation waits for the selected locked product’s attached view and
+  foreground key window; explicit lock/cancellation disarms retries. Pending
+  authentication is cancelled on product switch, and product epochs reject late
+  success before account helpers are used.
+- All 147 Swift tests passed. New synthetic tests cover foreground/attachment
+  prerequisites, one automatic attempt per activation, lack of biometrics, fresh
+  retry contexts, duplicate attempts, cancellation followed by late success,
+  biometric lockout/fallback, product-switch cancellation and single restore after
+  interrupting Touch ID with password fallback. Light/dark lock-screen renders use
+  synthetic evaluators and were visually inspected.
+- The release bundle and both Spotlight launchers passed strict nested signature
+  checks and were atomically installed; all installed files match their staged
+  bundles. The installed lock-screen UI was inspected without unlocking an account.
+  Both pinned product identity/privacy contracts passed; helper binaries were reused
+  for this UI-only change.
+- Physical fingerprint recognition and minimum-OS behavior require manual
+  acceptance. Synthetic evaluators never invoke the biometric sensor or an account
+  helper. Existing preview account restrictions and product protocol pins remain.
 
 ## Suite workspace, 2026-10-07
 

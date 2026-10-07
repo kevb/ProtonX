@@ -78,6 +78,20 @@ struct MailWindow: View {
         return nil
     }
     private var authentication: some View {
+        Group {
+            if store.phase == .locked && !store.demo && !store.previewOnly {
+                VStack(spacing: 0) {
+                    LocalUnlockCard(product: "Mail", authentication: store.localAuthentication, isActive: isActive, busy: store.busy,
+                                    unlock: { store.unlock(mode: $0) }, cancel: { store.lock() })
+                    HStack(spacing: 20) {
+                        Button("Explore demo inbox") { store.enterDemo() }
+                        Button("Connect using Bridge…") { bridge = true }
+                    }.font(.caption).buttonStyle(.plain).foregroundStyle(.secondary).disabled(store.busy)
+                }.frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else { signInForm }
+        }.background { RadialGradient(colors: [PassTheme.accent.opacity(0.06), .clear], center: .center, startRadius: 0, endRadius: 520) }
+    }
+    private var signInForm: some View {
         VStack(spacing: 22) {
             Image(systemName: store.phase == .locked ? "lock.shield" : "envelope.badge.shield.half.filled")
                 .font(.system(size: 42, weight: .light)).foregroundStyle(PassTheme.accent).accessibilityHidden(true)

@@ -300,3 +300,19 @@ private func syntheticSession() throws -> URL {
     #expect(runner.calls == ["login", "native-snapshot", "item view"])
     store.lock()
 }
+
+@Test @MainActor func explicitSuiteLockDoesNotRearmAutomaticPassUnlock() async throws {
+    let root = try syntheticSession(); defer { try? FileManager.default.removeItem(at: root) }
+    let runner = RecoveryRunner([])
+    let store = PassStore(service: PassService(runner: runner), sessionDirectory: root, previewOnly: false, localUnlock: { false })
+    let name = "ProtonXUnlockTests." + UUID().uuidString
+    let defaults = UserDefaults(suiteName: name)!; defer { defaults.removePersistentDomain(forName: name) }
+    let workspace = SuiteWorkspace(defaults: defaults, previewOnly: false, initialProduct: .pass, makePass: { store })
+    workspace.lock()
+    #expect(store.phase == .locked); #expect(!store.localAuthentication.automaticAttemptAllowed)
+    workspace.select(.pass)
+    #expect(!store.localAuthentication.automaticAttemptAllowed)
+    workspace.select(nil); workspace.select(.pass)
+    #expect(store.localAuthentication.automaticAttemptAllowed)
+    #expect(runner.calls.isEmpty)
+}

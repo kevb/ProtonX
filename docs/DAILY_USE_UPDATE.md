@@ -106,3 +106,21 @@ app, check navigation without making server mutations:
 
 Calendar, detachable windows, multiple/minimised composers and autosave are not
 part of this navigation build. The existing storage/release gates still apply.
+
+## Touch ID lock screens
+
+Selecting a saved, locked Mail or Pass workspace starts Touch ID directly in the
+window when biometric authentication is available. Rest a finger on the sensor;
+there is no initial Unlock click. **Use Mac password…** opens the macOS dialog
+and can interrupt a pending fingerprint attempt. Without available Touch ID,
+the screen offers an explicit password unlock button.
+
+Cancellation leaves the workspace locked with **Try Touch ID again**. An explicit
+lock does not immediately restart authentication. Switching away cancels a pending
+prompt; selecting that product again starts a fresh attempt. Authentication remains
+separate for Mail and Pass. Demo/preview workspaces retain synthetic unlock behavior.
+
+To check the installed build: open ProtonX, choose a locked product, authenticate
+with Touch ID, then lock it with ⌘L. Check that it stays locked until retry or a
+fresh product selection. Also try password fallback and switching to Home while
+the fingerprint prompt is waiting.
