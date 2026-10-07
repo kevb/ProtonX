@@ -18,6 +18,14 @@ turn the vault into a tab inside an email app. A future separately distributed
 Pass or Mail binary can share ProtonXCore, but separate product processes and
 sandboxing require another decision and tests, not merely changing a target name.
 
+Product launchers send a product-only URL without activating the suite themselves.
+One application delegate handles that URL; a shared window router waits for launch
+completion and the requested SwiftUI scene's native window, then restores and
+raises that specific window. Product menus and shortcuts use the same router.
+Existing windows are reused, closed windows are recreated, and a later request
+supersedes any pending earlier focus action. This shares navigation only, not
+product accounts or sessions.
+
 ## Modules
 
 - `ProtonXApp`: SwiftUI views, AppKit menu bar/hotkey integration, system lock

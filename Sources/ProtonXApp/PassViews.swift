@@ -3,7 +3,6 @@ import ProtonXCore
 
 struct PassWindow: View {
     @EnvironmentObject var store: PassStore
-    @Environment(\.openWindow) private var openWindow
     @Environment(\.openSettings) private var openSettings
     @State private var showingCreate = false
     @State private var showingEdit = false
@@ -41,13 +40,8 @@ struct PassWindow: View {
             if phase != .open { showingCreate = false; showingEdit = false; confirmTrash = false }
         }
         .onReceive(NotificationCenter.default.publisher(for: .protonXNewItem)) { _ in if store.canCreate { showingCreate = true } }
-        .onOpenURL { url in
-            guard let route = ProductRoute(url: url) else { return }
-            openWindow(id: route.rawValue); NSApp.activate(ignoringOtherApps: true)
-        }
+        .productWindow(.pass)
         .onAppear {
-            SystemIntegration.shared.openPass = { openWindow(id: "pass"); NSApp.activate(ignoringOtherApps: true) }
-            SystemIntegration.shared.openMail = { openWindow(id: "mail"); NSApp.activate(ignoringOtherApps: true) }
             SystemIntegration.shared.lockSuite = { store.lock(); NotificationCenter.default.post(name: .protonXLock, object: nil) }
             SystemIntegration.shared.openSettings = { openSettings(); NSApp.activate(ignoringOtherApps: true) }
             SystemIntegration.shared.configure()

@@ -14,7 +14,11 @@ import AppKit
             .contains { $0.bundleURL?.standardizedFileURL != target.standardizedFileURL }
         guard !otherCopy else { finish("Quit the other ProtonX copy first, then open this launcher again."); return }
         let options = NSWorkspace.OpenConfiguration()
-        options.activates = true
+        // The suite activates the requested window after routing the URL. An
+        // independent app activation can restore Pass over the Mail window.
+        options.activates = false
+        options.addsToRecentItems = false
+        options.allowsRunningApplicationSubstitution = false
         NSWorkspace.shared.open([URL(string: "protonx://" + product)!], withApplicationAt: target, configuration: options) { _, error in
             let failed = error != nil
             Task { @MainActor in self.finish(failed ? "ProtonX could not open. Try opening ProtonX.app directly." : nil) }

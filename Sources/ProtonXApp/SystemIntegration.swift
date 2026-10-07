@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import Carbon
+import ProtonXCore
 
 extension Notification.Name {
     static let protonXNewMessage = Notification.Name("ProtonX.newMessage")
@@ -14,8 +15,8 @@ extension Notification.Name {
 @MainActor
 final class SystemIntegration: NSObject {
     static let shared = SystemIntegration()
-    var openPass: (() -> Void)?
-    var openMail: (() -> Void)?
+    var openPass: (() -> Void)? = { ProductWindows.shared.open(.pass) }
+    var openMail: (() -> Void)? = { ProductWindows.shared.open(.mail) }
     var openSettings: (() -> Void)?
     var lockSuite: (() -> Void)?
     private var statusItem: NSStatusItem?
@@ -99,6 +100,12 @@ final class SystemIntegration: NSObject {
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        ProductWindows.shared.didFinishLaunching()
+    }
+    func application(_ application: NSApplication, open urls: [URL]) {
+        ProductWindows.shared.open(urls: urls)
+    }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
     func applicationWillTerminate(_ notification: Notification) {
         MainActor.assumeIsolated { SystemIntegration.shared.lockSuite?() }

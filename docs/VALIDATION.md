@@ -5,6 +5,31 @@ Rust 1.99.0. Automated test content is synthetic. User-driven live sign-in and
 local unlock reached a vault workspace in the morning follow-up. Only fixed UI
 states were inspected; no live vault contents were returned to the model.
 
+## Product launcher focus correction, 2026-10-07
+
+- Replaced duplicate per-window URL handlers and app-only activation with one
+  application URL handler and a native window router. Cold-launch requests wait
+  for launch completion/window creation; warm requests raise the existing target,
+  unminimize it if needed, and supersede stale requests. Menus and keyboard product
+  switching use this same route. Product URL validation remains closed.
+- Companion launchers no longer independently activate the suite. They retain
+  their adjacent-bundle identity and other-running-copy checks and do not add
+  helper, account, Keychain or session access.
+- 120 Swift tests passed (62 core, 58 app), including six routing tests covering
+  startup ordering, scene creation, warm reuse, closed/released targets, invalid
+  URLs and competing intents. Five synthetic atomic-install contracts passed.
+  Account-capable/preview release builds and native launcher signature checks
+  passed using the existing helpers and configured local certificate.
+- Native UI checks used synthetic Preview only. Test-only launcher copies changed
+  the adjacent target name/identity to Preview, leaving the routing/activation
+  calls intact. Verified Mail in front after a cold launch (also after quitting
+  with Pass in front), Mail over open Pass, minimized Mail restoration, closed
+  Mail recreation, and the reverse Pass launcher. Preview never registers the
+  production URL scheme; no real account/profile or credentials were accessed.
+- The signed update is staged at `build/ProtonX Focus Update.app`, including the
+  reader scrolling/image controls. Installation awaits the user closing the
+  installed app; its running binaries and unsaved work are left intact.
+
 ## Official-editor layout refinement, 2026-10-06
 
 - Used the supplied official Pass editor screenshot as a layout reference only;

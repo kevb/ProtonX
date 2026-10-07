@@ -2,7 +2,6 @@ import SwiftUI
 import ProtonXCore
 
 struct MailWindow: View {
-    @Environment(\.openWindow) private var openWindow
     @StateObject private var store: NativeMailStore
     @State private var username = ""
     @State private var password = ""
@@ -55,10 +54,7 @@ struct MailWindow: View {
         .onReceive(NotificationCenter.default.publisher(for: .protonXRefreshMail)) { _ in store.refresh() }
         .onReceive(NotificationCenter.default.publisher(for: .protonXFocusMailSearch)) { _ in focus = "search" }
         .onReceive(NotificationCenter.default.publisher(for: .protonXLock)) { _ in clearCredentials(); store.lock(); bridge = false }
-        .onOpenURL { url in
-            guard let route = ProductRoute(url: url) else { return }
-            openWindow(id: route.rawValue); NSApp.activate(ignoringOtherApps: true)
-        }
+        .productWindow(.mail)
         .onAppear { focus = "username" }
         .onDisappear { clearCredentials(); store.lock() }
         .onChange(of: store.phase) { _, phase in
