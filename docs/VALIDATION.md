@@ -5,6 +5,26 @@ macOS 26.6.2, Xcode 27 / Swift 6.4 and Rust 1.99.0. Automated test content is
 synthetic and uses isolated storage. Private account contents and credentials
 are excluded from public artifacts.
 
+## Account-wide Mail metadata search — 2026-10-08
+
+- All 235 Swift contracts passed across two runs: 234 with the private-pipe
+  contract excluded, then that contract in isolation. A concurrent full run
+  encountered the existing pipe-close assertion; an attempted serial run was
+  stopped after it stalled. Neither incomplete run is counted as a pass.
+- All 32 Mail helper unit tests and nine pinned public SDK search-scroller
+  tests passed. Coverage includes older pages, keyword changes, All Mail scope
+  with Spam/Trash policy, bounded queries, recipient-only matches, retained
+  drafts, lock/expiry, return navigation and explicit action refusal.
+- A synthetic native preview walkthrough verified Return submits all-mail
+  search, results include Sent recipient matches, conversations remain readable,
+  explicit mailbox actions are disabled, clearing restores Inbox and empty
+  results explain the body/attachment search limitation.
+- The optimized Mail helper and suite built successfully and passed strict
+  nested signature verification with the configured local signing identity.
+  No real-account search or imported-message acceptance
+  was exercised. This implements metadata search beyond the loaded folder page;
+  body text, attachment names/content and advanced filters remain unavailable.
+
 ## Contacts browsing and recipient selection — 2026-10-08
 
 - All 229 Swift contracts passed locally, including ten new Contacts model/store

@@ -82,4 +82,8 @@ handoff = (native / "project/mail/rust/mail/mail-uniffi/src/mail/user_session.rs
 assert (root / "Tools/MailAccountHandoff/sdk.rs").read_text() in handoff
 assert 'fork("web", "calendar")' in handoff and "CalendarHandoff" in helper
 assert "encode_handoff_key" not in helper
+
+assert (root / "Tools/MailSearch/sdk.rs").read_text() in (native / "project/mail/rust/mail/mail-uniffi/src/mail/mail_scroller.rs").read_text()
+assert (native / "protonx-mail-helper/src/search.rs").read_bytes() == (root / "Tools/ProtonXMailHelper/src/search.rs").read_bytes()
+
 print("Independent native Mail protocol, privacy, notifications and account handoff contracts verified")

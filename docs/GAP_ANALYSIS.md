@@ -8,6 +8,10 @@ technical results. Use synthetic content in public tests and screenshots.
 
 ## Current progress
 
+- Mail offers account-wide metadata search through the pinned SDK, reaching old
+  imported messages outside the loaded folder page. Body/attachment search and
+  advanced filters remain gaps. See [Mail search](MAIL_SEARCH.md).
+
 - Native Pass selection, type/vault filters, title search, sorting and empty
   states keep the list and detail consistent. Login/note forms support multiple
   websites, notes, TOTP and text/hidden custom fields; unsupported fields are

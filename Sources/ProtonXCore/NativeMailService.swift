@@ -52,6 +52,8 @@ public struct NativeMailNotification: Codable, Equatable, Sendable {
     }
 }
 public struct NativeMailResult: Codable, Sendable {
+    public var searchQuery: String?
+    public var hasMore: Bool?
     public var contacts: [ContactEntry]?
     public var contactDetail: ContactDetail?
     public var handoff: AccountHandoff?
@@ -81,7 +83,8 @@ public struct NativeMailResult: Codable, Sendable {
     public var conversationID: UInt64?
     public var notifications: [NativeMailNotification]?
     public var unreadCount: UInt64?
-    public init(phase: NativeMailPhase? = nil, folders: [NativeMailFolder]? = nil, folder: UInt64? = nil, messages: [NativeMailMessage]? = nil, loading: Bool? = nil, email: String? = nil, id: UInt64? = nil, body: String? = nil, sanitizedHTML: String? = nil, attachments: Int? = nil, draft: NativeMailDraft? = nil, token: UInt64? = nil, sendState: NativeMailSendState? = nil, closed: Bool? = nil, cacheFirst: Bool? = nil, fresh: Bool? = nil, refreshFailed: Bool? = nil, actions: [NativeMailAction]? = nil, queued: Bool? = nil, undoToken: UInt64? = nil, thread: NativeMailThread? = nil, conversationID: UInt64? = nil, notifications: [NativeMailNotification]? = nil, unreadCount: UInt64? = nil, attachmentList: [NativeMailAttachment]? = nil, transfer: NativeMailTransfer? = nil, handoff: AccountHandoff? = nil, contacts: [ContactEntry]? = nil, contactDetail: ContactDetail? = nil) {
+    public init(phase: NativeMailPhase? = nil, folders: [NativeMailFolder]? = nil, folder: UInt64? = nil, messages: [NativeMailMessage]? = nil, loading: Bool? = nil, email: String? = nil, id: UInt64? = nil, body: String? = nil, sanitizedHTML: String? = nil, attachments: Int? = nil, draft: NativeMailDraft? = nil, token: UInt64? = nil, sendState: NativeMailSendState? = nil, closed: Bool? = nil, cacheFirst: Bool? = nil, fresh: Bool? = nil, refreshFailed: Bool? = nil, actions: [NativeMailAction]? = nil, queued: Bool? = nil, undoToken: UInt64? = nil, thread: NativeMailThread? = nil, conversationID: UInt64? = nil, notifications: [NativeMailNotification]? = nil, unreadCount: UInt64? = nil, attachmentList: [NativeMailAttachment]? = nil, transfer: NativeMailTransfer? = nil, handoff: AccountHandoff? = nil, contacts: [ContactEntry]? = nil, contactDetail: ContactDetail? = nil, searchQuery: String? = nil, hasMore: Bool? = nil) {
+        self.searchQuery = searchQuery; self.hasMore = hasMore
         self.contacts = contacts; self.contactDetail = contactDetail
         self.handoff = handoff; self.phase = phase; self.folders = folders; self.folder = folder; self.messages = messages
         self.loading = loading; self.email = email; self.id = id; self.body = body; self.sanitizedHTML = sanitizedHTML; self.attachments = attachments
@@ -93,6 +96,7 @@ public struct NativeMailResult: Codable, Sendable {
     }
 }
 public enum NativeMailFailure: String, Codable, Error, LocalizedError, Sendable {
+    case searchFailed = "search_failed"
     case contactsFailed = "contacts_failed", contactDetailFailed = "contact_detail_failed", contactsTooLarge = "contacts_too_large"
     case handoffUnavailable = "handoff_unavailable"
     case actionUnavailable = "action_unavailable", actionUncertain = "action_uncertain"
@@ -111,6 +115,7 @@ public enum NativeMailFailure: String, Codable, Error, LocalizedError, Sendable 
     case storageMigrationPending = "storage_migration_pending", storageVersionUnsupported = "storage_version_unsupported"
     public var errorDescription: String? {
         switch self {
+        case .searchFailed: "Mail search could not complete. Check your connection and try again."
         case .contactsFailed: "Contacts could not load from Mail’s address book. Retry after Mail has synced."
         case .contactDetailFailed: "This contact’s details could not be opened. Try again when connected."
         case .contactsTooLarge: "This address book exceeds the current Contacts window limit."
@@ -157,6 +162,7 @@ public enum NativeMailFailure: String, Codable, Error, LocalizedError, Sendable 
 
 public struct NativeMailCommand: Encodable, Sendable {
     public let method: String
+    public var keywords: String?
     public var username: String?
     public var password: String?
     public var code: String?
@@ -174,7 +180,8 @@ public struct NativeMailCommand: Encodable, Sendable {
     public var name: String?
     public var size: Int?
     public var conversation: UInt64?
-    public init(_ method: String, username: String? = nil, password: String? = nil, code: String? = nil, folder: UInt64? = nil, item: UInt64? = nil, more: Bool? = nil, mode: String? = nil, token: UInt64? = nil, content: NativeMailComposeContent? = nil, action: NativeMailAction? = nil, conversation: UInt64? = nil, attachment: UInt64? = nil, transfer: UInt64? = nil, offset: Int? = nil, data: String? = nil, name: String? = nil, size: Int? = nil) {
+    public init(_ method: String, username: String? = nil, password: String? = nil, code: String? = nil, folder: UInt64? = nil, item: UInt64? = nil, more: Bool? = nil, mode: String? = nil, token: UInt64? = nil, content: NativeMailComposeContent? = nil, action: NativeMailAction? = nil, conversation: UInt64? = nil, attachment: UInt64? = nil, transfer: UInt64? = nil, offset: Int? = nil, data: String? = nil, name: String? = nil, size: Int? = nil, keywords: String? = nil) {
+        self.keywords = keywords
         self.method = method; self.username = username; self.password = password; self.code = code
         self.folder = folder; self.item = item; self.more = more
         self.mode = mode; self.token = token; self.content = content; self.action = action; self.conversation = conversation; self.attachment = attachment; self.transfer = transfer; self.offset = offset; self.data = data; self.name = name; self.size = size
@@ -294,6 +301,7 @@ public final class NativeMailProcess: NativeMailRunning, @unchecked Sendable {
         guard let result = reply.result, (result.messages?.count ?? 0) <= 1000, (result.folders?.count ?? 0) <= 1024, (result.body?.utf8.count ?? 0) <= 2 * 1024 * 1024, (result.sanitizedHTML?.utf8.count ?? 0) <= 2 * 1024 * 1024, result.sanitizedHTML == nil || result.body != nil else { throw ProtonXError.invalidResponse }
         guard result.fresh != true || (result.loading != true && result.refreshFailed != true) else { throw ProtonXError.invalidResponse }
         guard (result.actions?.count ?? 0) <= NativeMailAction.allCases.count, result.undoToken == nil || (result.queued == true && result.undoToken! > 0) else { throw ProtonXError.invalidResponse }
+        if let query = result.searchQuery { guard MailSearchPolicy.valid(query), result.hasMore != nil, result.folder != nil else { throw ProtonXError.invalidResponse } }
         if let contacts = result.contacts { try ContactEntry.validate(contacts) }
         if let detail = result.contactDetail { guard detail.localID > 0 else { throw ProtonXError.invalidResponse }; try detail.validate(for: detail.localID) }
         if let handoff = result.handoff { try handoff.validate() }

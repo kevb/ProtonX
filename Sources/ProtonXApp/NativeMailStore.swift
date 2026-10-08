@@ -69,6 +69,9 @@ final class NativeMailStore: ObservableObject {
     @Published var selectedFolder: UInt64?
     @Published var selectedItem: UInt64?
     @Published var query = ""
+    @Published private(set) var searchQuery: String?
+    @Published private(set) var searchHasMore = false
+    private var searchReturnFolder: UInt64?
     @Published var error: String?
     @Published private(set) var draft: NativeMailDraft? {
         didSet {
@@ -119,10 +122,12 @@ final class NativeMailStore: ObservableObject {
         if previewOnly { enterDemo() }
     }
     var visibleMessages: [NativeMailMessage] {
-        messages.filter { query.isEmpty || $0.subject.localizedStandardContains(query) || $0.sender.localizedStandardContains(query) || $0.senderName.localizedStandardContains(query) }
+        if searchQuery != nil { return messages }
+        return messages.filter { query.isEmpty || $0.subject.localizedStandardContains(query) || $0.sender.localizedStandardContains(query) || $0.senderName.localizedStandardContains(query) }
     }
     var visibleConversations: [NativeMailConversation] {
-        (conversationView ? NativeMailConversation.group(messages) : NativeMailConversation.individual(messages)).filter { $0.matches(query) }
+        let groups = conversationView ? NativeMailConversation.group(messages) : NativeMailConversation.individual(messages)
+        return searchQuery == nil ? groups.filter { $0.matches(query) } : groups
     }
     var selectedAnchor: NativeMailMessage? { visibleConversations.flatMap(\.messages).first { $0.id == selectedItem } }
     var selectedMessage: NativeMailMessage? {
@@ -179,6 +184,32 @@ final class NativeMailStore: ObservableObject {
         default: throw ProtonXError.invalidResponse
         }
     }
+    func searchAllMail() {
+        let keywords = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard phase == .open, !busy, MailSearchPolicy.valid(keywords) else { return }
+        if searchQuery == nil { searchReturnFolder = selectedFolder }
+        query = keywords; searchQuery = keywords; searchHasMore = false
+        clearActionUndo(); polling?.cancel(); clearThread(); selectedItem = nil; body = nil; sanitizedHTML = nil; messageActions = []
+        selectionEpoch.invalidate(); selection?.cancel(); loadedFolder = nil; messages = []
+        if demo {
+            messages = demoMessages.filter { $0.subject.localizedStandardContains(keywords) || $0.sender.localizedStandardContains(keywords) || $0.senderName.localizedStandardContains(keywords) || $0.recipient.localizedStandardContains(keywords) }
+            loadedFolder = selectedFolder; return
+        }
+        perform { [self] captured in try await load(captured: captured) }
+    }
+    func searchTextChanged() {
+        if let searchQuery, query != searchQuery, !busy { endSearch() }
+        reconcileSelection()
+    }
+    func endSearch() {
+        guard searchQuery != nil, !busy else { return }
+        let folder = searchReturnFolder
+        searchQuery = nil; searchReturnFolder = nil; searchHasMore = false
+        clearThread(); selectedItem = nil; body = nil; sanitizedHTML = nil; messageActions = []
+        selectionEpoch.invalidate(); selection?.cancel(); messages = []; loadedFolder = nil; selectedFolder = folder
+        if demo { messages = demoMessages.filter { demoLocations[$0.id] == selectedFolder }; loadedFolder = selectedFolder }
+        else { refresh() }
+    }
     func refresh(more: Bool = false) {
         guard phase == .open, !demo, !busy else { return }
         perform { [self] captured in
@@ -190,9 +221,18 @@ final class NativeMailStore: ObservableObject {
     private func load(captured: UInt64, more: Bool = false, mode: String? = nil) async throws {
         let folder = selectedFolder
         let mode = mode ?? (cacheFirstActive ? "refresh" : nil)
-        let result = try await runner.request(NativeMailCommand("snapshot", folder: folder, more: more, mode: mode))
+        let keywords = searchQuery
+        let result = try await runner.request(NativeMailCommand("snapshot", folder: keywords == nil ? folder : nil, more: more, mode: keywords == nil ? mode : nil, keywords: keywords))
         try check(captured)
-        guard selectedFolder == folder else { return }
+        guard selectedFolder == folder, searchQuery == keywords else { return }
+        if let keywords {
+            guard result.searchQuery == keywords, let nextMessages = result.messages, let nextFolder = result.folder, let moreResults = result.hasMore else { throw ProtonXError.invalidResponse }
+            if !folders.contains(where: { $0.id == nextFolder }) { folders.append(.init(id: nextFolder, name: "All mail")) }
+            messages = nextMessages; selectedFolder = nextFolder; loadedFolder = nextFolder
+            searchHasMore = moreResults; loading = false; showingSavedContent = false; cacheRefreshFailed = false
+            if let email = result.email { self.email = email }
+            polling?.cancel(); reconcileSelection(); return
+        }
         guard let nextFolders = result.folders, let nextMessages = result.messages, let nextFolder = result.folder, nextFolders.contains(where: { $0.id == nextFolder }) else { throw ProtonXError.invalidResponse }
         folders = nextFolders; messages = nextMessages; selectedFolder = nextFolder; loadedFolder = nextFolder
         email = result.email ?? ""; loading = result.loading ?? false
@@ -220,6 +260,7 @@ final class NativeMailStore: ObservableObject {
     }
     func changeFolder() {
         guard selectedFolder != loadedFolder else { return }
+        if searchQuery != nil { searchQuery = nil; searchHasMore = false; searchReturnFolder = nil; query = "" }
         clearThread(); body = nil; sanitizedHTML = nil; messageActions = []; selectedItem = nil; selectionEpoch.invalidate(); selection?.cancel()
         messages = []
         if demo { messages = demoMessages.filter { demoLocations[$0.id] == selectedFolder }; loadedFolder = selectedFolder; return }
@@ -308,6 +349,7 @@ final class NativeMailStore: ObservableObject {
     // Menu presentation follows Proton WebClients' useLabelActions by SDK folder kind.
     // This is a UI hint; every write rechecks SDK capabilities and destinations.
     func listActions(for item: UInt64?) -> [NativeMailAction] {
+        guard searchQuery == nil else { return [] }
         guard let item, let row = visibleConversations.first(where: { $0.messages.contains(where: { $0.id == item }) }),
               let folder = folders.first(where: { $0.id == selectedFolder }) else { return [] }
         let moves: [NativeMailAction]
@@ -374,7 +416,7 @@ final class NativeMailStore: ObservableObject {
         }
     }
     func canPerform(_ action: NativeMailAction) -> Bool {
-        phase == .open && !busy && !threadLoading && !mustRefreshBeforeActions && draft == nil && selectedMessage != nil && messageActions.contains(action)
+        searchQuery == nil && phase == .open && !busy && !threadLoading && !mustRefreshBeforeActions && draft == nil && selectedMessage != nil && messageActions.contains(action)
     }
     func actOnMessage(_ action: NativeMailAction) {
         guard canPerform(action), let item = selectedMessage?.id, let folder = selectedFolder else { return }
@@ -637,6 +679,7 @@ final class NativeMailStore: ObservableObject {
         // Navigation never replaces or discards an open composer.
         guard draft == nil else { notice = "New mail received. Save or close your draft to view it."; return }
         guard !busy else { notice = "New mail received. Refresh Mail when the current operation finishes."; return }
+        searchQuery = nil; searchHasMore = false; searchReturnFolder = nil
         query = ""; selectedFolder = folder
         perform { [self] captured in
             try await load(captured: captured)
@@ -650,6 +693,7 @@ final class NativeMailStore: ObservableObject {
         draftAttachmentPolling?.cancel(); clearAttachments()
         notificationEpoch.invalidate(); notificationTask?.cancel(); notificationTask = nil; notifications?.clearMail()
         epoch.invalidate(); selectionEpoch.invalidate(); operation?.cancel(); selection?.cancel(); polling?.cancel(); sendPolling?.cancel(); localAuthentication.cancel(); runner.cancelAll()
+        searchQuery = nil; searchHasMore = false; searchReturnFolder = nil
         folders = []; messages = []; body = nil; sanitizedHTML = nil; selectedItem = nil; selectedFolder = nil; query = ""; email = ""; error = nil
         clearThread()
         draft = nil; composeStatus = nil; notice = nil; messageActions = []; mustRefreshBeforeActions = false; clearActionUndo()
@@ -679,6 +723,7 @@ final class NativeMailStore: ObservableObject {
         selectedItem = 11; body = demoBodies[11]; sanitizedHTML = demoHTML[11]; setDemoAttachments(11); setDemoActions()
     }
     private func setDemoActions() {
+        guard searchQuery == nil else { messageActions = []; return }
         guard let message = selectedMessage else { messageActions = []; return }
         messageActions = [message.unread ? .read : .unread]
         let location = demoLocations[message.id] ?? selectedFolder

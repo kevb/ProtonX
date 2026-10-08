@@ -39,3 +39,6 @@ cargo test --locked -p mail-common --features protonx-native --test protonx_atta
 # Contact browsing/card interpretation uses public SDK fixtures only.
 cargo test --locked -p mail-contacts-common --lib contact_list --profile mail-macos-debug
 cargo test --locked -p mail-contacts-common --lib contact_details --profile mail-macos-debug
+
+# Account-wide metadata search, paging and Proton's Spam/Trash scope use mock API fixtures.
+cargo test --locked -p mail-common --test search_mail_scroller --profile mail-macos-debug

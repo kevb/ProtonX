@@ -50,6 +50,8 @@ with tempfile.TemporaryDirectory(prefix="ProtonX-mail-source-") as stage:
     shutil.copy2(root / "Tools/MailContractTests/attachment_export.rs", prepared / "project/mail/rust/mail/mail-common/tests/protonx_attachment_export.rs")
     handoff_sdk = prepared / "project/mail/rust/mail/mail-uniffi/src/mail/user_session.rs"
     handoff_sdk.write_text(handoff_sdk.read_text() + "\n" + (root / "Tools/MailAccountHandoff/sdk.rs").read_text())
+    search_sdk = prepared / "project/mail/rust/mail/mail-uniffi/src/mail/mail_scroller.rs"
+    search_sdk.write_text(search_sdk.read_text() + "\n" + (root / "Tools/MailSearch/sdk.rs").read_text())
     protocol = json.loads((root / "Resources/MailProtocol.json").read_text())
     constants = (
         f'pub const WEB_VERSION: &str = {json.dumps(protocol["webVersion"])};\n'

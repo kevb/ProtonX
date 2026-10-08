@@ -70,6 +70,7 @@ mod attachments;
 mod inbox_actions;
 mod threads;
 mod contacts;
+mod search;
 
 const MAX_INPUT: usize = 64 * 1024;
 const MAX_OUTPUT: usize = 8 * 1024 * 1024;
@@ -105,6 +106,7 @@ enum Command {
     },
     Snapshot {
         folder: Option<u64>,
+        keywords: Option<String>,
         more: bool,
         #[serde(default)]
         mode: SnapshotMode,
@@ -467,6 +469,8 @@ struct Backend {
     verification: Arc<AtomicBool>,
     mailbox: Option<Arc<Mailbox>>,
     scroller: Option<Arc<MessageScroller>>,
+    searcher: Option<Arc<mail_uniffi::mail::mail_scroller::SearchScroller>>,
+    search_query: Option<String>,
     listing: Arc<(Mutex<ListState>, Condvar)>,
     folder: Option<u64>,
     composer: Option<Composer>,
@@ -522,6 +526,8 @@ impl Backend {
             verification,
             mailbox: None,
             scroller: None,
+            searcher: None,
+            search_query: None,
             listing: Arc::new((Mutex::new(ListState::default()), Condvar::new())),
             folder: None,
             composer: None,
@@ -707,7 +713,19 @@ impl Backend {
             Command::TransferCancel { token } => { self.transfers.cancel(token); Ok(json!({"closed":true})) },
             Command::Contacts {} => self.contacts(),
             Command::ContactDetail { item } => self.contact_detail(item),
-            Command::Snapshot { folder, more, mode } => self.snapshot(folder, more, mode),
+            Command::Snapshot { folder, keywords, more, mode } => {
+                if let Some(query) = keywords {
+                    if mode != SnapshotMode::Legacy { return Err("invalid_input"); }
+                    self.search_snapshot(query, more)
+                }
+                else {
+                    if self.search_query.take().is_some() {
+                        if let Some(scroller) = self.searcher.take() { scroller.terminate(); }
+                        self.folder = None; self.mailbox = None; self.thread = None;
+                    }
+                    self.snapshot(folder, more, mode)
+                }
+            },
             Command::Thread { folder, item } => self.load_thread(folder, item),
             Command::Message { folder, item } => {
                 self.selected_message(folder, item)?;
@@ -725,7 +743,7 @@ impl Backend {
                     return Err("message_too_large");
                 }
                 let (body, sanitized_html) = reader::prepare(&raw, message.mime_type())?;
-                let actions = inbox_actions::available(mailbox.clone(), Id::from(item))?.names();
+                let actions = if self.search_query.is_some() { vec![] } else { inbox_actions::available(mailbox.clone(), Id::from(item))?.names() };
                 Ok(
                     json!({"id":item,"body":body,"sanitizedHTML":sanitized_html,"attachments":message.attachments().len(),"attachmentList":attachments::message_list(&message.attachments())?,"actions":actions}),
                 )
@@ -817,6 +835,8 @@ impl Backend {
                 self.thread = None;
                 self.mailbox = None;
                 self.scroller = None;
+                if let Some(scroller) = self.searcher.take() { scroller.terminate(); }
+                self.search_query = None;
                 self.flow = None;
                 self.transfers.clear(); self.composer = None;
                 self.listing.0.lock().unwrap().items.clear();

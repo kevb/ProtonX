@@ -219,15 +219,23 @@ struct MailWindow: View {
             VStack(spacing: 0) {
                 HStack(spacing: 10) {
                     Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                    TextField("Search loaded messages", text: $store.query).textFieldStyle(.plain).font(.system(size: 14))
-                        .focused($focus, equals: "search").accessibilityIdentifier("mailSearch")
+                    TextField("Search mail", text: $store.query).textFieldStyle(.plain).font(.system(size: 14))
+                        .focused($focus, equals: "search").accessibilityIdentifier("mailSearch").onSubmit { store.searchAllMail() }.disabled(store.busy && store.searchQuery != nil)
                     if !store.query.isEmpty {
                         Button { store.query = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
-                            .buttonStyle(.plain).accessibilityLabel("Clear mail search")
+                            .buttonStyle(.plain).accessibilityLabel("Clear mail search").disabled(store.busy && store.searchQuery != nil)
                     }
                 }.padding(12).background(MailTheme.canvas, in: RoundedRectangle(cornerRadius: 10)).padding(16)
+                if !store.query.isEmpty {
+                    HStack {
+                        Text(store.searchQuery == nil ? "Filtering this page" : "All-mail search · subjects and participants").font(.caption).foregroundStyle(.secondary)
+                        Spacer()
+                        Button(store.searchQuery == nil ? "Search all mail" : "Search again") { store.searchAllMail() }
+                            .disabled(store.busy || !MailSearchPolicy.valid(store.query.trimmingCharacters(in: .whitespacesAndNewlines)))
+                    }.padding(.horizontal, 18).padding(.bottom, 12)
+                }
                 HStack(alignment: .firstTextBaseline) {
-                    Text(folderTitle).font(.system(size: 20, weight: .semibold))
+                    Text(store.searchQuery == nil ? folderTitle : "Search results").font(.system(size: 20, weight: .semibold))
                     Spacer()
                     Text("\(store.visibleConversations.count) loaded").font(.caption).foregroundStyle(.secondary)
                 }.padding(.horizontal, 18).padding(.bottom, 16)
@@ -280,7 +288,7 @@ struct MailWindow: View {
                                 } description: { Text("Try refreshing when your connection is available.") }
                                 actions: { Button("Retry") { store.refresh() } }
                             } else {
-                                ContentUnavailableView(store.query.isEmpty ? "No messages here" : "No matching messages", systemImage: "tray", description: Text("Refresh or choose another folder."))
+                                ContentUnavailableView(store.query.isEmpty ? "No messages here" : "No matching messages", systemImage: "tray", description: Text(store.searchQuery != nil ? "Try different subject or sender terms. Body and attachment contents are not searched." : "Choose another folder, or use Search all mail to find older messages."))
                             }
                         }
                     }
@@ -290,11 +298,11 @@ struct MailWindow: View {
                     else if store.showingSavedContent { Label(store.cacheRefreshFailed ? "Saved content · refresh unavailable" : "Saved on this Mac", systemImage: "internaldrive") }
                     else { Text("\(store.messages.count) messages loaded") }
                     Spacer()
-                    if !store.demo && !store.messages.isEmpty { Button("Load more") { store.refresh(more: true) }.disabled(store.busy || store.messages.count >= 1000) }
+                    if !store.demo && !store.messages.isEmpty && (store.searchQuery == nil || store.searchHasMore) { Button("Load more") { store.refresh(more: true) }.disabled(store.busy || store.messages.count >= 1000) }
                 }.font(.caption).foregroundStyle(.secondary).padding(12)
             }.frame(minWidth: 300).background(MailTheme.collection)
                 .navigationSplitViewColumnWidth(min: 300, ideal: 340, max: 460)
-                .onChange(of: store.query) { _, _ in store.reconcileSelection() }
+                .onChange(of: store.query) { _, _ in store.searchTextChanged() }
                 .onChange(of: store.selectedItem) { _, _ in store.select() }
         } detail: { messageReader }
     }

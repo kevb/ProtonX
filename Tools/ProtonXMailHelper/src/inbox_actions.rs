@@ -14,6 +14,9 @@ pub struct State {
     next: u64,
     undo: Option<(u64, Instant, Arc<Undo>)>,
 }
+impl State {
+    pub(crate) fn clear_undo(&mut self) { self.undo = None; }
+}
 pub struct Options { read: bool, unread: bool, destinations: Vec<(Action, Id)> }
 impl Options {
     pub fn names(&self) -> Vec<Action> {
@@ -70,6 +73,7 @@ fn available_conversation(mailbox: Arc<Mailbox>, id: Id) -> Result<Options, &'st
 }
 impl Backend {
     pub(crate) fn conversation_action(&mut self, folder: u64, item: u64, expected: u64, action: Action) -> Result<Value, &'static str> {
+        search::allow_search_action(&self.search_query)?;
         if self.action_state.uncertain { return Err("action_uncertain"); }
         if self.composer.is_some() || self.folder != Some(folder) { return Err("invalid_selection"); }
         // A conversation is derived ONLY from a currently disclosed folder row.
@@ -97,6 +101,7 @@ impl Backend {
         Ok(json!({"id":item,"conversationID":conversation,"queued":true,"undoToken":token}))
     }
     pub(crate) fn message_action(&mut self, folder: u64, item: u64, action: Action) -> Result<Value, &'static str> {
+        search::allow_search_action(&self.search_query)?;
         if self.action_state.uncertain { return Err("action_uncertain"); }
         if self.composer.is_some() { return Err("invalid_selection"); }
         self.selected_message(folder, item)?;
@@ -121,6 +126,7 @@ impl Backend {
         Ok(json!({"id":item,"queued":true,"undoToken":token}))
     }
     pub(crate) fn undo_action(&mut self, token: u64) -> Result<Value, &'static str> {
+        search::allow_search_action(&self.search_query)?;
         if self.action_state.uncertain || self.composer.is_some() { return Err("action_uncertain"); }
         let user = self.user.clone().ok_or("invalid_state")?;
         let Some((saved, when, _)) = self.action_state.undo.as_ref() else { return Err("action_unavailable"); };

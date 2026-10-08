@@ -401,3 +401,19 @@ persistent cache is introduced. Recipient pickers bind to the current draft and
 current disclosed address list, preserve unfinished input on failure and deduplicate
 across To/Cc/Bcc without changing an existing address's visibility. Preview and
 contract fixtures are synthetic. See docs/CONTACTS.md for bounds and acceptance.
+
+## Mail metadata search
+
+Account-wide search uses the pinned SDK's existing search scroller. A query is
+bounded to 256 UTF-8 bytes without controls; metadata results stay within the
+existing 1,000-message/8 MiB private-pipe bounds. No body index is enabled, and no
+new persistent plaintext cache is added. The SDK can save retrieved metadata in
+its existing Mail database, with the storage limitations already described.
+Query strings are not logged or placed in arguments/environment/preferences.
+
+The selected result uses the current disclosed helper list and All Mail mailbox.
+Search follows Proton's normal Spam/Trash inclusion policy. Explicit folder/read/
+unread/undo actions are refused in search mode, with prior undo capabilities
+cleared. Selection, reply and attachment commands retain their existing fences.
+Native session cancellation rejects late search replies; query/results clear on
+lock. See docs/MAIL_SEARCH.md for UI coverage and remaining acceptance.

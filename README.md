@@ -157,6 +157,7 @@ public certificate, subject to Bridge's product limits.
 ## Keyboard and menu bar
 
 - ⌘0 / ⌘1 / ⌘2 / ⌘3 / ⌘4: Home / Pass / Mail / Calendar / Contacts.
+- Mail search: press Return or choose **Search all mail** for account-wide subjects/participants; typing alone filters the loaded page. Body and attachment contents are not searched. See [search coverage](docs/MAIL_SEARCH.md).
 - ⌘N / ⌘F / ⌘R: create, search and refresh in the front product window.
 - In Mail: ⇧⌘U read/unread, ⌘E archive, ⌘Delete Trash, ⌘Return review before sending.
 - ⌘L: lock all products. ⌘,: settings. ⌘Q: quit.
