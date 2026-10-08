@@ -33,6 +33,10 @@ are excluded from public artifacts.
   Keychain/account upgrade continuity still need validation.
 - A synthetic native walkthrough checked the Calendar timetable and lock screen;
   lock cleared event contents, and the preview welcome exposed no account form.
+- CI's macOS runner had no Go executable; helper/source-bundle and Calendar jobs
+  now explicitly provision pinned Go 1.26.4. Two remaining notification async
+  calls were moved to SDK callbacks to avoid older-SDK actor-transfer errors.
+  Local verification passed; the subsequent CI result is recorded separately.
 - No real Calendar account was accessed. Live sign-in, older/shared/subscribed keys,
   recurring exception interoperability and server expiry remain acceptance gates.
   Connected editing, invitations, reminders and persistent caching are not enabled.

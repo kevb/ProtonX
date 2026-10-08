@@ -167,7 +167,12 @@ struct DesktopNotice: Equatable {
     }
     func authorize() async throws -> Bool {
         guard let center else { return false }
-        return try await center.requestAuthorization(options: [.alert, .sound, .badge])
+        return try await withCheckedThrowingContinuation { continuation in
+            center.requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
+                if let error { continuation.resume(throwing: error) }
+                else { continuation.resume(returning: granted) }
+            }
+        }
     }
     func add(_ notice: DesktopNotice) async throws {
         guard let center else { throw CancellationError() }
@@ -175,7 +180,12 @@ struct DesktopNotice: Equatable {
         content.title = notice.title; content.body = notice.body
         content.userInfo = ["ticket": notice.id]
         if notice.sound { content.sound = .default }
-        try await center.add(UNNotificationRequest(identifier: notice.id, content: content, trigger: nil))
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
+            center.add(UNNotificationRequest(identifier: notice.id, content: content, trigger: nil)) { error in
+                if let error { continuation.resume(throwing: error) }
+                else { continuation.resume() }
+            }
+        }
     }
     func remove(_ ids: [String]) { center?.removePendingNotificationRequests(withIdentifiers: ids); center?.removeDeliveredNotifications(withIdentifiers: ids) }
     func clear() { center?.removeAllPendingNotificationRequests(); center?.removeAllDeliveredNotifications() }
