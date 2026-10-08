@@ -21,7 +21,7 @@ end-to-end workflow come before additional products.
 3. **Complete Mail's everyday workflow.** Validate actual send/reply delivery and
    enabled Gmail sending identities. Read/unread, Archive/Trash/Spam/Inbox and SDK move
    undo and SDK conversation reading are implemented with synthetic/public upstream
-   tests. Accept cross-client conversation behavior and add attachment viewing/sending.
+   tests. Accept cross-client conversation behavior and accept native attachment viewing/sending and interrupted-upload recovery.
    Preserve drafts and distinguish confirmed delivery from uncertain send outcomes.
 4. **Accept the shared suite workspace.** One ProtonX window now provides Home,
    a labelled product rail, lazy Pass/Mail workspaces and a nonmodal Mail composer.
@@ -90,8 +90,8 @@ remain separate gates.
 - Read/unread, Archive/Trash/Spam/Inbox and move undo are implemented through the pinned
   SDK for one message or one conversation. Folder-aware list context menus and
   keyboard confirmation for whole-conversation Trash are implemented. Conversation
-  grouping, cross-folder cards and individual-message mode have synthetic coverage; attachment UI and rich-text composition
-  remain. Sanitized HTML reading preserves structure alongside a text fallback.
+  grouping, cross-folder cards and individual-message mode have synthetic coverage; native attachment save/preview/upload/removal are implemented through the SDK; rich-text composition
+  and inline/CID rendering remain. Sanitized HTML reading preserves structure alongside a text fallback.
 - Test interrupted sends, ambiguous delivery and draft recovery across upgrades.
 - Retain Bridge as an optional prototype/compatibility path. Its lifecycle work
   is secondary to proving direct native Mail onboarding.
@@ -187,7 +187,7 @@ assets; public captures and fixtures use synthetic content.
 | Area | Missing capability or current limitation |
 | --- | --- |
 | Authentication/recovery | Human verification, FIDO-only/security-key login, password-change and wider account recovery/challenge flows. Existing native password/TOTP/second-password login and saved-session unlock must remain intact. |
-| Attachments | List, download/open/preview and export attachments; upload/remove/drag-drop in drafts; embedded CID and inline images. Counts and SDK retention are not attachment management. |
+| Attachments | Native listed attachments, bounded download/save, PDF/raster/text Quick Look preview/open and draft upload/remove/drag-drop are implemented. Accept actual send/receive and interrupted-upload recovery; expand preview types and support embedded CID/inline images. Current per-file native limit is 25 MB; Proton limits remain authoritative. See [attachment behavior](MAIL_ATTACHMENTS.md). |
 | Composition | Forward; rich text (font/size/colour, emphasis, lists, alignment, links, quotations, inline images, clear formatting); plain-text option. Multiple/minimizable/pop-out drafts and automatic saving remain; initial nonmodal composing and tab-switch draft retention are implemented. |
 | Sending controls | Undo Send, scheduled send with edit/cancel, read-receipt request/response, password-protected external messages and expiry. Preserve existing queued/confirmed/failed/unknown status handling. |
 | Contacts | Contact book, picker/autocomplete, create/edit/delete, groups and group addressing, CSV/vCard import/export. To/Cc/Bcc and From selection already exist. |

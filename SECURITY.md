@@ -33,7 +33,7 @@ include passwords, tokens, real message bodies or vault exports in public issues
   attachment/embedded-MIME payloads in atomic SQLCipher blob containers and reads
   them into memory, including SDK cache hits, cloning and calendar invite parsing.
   The original filename stays in encrypted metadata; the cache filename is generic.
-  There is no native attachment export API. Internal SDK attachment paths in this
+  The native attachment export reads bounded cache bytes in memory through the SDK adapter; explicit save/preview produces a user-authorized plaintext file. Internal SDK attachment paths in this
   candidate point to ciphertext, not files another app can open directly. Existing
   cache activation/path rebasing, full file-path/export/staging audit, whole-profile cutover and
   actual draft/send recovery remain release gates. See docs/MAIL_STORAGE_MIGRATION.md.
@@ -159,7 +159,7 @@ include passwords, tokens, real message bodies or vault exports in public issues
   Lock/selection change destroys the selected view and rejects late body results;
   this is not a WebKit process-memory zeroization guarantee. The SDK owns MIME
   and decryption. Bridge retains its limited bounded-recursion plain-text MIME
-  reader. Attachments are counted, not opened. See docs/MAIL_RENDERING.md.
+  reader. Native attachment save/preview and draft upload/removal use the SDK through bounded private transfers; see docs/MAIL_ATTACHMENTS.md. Inline/CID rendering remains disabled. See docs/MAIL_RENDERING.md.
 - No telemetry is added. Upstream Pass telemetry is disabled. Upstream automatic
   update checks are skipped by the patched helper in native mode. No auto-updater
   silently replaces this patched executable.
@@ -276,3 +276,22 @@ invalidated on lock and policy changes. Stale tickets only open the Mail interfa
 requirements. Valid clicks navigate only to messages disclosed by the current bounded SDK
 list and preserve an open composer. Test alerts contain synthetic text only;
 preview builds cannot request OS permission, deliver alerts or set a Dock badge.
+
+## Native Mail attachment files
+
+The helper never accepts app-supplied file paths. One transfer is scoped to a
+disclosed message or editing draft, with a 25 MB cap, bounded chunks, sequential
+offsets, one-use completion and expiry. SDK download/decryption/upload and server
+limits remain unchanged. Unknown attachment IDs cannot export another message's
+data. Source files are chosen explicitly and opened as regular files without
+following symlinks. A mode-0600, random SDK staging file is used only during import;
+crash leftovers fall under the existing SDK staging cleaner.
+
+Save/Quick Look/Open explicitly export plaintext outside the cache protection.
+Saved/preview files use mode 0600 and macOS quarantine; preview directories are
+mode 0700 and removed on normal dismissal/selection change/lock. Crash leftovers
+and external-app copies can remain. No forensic-erasure claim is made. Only PDF,
+raster images and TXT/CSV are offered in-app preview/open; other types use explicit
+Save. Unsaved composer text is preserved during file operations, and uncertain
+upload/removal requires metadata reconciliation before repeating a change/send.
+See docs/MAIL_ATTACHMENTS.md for complete behavior and acceptance limits.

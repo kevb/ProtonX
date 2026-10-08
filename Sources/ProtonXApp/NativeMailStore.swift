@@ -30,6 +30,15 @@ final class NativeMailStore: ObservableObject {
     @Published private(set) var phase: Phase = .welcome
     @Published private(set) var folders: [NativeMailFolder] = []
     @Published private(set) var messages: [NativeMailMessage] = []
+    @Published private(set) var attachmentList: [NativeMailAttachment] = []
+    @Published private(set) var attachmentBusy = false
+    @Published private(set) var attachmentNeedsRefresh = false
+    @Published private(set) var attachmentStatus: String?
+    @Published private(set) var attachmentError: String?
+    @Published var attachmentPreview: MailAttachmentPreview?
+    private var attachmentTask: Task<Void, Never>?
+    private var attachmentEpoch = SessionEpoch()
+    private var draftAttachmentPolling: Task<Void, Never>?
     @Published private(set) var body: String?
     @Published private(set) var sanitizedHTML: String?
     @Published private(set) var thread: NativeMailThread?
@@ -50,8 +59,8 @@ final class NativeMailStore: ObservableObject {
     @Published var error: String?
     @Published private(set) var draft: NativeMailDraft? {
         didSet {
-            guard let draft else { editorState = nil; return }
-            if editorState?.token != draft.token { editorState = MailEditorState(draft: draft) }
+            guard let draft else { editorState = nil; attachmentNeedsRefresh = false; draftAttachmentPolling?.cancel(); return }
+            if editorState?.token != draft.token { attachmentNeedsRefresh = false; editorState = MailEditorState(draft: draft) }
         }
     }
     @Published private(set) var editorState: MailEditorState?
@@ -203,7 +212,7 @@ final class NativeMailStore: ObservableObject {
             self.selectedItem = nil; body = nil; sanitizedHTML = nil; messageActions = []; selectionEpoch.invalidate(); selection?.cancel()
         }
     }
-    private func clearThread() { thread = nil; expandedThreadItem = nil; threadLoading = false; threadError = nil }
+    private func clearThread() { clearAttachments(); thread = nil; expandedThreadItem = nil; threadLoading = false; threadError = nil }
     func select(preferred: UInt64? = nil, preservingContent: Bool = false) {
         if !preservingContent { clearThread(); body = nil; sanitizedHTML = nil }
         messageActions = []; error = nil; threadError = nil; selectionEpoch.invalidate(); selection?.cancel()
@@ -215,7 +224,7 @@ final class NativeMailStore: ObservableObject {
                 thread = NativeMailThread(anchor: item, conversationID: conversation, messages: members)
             } else { thread = nil }
             let chosen = preferred.flatMap { id in thread?.messages.contains(where: { $0.id == id }) == true ? id : nil } ?? item
-            expandedThreadItem = chosen; body = demoBodies[chosen]; sanitizedHTML = demoHTML[chosen]; setDemoActions(); return
+            expandedThreadItem = chosen; setDemoAttachments(chosen); body = demoBodies[chosen]; sanitizedHTML = demoHTML[chosen]; setDemoActions(); return
         }
         guard let folder = selectedFolder, phase == .open else { return }
         threadLoading = conversationView && anchor.conversationID != nil
@@ -250,10 +259,10 @@ final class NativeMailStore: ObservableObject {
     func expandThreadMessage(_ item: UInt64) {
         guard !threadLoading, thread?.messages.contains(where: { $0.id == item }) == true,
               let anchor = selectedItem, let folder = selectedFolder else { return }
-        selectionEpoch.invalidate(); selection?.cancel(); messageActions = []; body = nil; sanitizedHTML = nil; error = nil
+        clearAttachments(); selectionEpoch.invalidate(); selection?.cancel(); messageActions = []; body = nil; sanitizedHTML = nil; error = nil
         if expandedThreadItem == item { expandedThreadItem = nil; return }
         expandedThreadItem = item
-        if demo { body = demoBodies[item]; sanitizedHTML = demoHTML[item]; setDemoActions(); return }
+        if demo { setDemoAttachments(item); body = demoBodies[item]; sanitizedHTML = demoHTML[item]; setDemoActions(); return }
         let captured = epoch.value, generation = selectionEpoch.value
         selection = Task { [self] in
             do { try await loadBody(item: item, anchor: anchor, folder: folder, captured: captured, generation: generation) }
@@ -272,7 +281,7 @@ final class NativeMailStore: ObservableObject {
         let result = try await runner.request(NativeMailCommand("message", folder: folder, item: item))
         try checkSelection(captured: captured, generation: generation, anchor: anchor, folder: folder)
         guard expandedThreadItem == item, result.id == item, let next = result.body else { throw ProtonXError.invalidResponse }
-        body = next; sanitizedHTML = result.sanitizedHTML; messageActions = result.actions ?? []
+        body = next; sanitizedHTML = result.sanitizedHTML; messageActions = result.actions ?? []; attachmentList = result.attachmentList ?? []; try MailAttachmentPolicy.validateList(attachmentList)
     }
     var canUndoAction: Bool { undoToken != nil && (undoExpiry ?? .distantPast) > Date() && !busy && !mustRefreshBeforeActions && draft == nil }
     // Menu presentation follows Proton WebClients' useLabelActions by SDK folder kind.
@@ -410,6 +419,7 @@ final class NativeMailStore: ObservableObject {
         guard mode == "new" || selectedMessage != nil else { return }
         if mode == "open" { guard selectedMessage?.isDraft == true, selectedMessage?.isScheduled != true else { return } }
         if mode == "reply" || mode == "reply_all" { guard selectedMessage?.canReply != false else { return } }
+        cancelAttachmentTransfer(); clearAttachmentPreview(); attachmentError = nil
         notice = nil; composeStatus = nil
         if demo {
             let reply = mode != "new" ? selectedMessage : nil
@@ -425,14 +435,14 @@ final class NativeMailStore: ObservableObject {
             let result = try await runner.request(NativeMailCommand("compose", folder: mode == "new" ? nil : selectedFolder, item: mode == "new" ? nil : selectedMessage?.id, mode: mode))
             try check(captured)
             guard let next = result.draft else { throw ProtonXError.invalidResponse }
-            draft = next
+            draft = next; startDraftAttachmentPolling()
         }
     }
     func markDraftEdited() {
         if draft?.state == .editing { composeStatus = nil }
     }
     func saveDraft(_ content: NativeMailComposeContent, close: Bool = false) {
-        guard phase == .open, !busy, let draft, draft.state == .editing else { return }
+        guard phase == .open, !busy, !attachmentBusy, !attachmentNeedsRefresh, let draft, draft.state == .editing else { return }
         do { try content.validate(senders: draft.senders, sending: false) } catch { self.error = safeError(error); return }
         if demo { composeStatus = "Demo draft saved · no account accessed"; if close { self.draft = nil }; return }
         perform { [self] captured in
@@ -464,7 +474,7 @@ final class NativeMailStore: ObservableObject {
         }
     }
     func discardDraft() {
-        guard phase == .open, !busy, let draft, draft.state == .editing else { return }
+        guard phase == .open, !busy, !attachmentBusy, !attachmentNeedsRefresh, let draft, draft.state == .editing else { return }
         if demo { self.draft = nil; return }
         perform { [self] captured in
             let result = try await runner.request(NativeMailCommand("discard_draft", token: draft.token))
@@ -473,7 +483,9 @@ final class NativeMailStore: ObservableObject {
         }
     }
     func sendDraft(_ content: NativeMailComposeContent) {
-        guard phase == .open, !busy, let draft, draft.state == .editing else { return }
+        guard phase == .open, !busy, !attachmentBusy, !attachmentNeedsRefresh, let draft, draft.state == .editing else { return }
+        guard (draft.attachmentList ?? []).allSatisfy({ $0.state == .uploaded }) else { error = NativeMailFailure.attachmentPending.localizedDescription; return }
+        draftAttachmentPolling?.cancel()
         do { try content.validate(senders: draft.senders, sending: true) } catch { self.error = safeError(error); return }
         if demo { self.draft = nil; notice = "Demo message sent · nothing was delivered"; return }
         perform { [self] captured in
@@ -487,7 +499,7 @@ final class NativeMailStore: ObservableObject {
                 if self.draft?.state == .sent { try await finishSent(token: draft.token, captured: captured) }
             } catch {
                 if epoch.accepts(captured), !Task.isCancelled {
-                    if (error as? NativeMailFailure) == .sendRejected {
+                    if [.sendRejected, .attachmentPending].contains(error as? NativeMailFailure) {
                         self.draft?.state = .editing; composeStatus = "Message was not queued. Correct the sender or recipients and try again."
                     } else {
                         composeStatus = "Sending could not be confirmed. Check Sent and Drafts before sending again."
@@ -609,6 +621,7 @@ final class NativeMailStore: ObservableObject {
     }
     func cancelLocalUnlock() { if localAuthentication.state == .authenticating { lock() } }
     func lock() {
+        draftAttachmentPolling?.cancel(); clearAttachments()
         notificationEpoch.invalidate(); notificationTask?.cancel(); notificationTask = nil; notifications?.clearMail()
         epoch.invalidate(); selectionEpoch.invalidate(); operation?.cancel(); selection?.cancel(); polling?.cancel(); sendPolling?.cancel(); localAuthentication.cancel(); runner.cancelAll()
         folders = []; messages = []; body = nil; sanitizedHTML = nil; selectedItem = nil; selectedFolder = nil; query = ""; email = ""; error = nil
@@ -622,7 +635,7 @@ final class NativeMailStore: ObservableObject {
     func enterDemo() {
         lock(); demo = true; phase = .open; email = "alex@example.com"
         folders = [NativeMailFolder(id: 1, name: "Inbox", count: 2, kind: .inbox), NativeMailFolder(id: 2, name: "Sent", kind: .sent), NativeMailFolder(id: 3, name: "Archive", kind: .archive), NativeMailFolder(id: 4, name: "Trash", kind: .trash), NativeMailFolder(id: 5, name: "Spam", kind: .spam)]; selectedFolder = 1; loadedFolder = 1
-        messages = [NativeMailMessage(id: 11, subject: "Welcome to your native inbox", sender: "hello@example.com", senderName: "ProtonX", recipient: "alex@example.com", date: 1791288000, unread: true, conversationID: 1100), NativeMailMessage(id: 12, subject: "Coffee this weekend?", sender: "sam@example.com", senderName: "Sam", recipient: "alex.demo@gmail.com", date: 1791201600, conversationID: 1200)]
+        messages = [NativeMailMessage(id: 11, subject: "Welcome to your native inbox", sender: "hello@example.com", senderName: "ProtonX", recipient: "alex@example.com", date: 1791288000, unread: true, attachments: 1, conversationID: 1100), NativeMailMessage(id: 12, subject: "Coffee this weekend?", sender: "sam@example.com", senderName: "Sam", recipient: "alex.demo@gmail.com", date: 1791201600, conversationID: 1200)]
         demoMessages = messages; demoLocations = Dictionary(uniqueKeysWithValues: messages.map { ($0.id, 1) })
         demoMessages += [
             NativeMailMessage(id: 13, subject: "Re: Coffee this weekend?", sender: "alex.demo@gmail.com", senderName: "Alex", recipient: "sam@example.com", date: 1791205200, conversationID: 1200),
@@ -637,7 +650,7 @@ final class NativeMailStore: ObservableObject {
         demoBodies[11] = "Welcome to your native inbox\n\nHello Alex,\n\nThis newsletter is synthetic. No account has been accessed.\n\nProduct / Window\nMail / ⌘2\nPass / ⌘1\n\nA comfortable place to read\n• Headings, lists and tables keep their structure.\n• The message stays light in dark appearance.\n\nA synthetic help link: https://example.com/help\n\nEarlier reply: thanks for the update."
         demoBodies[13] = "Hi Sam,\n\nSaturday sounds good. Shall we meet at ten?\n\nAlex"
         demoBodies[14] = "One more thing — I’ll bring the book we talked about.\n\nSee you Saturday!\n\nAlex"
-        selectedItem = 11; body = demoBodies[11]; sanitizedHTML = demoHTML[11]; setDemoActions()
+        selectedItem = 11; body = demoBodies[11]; sanitizedHTML = demoHTML[11]; setDemoAttachments(11); setDemoActions()
     }
     private func setDemoActions() {
         guard let message = selectedMessage else { messageActions = []; return }
@@ -651,6 +664,203 @@ final class NativeMailStore: ObservableObject {
     private func expireSession() {
         hasSession = false; defaults.set(false, forKey: "nativeMailConnected")
         lock(); demo = false; phase = .welcome
+    }
+    var filePanelContext: UInt64? { phase == .open ? epoch.value : nil }
+    enum AttachmentAction { case preview, save(URL) }
+    func clearAttachmentPreview() { attachmentPreview?.remove(); attachmentPreview = nil }
+    private func clearAttachments() {
+        if draft == nil { cancelAttachmentTransfer(); attachmentError = nil }
+        clearAttachmentPreview(); attachmentList = []
+    }
+    func cancelAttachmentTransfer() {
+        attachmentEpoch.invalidate(); attachmentTask?.cancel(); attachmentTask = nil
+        attachmentBusy = false; attachmentStatus = nil
+        if attachmentNeedsRefresh { attachmentError = "The attachment change may still complete. Refresh the list before adding, removing or sending." }
+    }
+    func refreshAttachments() {
+        guard phase == .open, draft == nil, !busy, !attachmentBusy, let item = selectedMessage?.id, let folder = selectedFolder else { return }
+        if demo { return }
+        let captured = epoch.value, generation = selectionEpoch.value
+        attachmentTask = Task { [self] in
+            do {
+                let result = try await runner.request(NativeMailCommand("attachment_list", folder: folder, item: item))
+                try check(captured)
+                guard selectionEpoch.accepts(generation), selectedMessage?.id == item, result.id == item, let list = result.attachmentList else { throw CancellationError() }
+                try MailAttachmentPolicy.validateList(list); attachmentList = list; attachmentError = nil
+            } catch { if epoch.accepts(captured), selectionEpoch.accepts(generation), !Task.isCancelled {
+                if (error as? NativeMailFailure) == .sessionExpired { expireSession() } else { attachmentError = safeError(error) }
+            } }
+        }
+    }
+    func downloadAttachment(_ file: NativeMailAttachment, action: AttachmentAction) {
+        guard phase == .open, draft == nil, !busy, !attachmentBusy, attachmentList.contains(file), let item = selectedMessage?.id, let folder = selectedFolder else { return }
+        guard file.size <= MailAttachmentPolicy.maxBytes else { attachmentError = NativeMailFailure.attachmentTooLarge.localizedDescription; return }
+        cancelAttachmentTransfer(); attachmentBusy = true; attachmentError = nil; attachmentStatus = "Downloading \(file.name)…"
+        let captured = epoch.value, generation = attachmentEpoch.value, selected = selectionEpoch.value
+        attachmentTask = Task { [self] in
+            var ticket: UInt64?
+            defer {
+                if let ticket { Task { [weak self] in
+                    guard let self, self.phase == .open, self.epoch.accepts(captured) else { return }
+                    _ = try? await self.runner.request(NativeMailCommand("transfer_cancel", token: ticket))
+                } }
+                if attachmentEpoch.accepts(generation) { attachmentBusy = false; attachmentStatus = nil }
+            }
+            do {
+                var bytes = Data()
+                if demo { bytes = Data("ProtonX synthetic attachment\nNo account data.\n".utf8) }
+                else {
+                    let start = try await runner.request(NativeMailCommand("attachment_download", folder: folder, item: item, attachment: file.id))
+                    ticket = start.transfer?.token
+                    try checkAttachment(captured, generation)
+                    guard let transfer = start.transfer, transfer.offset == 0 else { throw ProtonXError.invalidResponse }
+                    try transfer.validate(); ticket = transfer.token
+                    while true {
+                        let result = try await runner.request(NativeMailCommand("attachment_chunk", folder: folder, item: item, token: transfer.token, attachment: file.id, offset: bytes.count))
+                        try checkAttachment(captured, generation)
+                        guard let chunk = result.transfer, chunk.token == transfer.token, chunk.size == transfer.size,
+                              let encoded = chunk.data, let data = MailAttachmentPolicy.decode(encoded),
+                              chunk.offset == bytes.count + data.count, chunk.offset <= transfer.size,
+                              chunk.done == (chunk.offset == transfer.size), !data.isEmpty || chunk.done == true else { throw ProtonXError.invalidResponse }
+                        bytes.append(data)
+                        attachmentStatus = "Downloading \(file.name) · \(ByteCountFormatter.string(fromByteCount: Int64(bytes.count), countStyle: .file))"
+                        if chunk.done == true { break }
+                    }
+                }
+                try checkAttachment(captured, generation)
+                guard selectionEpoch.accepts(selected), selectedMessage?.id == item else { throw CancellationError() }
+                switch action {
+                case .preview:
+                    guard MailAttachmentFiles.canPreview(file.name) else { throw NativeMailFailure.attachmentFailed }
+                    clearAttachmentPreview(); attachmentPreview = try MailAttachmentPreview(name: file.name, bytes: bytes)
+                case .save(let url):
+                    try MailAttachmentFiles.save(bytes, to: url); notice = "Attachment saved"
+                }
+            } catch {
+                if !Task.isCancelled, epoch.accepts(captured), attachmentEpoch.accepts(generation) {
+                    if (error as? NativeMailFailure) == .sessionExpired { expireSession() }
+                    else { attachmentError = safeError(error) }
+                }
+            }
+        }
+    }
+    private func checkAttachment(_ captured: UInt64, _ generation: UInt64) throws {
+        try check(captured); guard attachmentEpoch.accepts(generation), phase == .open else { throw CancellationError() }
+    }
+    func acceptDroppedFiles(_ providers: [NSItemProvider]) {
+        guard let token = draft?.token, providers.count <= 100 else { return }
+        let captured = epoch.value
+        Task { [weak self] in
+            var urls: [URL] = []
+            for provider in providers {
+                let data: Data? = await withCheckedContinuation { continuation in
+                    provider.loadDataRepresentation(forTypeIdentifier: "public.file-url") { data, _ in continuation.resume(returning: data) }
+                }
+                if let data, let url = URL(dataRepresentation: data, relativeTo: nil), url.isFileURL { urls.append(url) }
+            }
+            guard let self, self.epoch.accepts(captured), self.draft?.token == token else { return }
+            self.addDraftAttachments(urls)
+        }
+    }
+    func addDraftAttachments(_ urls: [URL]) {
+        guard phase == .open, !busy, !attachmentBusy, !attachmentNeedsRefresh, let draft, draft.state == .editing, !urls.isEmpty, urls.count <= 100 else { return }
+        cancelAttachmentTransfer(); attachmentBusy = true; attachmentError = nil
+        let captured = epoch.value, generation = attachmentEpoch.value, owner = draft.token
+        attachmentTask = Task { [self] in
+            var ticket: UInt64?
+            defer {
+                if let ticket { Task { [weak self] in
+                    guard let self, self.phase == .open, self.epoch.accepts(captured) else { return }
+                    _ = try? await self.runner.request(NativeMailCommand("transfer_cancel", token: ticket))
+                } }
+                if attachmentEpoch.accepts(generation) { attachmentBusy = false; attachmentStatus = nil; startDraftAttachmentPolling() }
+            }
+            do {
+                for url in urls {
+                    try checkAttachment(captured, generation)
+                    guard self.draft?.token == owner, url.isFileURL else { throw CancellationError() }
+                    let name = MailAttachmentPolicy.filename(url.lastPathComponent)
+                    attachmentStatus = "Attaching \(name)…"
+                    let bytes = try await Task.detached(priority: .userInitiated) { try MailAttachmentFiles.readUpload(url) }.value
+                    try checkAttachment(captured, generation)
+                    if demo {
+                        var list = self.draft?.attachmentList ?? []
+                        list.append(.init(id: UInt64((list.map(\.id).max() ?? 0) + 1), name: name, size: UInt64(bytes.count), state: .uploaded))
+                        self.draft?.attachmentList = list; continue
+                    }
+                    let start = try await runner.request(NativeMailCommand("upload_start", token: owner, name: name, size: bytes.count))
+                    ticket = start.transfer?.token
+                    try checkAttachment(captured, generation)
+                    guard let transfer = start.transfer, transfer.size == bytes.count, transfer.offset == 0 else { throw ProtonXError.invalidResponse }
+                    try transfer.validate(); ticket = transfer.token
+                    var offset = 0
+                    while offset < bytes.count {
+                        let end = min(offset + MailAttachmentPolicy.chunkBytes, bytes.count)
+                        let reply = try await runner.request(NativeMailCommand("upload_chunk", token: owner, transfer: transfer.token, offset: offset, data: MailAttachmentPolicy.encode(bytes.subdata(in: offset..<end))))
+                        try checkAttachment(captured, generation)
+                        guard let ack = reply.transfer, ack.token == transfer.token, ack.offset == end, ack.size == bytes.count else { throw ProtonXError.invalidResponse }
+                        offset = end
+                    }
+                    attachmentNeedsRefresh = true
+                    let result = try await runner.request(NativeMailCommand("upload_finish", token: owner, transfer: transfer.token))
+                    try checkAttachment(captured, generation); ticket = nil
+                    guard result.draft?.token == owner else { throw ProtonXError.invalidResponse }
+                    self.draft = result.draft; attachmentNeedsRefresh = false; composeStatus = "Attachment added · syncing with Proton"
+                }
+            } catch {
+                if !Task.isCancelled, epoch.accepts(captured), attachmentEpoch.accepts(generation) {
+                    if (error as? NativeMailFailure) == .sessionExpired { expireSession() }
+                    else { attachmentError = safeError(error) }
+                }
+            }
+        }
+    }
+    func removeDraftAttachment(_ id: UInt64) {
+        guard phase == .open, !busy, !attachmentBusy, !attachmentNeedsRefresh, let draft, draft.state == .editing, draft.attachmentList?.contains(where: { $0.id == id }) == true else { return }
+        if demo { self.draft?.attachmentList?.removeAll { $0.id == id }; return }
+        perform { [self] captured in
+            attachmentNeedsRefresh = true
+            let result = try await runner.request(NativeMailCommand("remove_attachment", token: draft.token, attachment: id))
+            try check(captured); guard result.draft?.token == draft.token else { throw ProtonXError.invalidResponse }
+            self.draft = result.draft; attachmentNeedsRefresh = false; attachmentError = nil; composeStatus = "Attachment removed · syncing with Proton"
+        }
+    }
+    func refreshDraftAttachments() {
+        guard phase == .open, !busy, !attachmentBusy, !demo, let draft else { return }
+        perform { [self] captured in
+            let result = try await runner.request(NativeMailCommand("draft_attachments", token: draft.token))
+            try check(captured); guard result.draft?.token == draft.token else { throw ProtonXError.invalidResponse }
+            self.draft = result.draft; attachmentNeedsRefresh = false; attachmentError = nil; startDraftAttachmentPolling()
+        }
+    }
+    private func startDraftAttachmentPolling() {
+        draftAttachmentPolling?.cancel()
+        guard !demo, !attachmentNeedsRefresh, let draft, draft.state == .editing, draft.attachmentList?.contains(where: { $0.state == .pending || $0.state == .uploading || $0.state == .offline }) == true else { return }
+        let captured = epoch.value, token = draft.token
+        draftAttachmentPolling = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(2))
+                guard let self, self.epoch.accepts(captured), !Task.isCancelled, self.draft?.token == token else { return }
+                if self.busy || self.attachmentBusy { continue }
+                do {
+                    let result = try await self.runner.request(NativeMailCommand("draft_attachments", token: token))
+                    try self.check(captured)
+                    guard !self.busy, self.draft?.state == .editing, self.draft?.token == token, result.draft?.token == token else { return }
+                    self.draft = result.draft
+                    if result.draft?.attachmentList?.allSatisfy({ $0.state == .uploaded || $0.state == .failed }) == true { return }
+                } catch {
+                    if !Task.isCancelled, self.epoch.accepts(captured) {
+                        if (error as? NativeMailFailure) == .sessionExpired { self.expireSession() }
+                        else { self.attachmentError = self.safeError(error) }
+                    }
+                    return
+                }
+            }
+        }
+    }
+    private func setDemoAttachments(_ item: UInt64) {
+        attachmentList = (demoMessages.first { $0.id == item }?.attachments ?? 0) > 0
+            ? [.init(id: 1, name: "ProtonX sample.txt", size: 44, mime: "text/plain")] : []
     }
     private func check(_ captured: UInt64) throws { try Task.checkCancellation(); guard epoch.accepts(captured) else { throw CancellationError() } }
     private func safeError(_ error: Error) -> String {

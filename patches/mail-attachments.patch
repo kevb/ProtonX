@@ -1,0 +1,43 @@
+--- a/project/mail/rust/mail/mail-common/src/mailbox/attachments.rs
++++ b/project/mail/rust/mail/mail-common/src/mailbox/attachments.rs
+@@ -19,3 +19,21 @@
+     // /// The result of the signature verification.
+     // pub verification_result: VerificationResult,
+ }
++
++// ProtonX: bytes stay in the helper until an explicit native export/preview.
++#[cfg(feature = "protonx-native")]
++impl DecryptedAttachment {
++    pub async fn native_content(&self) -> std::io::Result<Vec<u8>> {
++        const MAX: usize = 25_000_000;
++        if self.attachment_metadata.size > MAX as u64 {
++            return Err(std::io::ErrorKind::InvalidData.into());
++        }
++        // Encrypted containers have bounded overhead; never read an unbounded file.
++        if tokio::fs::metadata(&self.data_path).await?.len() > (MAX + 1_000_000) as u64 {
++            return Err(std::io::ErrorKind::InvalidData.into());
++        }
++        let bytes = crate::cache_storage::read(&self.data_path).await?;
++        if bytes.len() > MAX { return Err(std::io::ErrorKind::InvalidData.into()); }
++        Ok(bytes)
++    }
++}
+--- a/project/mail/rust/mail/mail-uniffi/src/mail/mailbox/attachments.rs
++++ b/project/mail/rust/mail/mail-uniffi/src/mail/mailbox/attachments.rs
+@@ -43,3 +43,16 @@
+         .map_err(ActionError::from)
+     }
+ }
++
++#[cfg(feature = "protonx-native")]
++impl Mailbox {
++    /// Native-only bounded export. Cache paths are never exposed over app IPC.
++    pub async fn protonx_attachment_content(&self, id: Id) -> Result<Vec<u8>, ActionError> {
++        let ctx = self.ctx()?;
++        uniffi_async(async move {
++            let mut tether = ctx.user_stash().connection();
++            let attachment = Attachment::get_attachment(&ctx, id.into(), &mut tether).await?;
++            attachment.native_content().await.map_err(|e| RealProtonMailError::from(anyhow::anyhow!(e)))
++        }).await.map_err(ActionError::from)
++    }
++}

@@ -70,4 +70,9 @@ assert "NotificationsPoll" in helper and "protonx_notifications(operation)" in h
 
 assert (native / "project/mail/rust/mail/mail-common/tests/protonx_notifications.rs").read_bytes() == (root / "Tools/MailContractTests/notifications.rs").read_bytes()
 
+assert (native / "protonx-mail-helper/src/attachments.rs").read_bytes() == (root / "Tools/ProtonXMailHelper/src/attachments.rs").read_bytes()
+assert (native / "project/mail/rust/mail/mail-common/tests/protonx_attachment_export.rs").read_bytes() == (root / "Tools/MailContractTests/attachment_export.rs").read_bytes()
+assert "protonx_attachment_content" in (native / "project/mail/rust/mail/mail-uniffi/src/mail/mailbox/attachments.rs").read_text()
+assert "cache_storage::read" in (native / "project/mail/rust/mail/mail-common/src/mailbox/attachments.rs").read_text()
+
 print("Independent native Mail protocol, privacy and notification contracts verified")

@@ -15,8 +15,8 @@ struct MailComposer: View {
     }
     private var current: NativeMailDraft { store.draft ?? initial }
     private var content: NativeMailComposeContent { editor.content }
-    private var editable: Bool { current.state == .editing && !store.busy }
-    private var valid: Bool { (try? content.validate(senders: current.senders, sending: true)) != nil }
+    private var editable: Bool { current.state == .editing && !store.busy && !store.attachmentBusy && !store.attachmentNeedsRefresh }
+    private var valid: Bool { (current.attachmentList ?? []).allSatisfy { $0.state == .uploaded } && (try? content.validate(senders: current.senders, sending: true)) != nil }
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
@@ -38,10 +38,10 @@ struct MailComposer: View {
                             ForEach(current.senders, id: \.self) { address in Text(address).tag(address) }
                         }.labelsHidden().pickerStyle(.menu).frame(maxWidth: .infinity, alignment: .leading)
                         if editor.sender.lowercased().hasSuffix("@gmail.com") { Text("Connected Gmail").font(.caption).foregroundStyle(.secondary) }
-                    }.padding(.vertical, 12)
+                    }.padding(.vertical, 12).disabled(!editable)
                     Divider()
                     HStack {
-                        recipientField("To", text: $editor.to, focus: "to")
+                        recipientField("To", text: $editor.to, focus: "to").disabled(!editable)
                         Button(editor.expandedRecipients ? "Hide Cc/Bcc" : "Cc/Bcc") { editor.expandedRecipients.toggle() }.buttonStyle(.plain).foregroundStyle(MailTheme.accent)
                     }
                     Divider()
@@ -52,7 +52,7 @@ struct MailComposer: View {
                     HStack {
                         Text("Subject").foregroundStyle(.secondary).frame(width: 60, alignment: .leading)
                         TextField("Subject", text: $editor.subject).textFieldStyle(.plain).focused($focus, equals: "subject")
-                    }.padding(.vertical, 15)
+                    }.padding(.vertical, 15).disabled(!editable)
                     Divider()
                     if current.warning != nil {
                         Label("The original receiving address is unavailable. This reply will use the From address shown above.", systemImage: "exclamationmark.triangle")
@@ -62,16 +62,15 @@ struct MailComposer: View {
                         .foregroundStyle(MailTheme.ink).padding(12).background(MailTheme.paper, in: RoundedRectangle(cornerRadius: 8))
                         .environment(\.colorScheme, .light)
                         .frame(minHeight: 230).focused($focus, equals: "body").padding(.top, 16)
-                        .accessibilityLabel("Message body")
+                        .accessibilityLabel("Message body").disabled(!editable)
                     if !current.quote.isEmpty {
                         DisclosureGroup("Signature & quoted message") {
                             Text(current.quote).font(.callout).foregroundStyle(.secondary).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading).padding(.top, 12)
                         }.padding(.vertical, 14)
                     }
-                    if current.attachments > 0 {
-                        Label("\(current.attachments) existing attachment(s) retained by Proton", systemImage: "paperclip").font(.caption).foregroundStyle(.secondary).padding(.bottom, 12)
-                    }
-                }.disabled(!editable).padding(.horizontal, 24)
+                    MailAttachmentsView(store: store, composing: true).padding(.vertical, 12)
+
+                }.padding(.horizontal, 24)
             }.background(MailTheme.canvas)
             if let error = store.error {
                 Text(error).font(.callout).foregroundStyle(.orange).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 24).padding(.vertical, 10)
@@ -106,6 +105,6 @@ struct MailComposer: View {
         HStack {
             Text(title).foregroundStyle(.secondary).frame(width: 60, alignment: .leading)
             TextField("Email addresses, separated by commas", text: text).textFieldStyle(.plain).focused($focus, equals: key)
-        }.padding(.vertical, 15)
+        }.padding(.vertical, 15).disabled(!editable)
     }
 }

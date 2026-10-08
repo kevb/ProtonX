@@ -1,6 +1,6 @@
 # Native Mail composer and linked Gmail
 
-Review date: 2026-10-07. Manual account acceptance covers native Mail sign-in and
+Review date: 2026-10-08. Manual account acceptance covers native Mail sign-in and
 message reading. Live sending, restart/revocation recovery and linked-Gmail
 delivery remain acceptance gates.
 
@@ -49,8 +49,11 @@ verified in the received message during a linked-Gmail delivery acceptance test.
   it is shown as a text disclosure without loading remote resources. Entered text
   is escaped if the core uses HTML. Reopened drafts use a simplified text edit of
   the complete body; original rich formatting is not retained on save.
-- Existing core-managed reply attachments are retained. File upload/removal and
-  attachment viewing are not implemented. Scheduled drafts are refused.
+- Existing core-managed reply attachments are retained. Native file selection and
+  drag-and-drop add attachments through the SDK; listed attachments can be removed,
+  saved or previewed. Upload readiness gates Send and uncertain changes require
+  metadata reconciliation. See [attachment boundaries](MAIL_ATTACHMENTS.md).
+  Scheduled drafts are refused.
 - Save Draft and Save & Close explicitly apply the whole validated batch before
   asking the core to save. The opt-in native feature disables the SDK wrapper's
   immediate per-field auto-save; upstream defaults stay unchanged. A successful
@@ -87,7 +90,7 @@ Read/unread, Archive/Trash/Inbox and move undo are now implemented with syntheti
 coverage. The [conversation reader](MAIL_RENDERING.md) is implemented. Replies, draft opening
 and message actions target the expanded card, including a message outside the
 current folder when disclosed by the selected SDK conversation. Next functionality:
-attachment upload/viewing,
+inline/CID attachments and live attachment delivery acceptance,
 recipient completion, rich text and confirmed draft
 sync/auto-save recovery. Gmail read/unread/folder changes are not mirrored back
 to Gmail by Proton's connection; do not promise two-way state synchronization.

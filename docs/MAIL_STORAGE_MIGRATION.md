@@ -67,8 +67,9 @@ the synthetic fixture owner after assertions.
 The opt-in candidate now writes newly cached attachment/embedded-MIME payloads
 into atomic SQLCipher blob containers. The SDK cache hit/copy paths and calendar
 invite parser decrypt them in memory. Generic filenames replace original names
-on disk, with names retained in encrypted metadata. There is no native attachment
-export endpoint; SDK file paths in this candidate refer to ciphertext containers.
+on disk, with names retained in encrypted metadata. The native attachment export endpoint reads bounded bytes through the encrypted
+cache adapter. SDK file paths in this candidate still refer to ciphertext
+containers; explicit save/preview produces a user-authorized plaintext copy.
 
 Synthetic tests exercise the real SDK store/read/copy path and validate wrong keys,
 corruption, empty/bounded data, replacement, permissions, links and plaintext

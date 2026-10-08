@@ -12,3 +12,6 @@ cargo test --locked -p protonx-mail-storage -p protonx-mail-helper --features pr
 
 cargo build --locked -p protonx-mail-helper --features secure-storage --profile mail-macos-debug
 python3 "$PROTONX_ROOT/Tools/MailContractTests/storage_preflight.py" "$CARGO_TARGET_DIR/mail-macos-debug/protonx-mail"
+
+# Explicit native export reads encrypted cache bytes in memory; fixture files are synthetic.
+cargo test --locked -p mail-common --features protonx-native,protonx-encrypted --test protonx_attachment_export --profile mail-macos-debug

@@ -169,6 +169,22 @@ adapter needs a public, redistributable native SDK/CLI, encrypted streaming and
 conflict handling, and Finder/File Provider integration. A generic file browser
 with download links would not fulfill that product's job.
 
+## Native Mail attachments
+
+The helper exposes listed attachment metadata and one bounded, sequential file
+transfer at a time. Download requests belong to a disclosed message in the current
+folder/conversation; uploads and removals belong to the current editing draft.
+No file paths cross app IPC. The pinned SDK owns download/decryption, upload jobs,
+quota refusal and draft send readiness. A narrow native export reads cache bytes
+through the existing storage adapter, including the opt-in encrypted candidate.
+
+Native file selection and drops read regular files through no-follow descriptors.
+Reader Save writes a private, quarantined atomic export; Quick Look uses a private
+temporary copy removed on dismissal, selection change and lock. Local editor text
+survives attachment metadata refreshes. Unknown add/remove outcomes block another
+attachment mutation or send until metadata is reconciled, without automatic replay.
+See [attachment behavior and acceptance](MAIL_ATTACHMENTS.md).
+
 ## API stability
 
 The Pass helper interface is pinned, not a promise that Proton's internal API is

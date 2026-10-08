@@ -61,6 +61,8 @@ public struct NativeMailResult: Codable, Sendable {
     public var id: UInt64?
     public var body: String?
     public var sanitizedHTML: String?
+    public var attachmentList: [NativeMailAttachment]?
+    public var transfer: NativeMailTransfer?
     public var attachments: Int?
     public var draft: NativeMailDraft?
     public var token: UInt64?
@@ -76,14 +78,14 @@ public struct NativeMailResult: Codable, Sendable {
     public var conversationID: UInt64?
     public var notifications: [NativeMailNotification]?
     public var unreadCount: UInt64?
-    public init(phase: NativeMailPhase? = nil, folders: [NativeMailFolder]? = nil, folder: UInt64? = nil, messages: [NativeMailMessage]? = nil, loading: Bool? = nil, email: String? = nil, id: UInt64? = nil, body: String? = nil, sanitizedHTML: String? = nil, attachments: Int? = nil, draft: NativeMailDraft? = nil, token: UInt64? = nil, sendState: NativeMailSendState? = nil, closed: Bool? = nil, cacheFirst: Bool? = nil, fresh: Bool? = nil, refreshFailed: Bool? = nil, actions: [NativeMailAction]? = nil, queued: Bool? = nil, undoToken: UInt64? = nil, thread: NativeMailThread? = nil, conversationID: UInt64? = nil, notifications: [NativeMailNotification]? = nil, unreadCount: UInt64? = nil) {
+    public init(phase: NativeMailPhase? = nil, folders: [NativeMailFolder]? = nil, folder: UInt64? = nil, messages: [NativeMailMessage]? = nil, loading: Bool? = nil, email: String? = nil, id: UInt64? = nil, body: String? = nil, sanitizedHTML: String? = nil, attachments: Int? = nil, draft: NativeMailDraft? = nil, token: UInt64? = nil, sendState: NativeMailSendState? = nil, closed: Bool? = nil, cacheFirst: Bool? = nil, fresh: Bool? = nil, refreshFailed: Bool? = nil, actions: [NativeMailAction]? = nil, queued: Bool? = nil, undoToken: UInt64? = nil, thread: NativeMailThread? = nil, conversationID: UInt64? = nil, notifications: [NativeMailNotification]? = nil, unreadCount: UInt64? = nil, attachmentList: [NativeMailAttachment]? = nil, transfer: NativeMailTransfer? = nil) {
         self.phase = phase; self.folders = folders; self.folder = folder; self.messages = messages
         self.loading = loading; self.email = email; self.id = id; self.body = body; self.sanitizedHTML = sanitizedHTML; self.attachments = attachments
         self.draft = draft; self.token = token; self.sendState = sendState; self.closed = closed
         self.cacheFirst = cacheFirst; self.fresh = fresh; self.refreshFailed = refreshFailed
         self.actions = actions; self.queued = queued; self.undoToken = undoToken
         self.thread = thread; self.conversationID = conversationID
-        self.notifications = notifications; self.unreadCount = unreadCount
+        self.notifications = notifications; self.unreadCount = unreadCount; self.attachmentList = attachmentList; self.transfer = transfer
     }
 }
 public enum NativeMailFailure: String, Codable, Error, LocalizedError, Sendable {
@@ -96,12 +98,17 @@ public enum NativeMailFailure: String, Codable, Error, LocalizedError, Sendable 
     case invalidSelection = "invalid_selection", messageFailed = "message_failed", decryptionFailed = "decryption_failed"
     case messageTooLarge = "message_too_large", snapshotFailed = "snapshot_failed", pageLimit = "page_limit"
     case threadFailed = "thread_failed", threadTooLarge = "thread_too_large"
+    case attachmentFailed = "attachment_failed", attachmentTooLarge = "attachment_too_large", attachmentTransferInvalid = "attachment_transfer_invalid", attachmentPending = "attachment_pending"
     case draftFailed = "draft_failed", draftUnsupported = "draft_unsupported", senderUnavailable = "sender_unavailable"
     case sendUncertain = "send_uncertain", sendRejected = "send_rejected"
     case storageUnavailable = "storage_unavailable", storageKeyMissing = "storage_key_missing", storageUpgradeRequired = "storage_upgrade_required"
     case storageMigrationPending = "storage_migration_pending", storageVersionUnsupported = "storage_version_unsupported"
     public var errorDescription: String? {
         switch self {
+        case .attachmentFailed: "The attachment operation could not be confirmed. Check the attachment list before trying again; your message text is retained."
+        case .attachmentTooLarge: "ProtonX currently supports files up to 25 MB. Proton’s total-message and account limits also apply."
+        case .attachmentTransferInvalid: "The attachment transfer expired or changed. Select the file again to restart."
+        case .attachmentPending: "Wait for attachments to upload, or remove offline/failed attachments, before sending."
         case .threadFailed: "Could not load the conversation. You can still read this message or retry."
         case .threadTooLarge: "This conversation exceeds the current thread limit. Use Messages view to read individual messages."
         case .actionUnavailable: "That Mail action is no longer available. Refresh and try again."
@@ -150,11 +157,17 @@ public struct NativeMailCommand: Encodable, Sendable {
     public var token: UInt64?
     public var content: NativeMailComposeContent?
     public var action: NativeMailAction?
+    public var attachment: UInt64?
+    public var transfer: UInt64?
+    public var offset: Int?
+    public var data: String?
+    public var name: String?
+    public var size: Int?
     public var conversation: UInt64?
-    public init(_ method: String, username: String? = nil, password: String? = nil, code: String? = nil, folder: UInt64? = nil, item: UInt64? = nil, more: Bool? = nil, mode: String? = nil, token: UInt64? = nil, content: NativeMailComposeContent? = nil, action: NativeMailAction? = nil, conversation: UInt64? = nil) {
+    public init(_ method: String, username: String? = nil, password: String? = nil, code: String? = nil, folder: UInt64? = nil, item: UInt64? = nil, more: Bool? = nil, mode: String? = nil, token: UInt64? = nil, content: NativeMailComposeContent? = nil, action: NativeMailAction? = nil, conversation: UInt64? = nil, attachment: UInt64? = nil, transfer: UInt64? = nil, offset: Int? = nil, data: String? = nil, name: String? = nil, size: Int? = nil) {
         self.method = method; self.username = username; self.password = password; self.code = code
         self.folder = folder; self.item = item; self.more = more
-        self.mode = mode; self.token = token; self.content = content; self.action = action; self.conversation = conversation
+        self.mode = mode; self.token = token; self.content = content; self.action = action; self.conversation = conversation; self.attachment = attachment; self.transfer = transfer; self.offset = offset; self.data = data; self.name = name; self.size = size
     }
 }
 public protocol NativeMailRunning: Sendable {
@@ -280,7 +293,10 @@ public final class NativeMailProcess: NativeMailRunning, @unchecked Sendable {
         if let conversation = result.conversationID {
             guard conversation > 0, result.id != nil, result.queued == true else { throw ProtonXError.invalidResponse }
         }
+        if let attachments = result.attachmentList { try MailAttachmentPolicy.validateList(attachments) }
+        if let transfer = result.transfer { try transfer.validate() }
         if let draft = result.draft {
+            if let attachments = draft.attachmentList { try MailAttachmentPolicy.validateList(attachments) }
             guard draft.token > 0, draft.senders.count <= 256, Set(draft.senders).count == draft.senders.count,
                   draft.senders.contains(draft.sender), draft.quote.utf8.count <= 2 * 1024 * 1024,
                   draft.attachments >= 0 else { throw ProtonXError.invalidResponse }

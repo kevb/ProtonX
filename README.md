@@ -13,7 +13,7 @@ interface or contribute. Signed, notarized binary releases are not yet available
 | Product | Available | Current limitations |
 | --- | --- | --- |
 | Pass | Account sign-in and local unlock; vault and Trash browsing; search and sorting; password copy/reveal; TOTP copy/setup/edit; login and note editing with multiple websites and custom fields; revision conflict protection; Trash/restore; encrypted saved-first loading and read-only offline browsing for eligible personal paid accounts | No native browser autofill, passkey operations, attachment handling, sharing UI or account switching. Other item types are readable but have no native editor. Managed accounts stay online-only. |
-| Mail | Native username/password, TOTP and second-password sign-in; independent Keychain-backed session; folders and paged inbox; SDK conversation grouping with expandable message cards; formatted HTML reading on light paper; per-message image loading; read/unread, Archive/Trash/Inbox and move undo; compose, reply and reply-all; sending identity selection and draft saving | Live send/reply delivery and account recovery are acceptance gates. No human verification/FIDO-only login, file upload/viewing, rich-text editing or push UI. Search covers loaded subjects and senders, capped at 1,000 messages. |
+| Mail | Native username/password, TOTP and second-password sign-in; independent Keychain-backed session; folders and paged inbox; SDK conversation grouping with expandable message cards; formatted HTML reading on light paper; per-message image loading; read/unread, Archive/Trash/Inbox and move undo; compose, reply and reply-all; sending identity selection, draft saving, attachment save/preview/upload/removal and native notification settings | Live send/reply/attachment delivery and account recovery are acceptance gates. No human verification/FIDO-only login, rich-text editing or inline/CID images. Search covers loaded subjects and senders, capped at 1,000 messages. |
 | Drive | Planned | No Drive client implemented. |
 
 Pass and Mail share one native workspace with Home and a product rail, while keeping their
@@ -133,6 +133,11 @@ appearances. Remote images start blocked; **Load images** enables them for the
 selected message only. Message scripts remain disabled, links require an external
 open confirmation, and plain text is always available. See
 [reader boundaries](docs/MAIL_RENDERING.md).
+
+Native Mail attachments can be saved, previewed with Quick Look (PDF/images/text),
+and added or removed in the composer with file selection or drag-and-drop. The
+current native per-file limit is 25 MB; Proton's message/account limits apply.
+See [attachment handling and acceptance limits](docs/MAIL_ATTACHMENTS.md).
 
 Native Mail alerts are opt-in under **Settings → Notifications**. Enable macOS
 permission, choose sound, an unread Dock badge and private or sender/subject

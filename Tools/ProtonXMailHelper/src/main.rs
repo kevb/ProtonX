@@ -66,6 +66,7 @@ macro_rules! sdk_void {
     }};
 }
 
+mod attachments;
 mod inbox_actions;
 mod threads;
 
@@ -137,6 +138,15 @@ enum Command {
     MessageAction { folder: u64, item: u64, action: inbox_actions::Action },
     ConversationAction { folder: u64, item: u64, conversation: u64, action: inbox_actions::Action },
     UndoAction { token: u64 },
+    AttachmentList { folder: u64, item: u64 },
+    AttachmentDownload { folder: u64, item: u64, attachment: u64 },
+    AttachmentChunk { token: u64, folder: u64, item: u64, attachment: u64, offset: usize },
+    UploadStart { token: u64, name: String, size: usize },
+    UploadChunk { token: u64, transfer: u64, offset: usize, data: String },
+    UploadFinish { token: u64, transfer: u64 },
+    RemoveAttachment { token: u64, attachment: u64 },
+    DraftAttachments { token: u64 },
+    TransferCancel { token: u64 },
     SignOut,
 }
 #[derive(Clone, Copy, Default, Deserialize, PartialEq, Eq)]
@@ -457,6 +467,7 @@ struct Backend {
     folder: Option<u64>,
     composer: Option<Composer>,
     next_composer: u64,
+    transfers: attachments::Transfers,
     action_state: inbox_actions::State,
     thread: Option<threads::SelectedThread>,
 }
@@ -510,6 +521,7 @@ impl Backend {
             folder: None,
             composer: None,
             next_composer: 0,
+            transfers: attachments::Transfers::default(),
             action_state: inbox_actions::State::default(),
             thread: None,
         })
@@ -661,6 +673,18 @@ impl Backend {
                 .map_err(|e| self.login_failure(e))?;
                 self.finish_login()
             }
+            Command::AttachmentList { folder,item } => self.attachment_metadata(folder,item),
+            Command::AttachmentDownload { folder,item,attachment } => self.attachment_download(folder,item,attachment),
+            Command::AttachmentChunk { token,folder,item,attachment,offset } => self.attachment_chunk(token,folder,item,attachment,offset),
+            Command::UploadStart { token,name,size } => self.upload_start(token,name,size),
+            Command::UploadChunk { token,transfer,offset,data } => self.upload_chunk(token,transfer,offset,data),
+            Command::UploadFinish { token,transfer } => self.upload_finish(token,transfer),
+            Command::RemoveAttachment { token,attachment } => self.remove_attachment(token,attachment),
+            Command::DraftAttachments { token } => {
+                let c = self.composer.as_ref().ok_or("invalid_state")?;
+                if c.token != token { return Err("invalid_state"); } self.composer_value()
+            },
+            Command::TransferCancel { token } => { self.transfers.cancel(token); Ok(json!({"closed":true})) },
             Command::Snapshot { folder, more, mode } => self.snapshot(folder, more, mode),
             Command::Thread { folder, item } => self.load_thread(folder, item),
             Command::Message { folder, item } => {
@@ -681,7 +705,7 @@ impl Backend {
                 let (body, sanitized_html) = reader::prepare(&raw, message.mime_type())?;
                 let actions = inbox_actions::available(mailbox.clone(), Id::from(item))?.names();
                 Ok(
-                    json!({"id":item,"body":body,"sanitizedHTML":sanitized_html,"attachments":message.attachments().len(),"actions":actions}),
+                    json!({"id":item,"body":body,"sanitizedHTML":sanitized_html,"attachments":message.attachments().len(),"attachmentList":attachments::message_list(&message.attachments())?,"actions":actions}),
                 )
             }
             Command::MessageAction { folder, item, action } => self.message_action(folder, item, action),
@@ -699,6 +723,7 @@ impl Backend {
                 self.composer_value()
             }
             Command::SendDraft { token, content } => {
+                if self.draft_attachments()?.iter().any(|a| a["state"].as_str() != Some("uploaded")) { return Err("attachment_pending"); }
                 self.update_draft(token, content, true)?;
                 let composer = self.composer.as_mut().ok_or("invalid_state")?;
                 // Commit the no-retry guard before crossing the SDK queue boundary.
@@ -737,7 +762,7 @@ impl Backend {
                 if composer.token != token {
                     return Err("invalid_state");
                 }
-                self.composer = None;
+                self.transfers.clear(); self.composer = None;
                 Ok(json!({"closed":true}))
             }
             Command::DiscardDraft { token } => {
@@ -750,7 +775,7 @@ impl Backend {
                     block_on(composer.draft.clone().discard())
                 )
                 .map_err(|_| "draft_failed")?;
-                self.composer = None;
+                self.transfers.clear(); self.composer = None;
                 Ok(json!({"closed":true}))
             }
             Command::SignOut => {
@@ -770,7 +795,7 @@ impl Backend {
                 self.mailbox = None;
                 self.scroller = None;
                 self.flow = None;
-                self.composer = None;
+                self.transfers.clear(); self.composer = None;
                 self.listing.0.lock().unwrap().items.clear();
                 Ok(json!({"phase":"welcome"}))
             }
@@ -842,6 +867,7 @@ impl Backend {
         } else {
             (String::new(), raw)
         };
+        self.transfers.clear();
         self.next_composer += 1;
         self.composer = Some(Composer {
             token: self.next_composer,
@@ -854,7 +880,7 @@ impl Backend {
         });
         let result = self.composer_value();
         if result.is_err() {
-            self.composer = None;
+            self.transfers.clear(); self.composer = None;
         }
         result
     }
@@ -874,7 +900,7 @@ impl Backend {
             html2text::from_read(c.suffix.as_bytes(), 100).map_err(|_| "draft_failed")?
         };
         Ok(
-            json!({"draft":{"token":c.token,"sender":senders.active,"senders":senders.available,"to":recipient_addresses(&c.draft.to_recipients())?,"cc":recipient_addresses(&c.draft.cc_recipients())?,"bcc":recipient_addresses(&c.draft.bcc_recipients())?,"subject":c.draft.subject(),"text":c.text,"quote":quote,"state":c.state,"warning":c.warning,"attachments":sdk_result!(draft::attachments::AttachmentListAttachmentsResult, block_on(c.draft.attachment_list().attachments())).map_err(|_| "draft_failed")?.len()}}),
+            json!({"draft":{"token":c.token,"sender":senders.active,"senders":senders.available,"to":recipient_addresses(&c.draft.to_recipients())?,"cc":recipient_addresses(&c.draft.cc_recipients())?,"bcc":recipient_addresses(&c.draft.bcc_recipients())?,"subject":c.draft.subject(),"text":c.text,"quote":quote,"state":c.state,"warning":c.warning,"attachments":sdk_result!(draft::attachments::AttachmentListAttachmentsResult, block_on(c.draft.attachment_list().attachments())).map_err(|_| "draft_failed")?.len(),"attachmentList":self.draft_attachments()?}}),
         )
     }
     fn update_draft(

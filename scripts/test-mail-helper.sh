@@ -32,3 +32,6 @@ cargo test --locked -p mail-common --test mailbox_conversation --test conversati
 # Native alerts are driven by committed CREATE events, not list refreshes.
 cargo test --locked -p mail-common --features protonx-native --lib native_notifications --profile mail-macos-debug
 cargo test --locked -p mail-common --features protonx-native --test protonx_notifications --profile mail-macos-debug
+
+# Native attachment bytes and genuine SDK upload/remove/quota jobs use synthetic files.
+cargo test --locked -p mail-common --features protonx-native --test protonx_attachment_export --test draft_attachments --profile mail-macos-debug

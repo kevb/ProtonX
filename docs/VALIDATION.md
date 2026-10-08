@@ -1,6 +1,6 @@
 # Validation record
 
-Last updated: 2026-10-07. Local validation environment: Apple Silicon Mac,
+Last updated: 2026-10-08. Local validation environment: Apple Silicon Mac,
 macOS 26.6.2, Xcode 27 / Swift 6.4 and Rust 1.99.0. Automated test content is
 synthetic and uses isolated storage. Private account contents and credentials
 are excluded from public artifacts.
@@ -11,14 +11,36 @@ are excluded from public artifacts.
 | --- | --- | --- |
 | Pass account workflow | Manual fictional-login creation, bidirectional edit/sync with the official desktop app, conflict refusal, Trash/restore and online quit/restart | Broader item/account types, real server expiry/revocation and upgrade/Keychain continuity |
 | Pass saved/offline browsing | Synthetic encrypted-storage, policy, saved-first/reconnect and lock-race tests | Disconnected account restart and larger-vault measurements |
-| Native Mail | Manual sign-in and message reading; synthetic/public tests for reading, composer, sender selection, message actions and conversations | Conversation interoperability, live send/reply delivery, linked-Gmail delivery and account recovery |
+| Native Mail | Manual sign-in and message reading; synthetic/public tests for reading, composer, sender selection, message actions, conversations and native attachments | Conversation interoperability, live send/reply/attachment delivery, linked-Gmail delivery and account recovery |
 | Mail secure storage | Opt-in database/file encryption and resumable database/attachment staging contracts | Cache path rebasing/activation, whole-profile cutover and pending-send/draft recovery before enabling ordinary builds |
 | Product launchers | Synthetic native UI checks for cold/warm requests, minimized/closed windows and reverse product selection; signed installer checks | Minimum-OS runtime and update/Keychain continuity |
 
-The latest local Swift run passed 156 tests; five synthetic atomic-install tests
+The latest local Swift run passed 173 tests; five synthetic atomic-install tests
 passed at the prior installer milestone. These are local results, not a statement about the
 latest GitHub run. Dated entries below record milestone-specific test scope and
 historical limitations. The README and roadmap describe the current feature set.
+
+## Native Mail attachments, 2026-10-08
+
+- Listed received attachments have native Save and PDF/raster/text Quick Look
+  preview; the composer supports file selection, file drops, removal and SDK
+  upload states. Existing draft/reply attachment handling remains SDK-managed.
+- All 173 Swift tests passed in the final full run. Attachment fixtures cover
+  exact binary and multi-chunk transfer, malformed offsets, private quarantined
+  exports, symlink refusal, late replies after lock/composer transition, Send
+  refusal during uploads, metadata refresh/removal with unsaved edits intact and
+  no automatic replay after an ambiguous upload.
+- All 28 helper tests and 190 selected SDK/contract tests passed, plus eight
+  synthetic storage-preflight refusals. The added export fixture also passed in
+  encrypted-cache mode; the secure-storage helper passed compile checks with the new adapter.
+  One upstream attachment-concurrency test remains ignored.
+- Synthetic native UI checks verified received-file preview, the native attachment
+  picker and composer addition/removal. The optimized helper and signed release
+  app built successfully. These checks did not send messages or access account
+  contents. Real send/receive and interrupted-upload acceptance remain open.
+- An earlier full Swift run hit existing recovery/scroll timing deadlines during
+  concurrent compilation. Targeted checks and the final full run passed. The
+  exploratory serial process-test run stalled and was terminated.
 
 ## Mail folder-aware context actions, 2026-10-07
 

@@ -52,6 +52,9 @@ struct MailWindow: View {
                 }.padding(12).background(MailTheme.accent.opacity(0.12))
             }
         }
+        .sheet(item: $store.attachmentPreview, onDismiss: { store.clearAttachmentPreview() }) { preview in
+            MailAttachmentPreviewSheet(preview: preview) { store.clearAttachmentPreview() }
+        }
         .sheet(isPresented: $bridge) { BridgeMailWindow().frame(width: 1050, height: 740) }
         .alert(pendingTrash?.title ?? "Move to Trash?", isPresented: Binding(get: { pendingTrash != nil }, set: { if !$0 { pendingTrash = nil } }), presenting: pendingTrash) { intent in
             Button("Cancel", role: .cancel) { pendingTrash = nil }
@@ -395,8 +398,8 @@ struct MailWindow: View {
             else { ProgressView("Decrypting message…").padding(28).frame(maxWidth: .infinity) }
             if message.attachments > 0 {
                 Divider()
-                Label("\(message.attachments) attachment(s) · open with the official client for now", systemImage: "paperclip")
-                    .font(.caption).foregroundStyle(.secondary).padding(18)
+                MailAttachmentsView(store: store)
+
             }
         }.background(MailTheme.canvas).clipShape(RoundedRectangle(cornerRadius: 14))
             .overlay { RoundedRectangle(cornerRadius: 14).strokeBorder(MailTheme.border, lineWidth: 1).allowsHitTesting(false) }

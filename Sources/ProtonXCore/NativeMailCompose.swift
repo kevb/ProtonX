@@ -37,10 +37,11 @@ public struct NativeMailDraft: Codable, Identifiable, Equatable, Sendable {
     public let quote: String
     public var state: NativeMailSendState
     public let warning: String?
+    public var attachmentList: [NativeMailAttachment]?
     public let attachments: Int
-    public init(token: UInt64, sender: String, senders: [String], to: [String] = [], cc: [String] = [], bcc: [String] = [], subject: String = "", text: String = "", quote: String = "", state: NativeMailSendState = .editing, warning: String? = nil, attachments: Int = 0) {
+    public init(token: UInt64, sender: String, senders: [String], to: [String] = [], cc: [String] = [], bcc: [String] = [], subject: String = "", text: String = "", quote: String = "", state: NativeMailSendState = .editing, warning: String? = nil, attachments: Int = 0, attachmentList: [NativeMailAttachment]? = nil) {
         self.token = token; self.sender = sender; self.senders = senders; self.to = to; self.cc = cc; self.bcc = bcc
-        self.subject = subject; self.text = text; self.quote = quote; self.state = state; self.warning = warning; self.attachments = attachments
+        self.subject = subject; self.text = text; self.quote = quote; self.state = state; self.warning = warning; self.attachments = attachments; self.attachmentList = attachmentList
     }
     public var content: NativeMailComposeContent { .init(sender: sender, to: to, cc: cc, bcc: bcc, subject: subject, text: text) }
 }
