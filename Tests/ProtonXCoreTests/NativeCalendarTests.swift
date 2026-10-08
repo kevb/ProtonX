@@ -6,7 +6,7 @@ import Testing
 @Suite struct NativeCalendarTests {
     let range = CalendarQueryRange(start: Date(timeIntervalSince1970: 1791417600), end: Date(timeIntervalSince1970: 1792022400), timeZoneID: "UTC")
     @Test func closedCommandsAndRangeBounds() throws {
-        for method in ["create","update","delete","export","host_override"] {
+        for method in ["create","update","delete","export","host_override","save_event"] {
             #expect(throws: Error.self) { try NativeCalendarCommand(method) }
         }
         #expect(throws: Error.self) { try NativeCalendarCommand("restore", password: "synthetic") }
@@ -39,7 +39,7 @@ import Testing
         #expect(throws: Error.self) { try NativeCalendarProcess.decode(reply(event: event.replacingOccurrences(of: #""calendarID":"cal""#, with: #""calendarID":"other""#)), expectedID: 1).snapshot(for: range) }
         #expect(throws: Error.self) { try NativeCalendarProcess.decode(reply(event: event.replacingOccurrences(of: "1791453600", with: "1792453600").replacingOccurrences(of: "1791457200", with: "1792457200")), expectedID: 1).snapshot(for: range) }
     }
-    @Test func liveSourceHasNoWritePath() async throws {
+    @Test func writesRequireFreshWritableSnapshotAndDeletionStaysClosed() async throws {
         let runner = CalendarRejectingRunner()
         let source = NativeCalendarDataSource(runner: runner)
         let r = CalendarEventRecord(id: "synthetic", calendarID: "cal", title: "Synthetic", time: .timed(start: .now, end: .now.addingTimeInterval(60), timeZoneID: "UTC"))

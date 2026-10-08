@@ -38,7 +38,7 @@ struct CalendarWindow: View {
                     }.frame(maxWidth: .infinity, maxHeight: .infinity)
                     if let editor = store.editor {
                         Divider()
-                        CalendarEditorView(store: store, editor: editor).frame(width: 300)
+                        CalendarEditorView(store: store, editor: editor).frame(width: 340)
                     } else if let event = store.selectedEvent {
                         Divider()
                         inspector(event).frame(width: 280)
@@ -75,7 +75,7 @@ struct CalendarWindow: View {
                 Button("Cancel") { store.lock() }
             } else {
                 Text("Your Calendar, at home on Mac").font(.largeTitle.weight(.semibold))
-                Text(store.previewOnly ? "Explore a native Calendar with sample events." : "Read your calendars using your Proton account.")
+                Text(store.previewOnly ? "Explore a native Calendar with sample events." : "Your calendars, with native event creation and editing.")
                     .multilineTextAlignment(.center).foregroundStyle(.secondary)
                 if !store.previewOnly && !accounts.isEmpty && !separateAccount {
                     VStack(spacing:12) {
@@ -103,7 +103,7 @@ struct CalendarWindow: View {
                         .disabled(store.busy || username.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty || password.isEmpty).accessibilityIdentifier("calendarSignIn")
                 }.frame(width:340)
                 if !accounts.isEmpty { Button("Use an account in ProtonX") { separateAccount = false }.buttonStyle(.plain) }
-                Text("Experimental connection · read-only").font(.caption).foregroundStyle(.secondary) }
+                Text("Experimental Proton connection").font(.caption).foregroundStyle(.secondary) }
             }
             if !store.busy && store.phase != .totp && store.phase != .mailboxPassword {
                 Button("Explore Calendar preview") { store.enterPreview() }.buttonStyle(.plain).foregroundStyle(PassTheme.accent).accessibilityIdentifier("calendarExplore")
@@ -117,7 +117,7 @@ struct CalendarWindow: View {
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 18) {
             Button { store.beginEvent() } label: { Label("New event", systemImage: "plus").frame(maxWidth: .infinity).padding(.vertical, 8) }
-                .buttonStyle(.borderedProminent).disabled(!store.canEdit || store.busy || store.editor != nil).accessibilityIdentifier("calendarNewEvent").help(store.canEdit ? "Create a sample event" : "Event creation will be available after sync validation")
+                .buttonStyle(.borderedProminent).disabled(!store.canEdit || store.busy || store.editor != nil).accessibilityIdentifier("calendarNewEvent").help(store.phase == .preview ? "Create a sample event" : "Create an event in an owned calendar")
             miniMonth
             Divider()
             Text("My calendars").font(.headline)
@@ -128,7 +128,7 @@ struct CalendarWindow: View {
             }
             Spacer()
             Text(store.phase == .connected ? "Proton Calendar" : "Calendar preview").font(.callout.weight(.medium))
-            Text(store.phase == .connected ? "Connected · read-only\nEvents stay in memory until lock." : "Sample events only. Proton Calendar is not connected.").font(.caption).foregroundStyle(.secondary)
+            Text(store.phase == .connected ? "Connected to Proton\nEvents stay in memory until lock." : "Sample events only. Proton Calendar is not connected.").font(.caption).foregroundStyle(.secondary)
             if store.phase == .connected {
                 HStack { Button("Lock") { store.lock() }; Spacer(); Button("Sign out") { store.signOut() }.disabled(store.busy) }
             }
@@ -168,7 +168,7 @@ struct CalendarWindow: View {
             }.padding(8).background(PassTheme.sidebar, in: RoundedRectangle(cornerRadius: 9))
             HStack(spacing:8) {
                 if store.busy { ProgressView().controlSize(.small) }
-                Text(store.busy ? "Loading calendars and events…" : store.notice ?? (store.phase == .connected ? "Connected to Proton · read-only" : "Preview · edits stay in memory"))
+                Text(store.busy ? "Loading calendars and events…" : store.notice ?? (store.phase == .connected ? "Connected to Proton" : "Preview · edits stay in memory"))
                     .font(.caption).foregroundStyle(.secondary)
             }
         }.padding(16)
@@ -184,11 +184,11 @@ struct CalendarWindow: View {
                 if !event.location.isEmpty { Label(event.location, systemImage: "mappin.and.ellipse").textSelection(.enabled) }
                 if !event.notes.isEmpty { Text(event.notes).textSelection(.enabled) }
                 if event.recurring { Label("Repeating event",systemImage:"repeat").font(.caption).foregroundStyle(.secondary) }
-                if store.canEdit { Button("Edit event") { store.beginEvent(event) }.buttonStyle(.borderedProminent).disabled(store.busy).accessibilityIdentifier("calendarEditEvent")
-                Button("Delete event", role: .destructive) { deletion = store.deleteIntent() }.disabled(store.busy).accessibilityIdentifier("calendarDeleteEvent") }
-                else { Text("Event editing and invitations are coming next.").font(.caption).foregroundStyle(.secondary) }
+                if store.canEditEvent(event) { Button("Edit event") { store.beginEvent(event) }.buttonStyle(.borderedProminent).disabled(store.busy).accessibilityIdentifier("calendarEditEvent")
+                if store.phase == .preview { Button("Delete event", role: .destructive) { deletion = store.deleteIntent() }.disabled(store.busy).accessibilityIdentifier("calendarDeleteEvent") } }
+                else { Text("Recurring events, invitations and shared calendars remain read-only.").font(.caption).foregroundStyle(.secondary) }
                 Divider()
-                Text("Preview · no event is sent to Proton.").font(.caption).foregroundStyle(.secondary)
+                Text(store.phase == .preview ? "Preview · no event is sent to Proton." : "Events sync securely with Proton Calendar.").font(.caption).foregroundStyle(.secondary)
             }.padding(18).frame(maxWidth: .infinity, alignment: .leading)
         }.background(PassTheme.sidebar)
     }
@@ -343,15 +343,16 @@ private struct CalendarAgendaView: View {
 private struct CalendarEditorView: View {
     @ObservedObject var store: CalendarStore
     @ObservedObject var editor: CalendarEditor
-    private var range: ClosedRange<Date> { Date(timeIntervalSince1970: -2208988800)...Date(timeIntervalSince1970: 7258031999) }
+    @FocusState private var titleFocused: Bool
+    private var range: ClosedRange<Date> { Date(timeIntervalSince1970: store.phase == .preview ? -2208988800 : 0)...Date(timeIntervalSince1970: store.phase == .preview ? 7258031999 : 2145916799) }
     var body: some View {
         VStack(spacing: 0) {
             HStack { Text(editor.expectedRevision == nil ? "New event" : "Edit event").font(.headline); Spacer(); Button { store.cancelEditor() } label: { Image(systemName: "xmark") }.buttonStyle(.plain).accessibilityLabel("Cancel event") }.padding(16)
             Divider()
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
-                    TextField("Event title", text: $editor.title).font(.title2).textFieldStyle(.plain).accessibilityIdentifier("calendarEventTitle")
-                    Picker("Calendar", selection: $editor.calendarID) { ForEach(store.calendars) { Text($0.name).tag($0.id) } }
+                    TextField("Event title", text: $editor.title).font(.title2).textFieldStyle(.plain).focused($titleFocused).accessibilityIdentifier("calendarEventTitle")
+                    Picker("Calendar", selection: $editor.calendarID) { ForEach(store.editableCalendars) { Text($0.name).tag($0.id) } }.disabled(store.phase == .connected && editor.expectedRevision != nil)
                     Toggle("All day", isOn: Binding(get: { editor.allDay }, set: { editor.changeAllDay($0) })).accessibilityIdentifier("calendarAllDay")
                     DatePicker("Starts", selection: $editor.start, in: range, displayedComponents: editor.allDay ? [.date] : [.date,.hourAndMinute]).accessibilityIdentifier("calendarEventStart")
                     DatePicker("Ends", selection: $editor.end, in: range, displayedComponents: editor.allDay ? [.date] : [.date,.hourAndMinute]).accessibilityIdentifier("calendarEventEnd")
@@ -360,11 +361,11 @@ private struct CalendarEditorView: View {
                     TextField("Location", text: $editor.location).textFieldStyle(.roundedBorder).accessibilityIdentifier("calendarEventLocation")
                     Text("Notes").font(.callout).foregroundStyle(.secondary)
                     TextEditor(text: $editor.notes).frame(minHeight: 140).padding(5).background(PassTheme.canvas, in: RoundedRectangle(cornerRadius: 8)).accessibilityIdentifier("calendarEventNotes")
-                    Text("Preview · edits stay in memory. No invitations or reminders are sent.").font(.caption).foregroundStyle(.secondary)
+                    Text(store.phase == .preview ? "Preview · edits stay in memory. No invitations or reminders are sent." : "Saved securely to Proton. Existing reminders are preserved; new events use calendar defaults.").font(.caption).foregroundStyle(.secondary)
                 }.padding(16)
             }.environment(\.timeZone, TimeZone(identifier: editor.timeZoneID) ?? .gmt)
             Divider()
-            HStack { Button("Cancel") { store.cancelEditor() }; Spacer(); Button("Save event") { store.saveEditor() }.buttonStyle(.borderedProminent).accessibilityIdentifier("calendarSaveEvent") }.padding(16)
-        }.disabled(store.busy).background(PassTheme.sidebar)
+            HStack { Button("Cancel") { store.cancelEditor() }; Spacer(); Button("Save event") { store.saveEditor() }.disabled(!store.canEdit || editor.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty).buttonStyle(.borderedProminent).keyboardShortcut("s", modifiers:.command).accessibilityIdentifier("calendarSaveEvent") }.padding(16)
+        }.disabled(store.busy).background(PassTheme.sidebar).defaultFocus($titleFocused, true).task { await Task.yield(); titleFocused = true }
     }
 }

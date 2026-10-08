@@ -13,7 +13,8 @@ public enum CalendarEventTime: Equatable, Sendable {
 public struct CalendarCollection: Codable, Identifiable, Equatable, Sendable {
     public let id: String, name: String
     public let color: Int
-    public init(id: String, name: String, color: Int) { self.id = id; self.name = name; self.color = color }
+    public var writable: Bool? = nil
+    public init(id: String, name: String, color: Int, writable: Bool? = nil) { self.id = id; self.name = name; self.color = color; self.writable = writable }
 }
 public struct CalendarEventRecord: Identifiable, Equatable, Sendable {
     public let id: String
@@ -21,6 +22,7 @@ public struct CalendarEventRecord: Identifiable, Equatable, Sendable {
     public var time: CalendarEventTime
     public var revision: Int
     public var recurring: Bool = false
+    public var writeToken: String? = nil
     public init(id: String, calendarID: String, title: String, location: String = "", notes: String = "", time: CalendarEventTime, revision: Int = 0) {
         self.id = id; self.calendarID = calendarID; self.title = title; self.location = location; self.notes = notes; self.time = time; self.revision = revision
     }

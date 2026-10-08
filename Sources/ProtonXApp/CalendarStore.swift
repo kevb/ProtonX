@@ -5,6 +5,7 @@ import ProtonXCore
 
 @MainActor final class CalendarEditor: ObservableObject {
     let id: String, expectedRevision: Int?
+    let writeToken: String?
     @Published var title = ""
     @Published var calendarID: String
     @Published var location = ""
@@ -14,6 +15,7 @@ import ProtonXCore
     @Published var allDay = false
     @Published var timeZoneID: String
     init(event: CalendarEventRecord?, calendarID: String, date: Date, timeZoneID: String) {
+        writeToken = event?.writeToken
         id = event?.id ?? UUID().uuidString; expectedRevision = event?.revision
         self.calendarID = event?.calendarID ?? calendarID; self.timeZoneID = timeZoneID
         start = date; end = date.addingTimeInterval(3600)
@@ -31,7 +33,8 @@ import ProtonXCore
         let time: CalendarEventTime = allDay
             ? .allDay(start:math.day(start),endExclusive:math.day(math.addingDays(1,to:end)))
             : .timed(start:start,end:end,timeZoneID:timeZoneID)
-        return .init(id:id,calendarID:calendarID,title:title.trimmingCharacters(in:.whitespacesAndNewlines),location:location,notes:notes,time:time,revision:expectedRevision ?? 0)
+        var result = CalendarEventRecord(id:id,calendarID:calendarID,title:title.trimmingCharacters(in:.whitespacesAndNewlines),location:location,notes:notes,time:time,revision:expectedRevision ?? 0)
+        result.writeToken = writeToken; return result
     }
     func changeAllDay(_ value: Bool) {
         let math = CalendarDateMath(timeZoneID:timeZoneID)
@@ -61,6 +64,7 @@ import ProtonXCore
     @Published var selectedEventID: String?
     @Published private(set) var editor: CalendarEditor?
     @Published private(set) var busy = false
+    @Published private(set) var writeBlocked = false
     @Published var error: String?
     @Published private(set) var notice: String?
     private var source: (any CalendarDataSource)?
@@ -117,8 +121,8 @@ import ProtonXCore
             return { [self] in
                 if phase == .connected && requestedRange != requestRange { needsRangeReload = true; return }
                 let previousIDs = Set(calendars.map(\.id))
-                calendars = snapshot.calendars; events = snapshot.events; loadedRange = requestedRange
-                if phase == .connected { notice = snapshot.omitted > 0 ? "\(snapshot.omitted) event occurrences could not be decrypted or displayed. The visible range may be incomplete." : "Connected to Proton · read-only" }
+                calendars = snapshot.calendars; events = snapshot.events; writeBlocked = false; loadedRange = requestedRange
+                if phase == .connected { notice = snapshot.omitted > 0 ? "\(snapshot.omitted) event occurrences could not be decrypted or displayed. The visible range may be incomplete." : "Connected to Proton" }
                 if initial { visibleCalendarIDs = Set(calendars.map(\.id)) }
                 else { visibleCalendarIDs.formIntersection(Set(calendars.map(\.id))); visibleCalendarIDs.formUnion(Set(calendars.map(\.id)).subtracting(previousIDs)) }
                 if !events.contains(where: { $0.id == selectedEventID }) { selectedEventID = nil }
@@ -127,24 +131,24 @@ import ProtonXCore
     }
     func select(_ event: CalendarEventRecord) { guard editor == nil, events.contains(event) else { return }; selectedEventID = event.id; error = nil }
     func beginEvent(_ event: CalendarEventRecord? = nil, on day: Date? = nil) {
-        guard phase == .preview, !busy, editor == nil, let first = calendars.first else { return }
-        if let event { guard events.contains(event) else { return } }
+        guard canEdit, !busy, editor == nil, let first = editableCalendars.first else { return }
+        if let event { guard events.contains(event), canEditEvent(event) else { return } }
         let day = day ?? date
         let start = math.calendar.date(bySettingHour:10,minute:0,second:0,of:day)!
         editor = CalendarEditor(event:event,calendarID:first.id,date:start,timeZoneID:timeZoneID); error = nil
     }
     func cancelEditor() { guard !busy else { return }; editor = nil; error = nil }
     func saveEditor() {
-        guard phase == .preview, !busy, let editor, let source else { return }
+        guard canEdit, !busy, let editor, let source else { return }
         let record = editor.record()
         do { try record.validate(in:calendars) } catch { self.error = error.localizedDescription; return }
         perform { [self] in
             let saved = try await source.save(record,expectedRevision:editor.expectedRevision)
             try saved.validate(in:calendars)
             return { [self] in
-                events.removeAll { $0.id == saved.id }; events.append(saved); self.editor = nil
+                events.removeAll { $0.id == saved.id || $0.id == editor.id }; events.append(saved); self.editor = nil
                 selectedEventID = saved.id; visibleCalendarIDs.insert(saved.calendarID); date = math.bounds(saved)!.0
-                notice = "Event saved in preview"
+                notice = phase == .preview ? "Event saved in preview" : "Event saved to Proton"
             }
         }
     }
@@ -169,6 +173,7 @@ import ProtonXCore
                 guard let self, !Task.isCancelled, self.epoch.accepts(ticket), (self.phase == .preview || self.phase == .connected || self.phase == .signingIn || self.phase == .locked || self.phase == .totp || self.phase == .mailboxPassword) else { return }; apply()
             } catch {
                 guard let self, !Task.isCancelled, self.epoch.accepts(ticket) else { return }
+                if error as? NativeCalendarFailure == .writeUncertain { self.writeBlocked = true }
                 if let failure = error as? NativeCalendarFailure, failure == .sessionExpired {
                     self.lock(); self.hasSession = false; self.defaults.set(false, forKey: "nativeCalendarConnected"); self.phase = .welcome
                 } else if self.phase == .signingIn || self.phase == .totp || self.phase == .mailboxPassword { self.runner.cancelAll(); self.phase = self.hasSession ? .locked : .welcome }
@@ -184,10 +189,12 @@ import ProtonXCore
         epoch.invalidate(); operation?.cancel(); operation = nil; source = nil; debounce?.cancel(); debounce = nil
         runner.cancelAll(); localAuthentication.cancel(); loadedRange = nil; needsRangeReload = false
         editor = nil; selectedEventID = nil; events = []; calendars = []; visibleCalendarIDs = []
-        query = ""; error = nil; notice = nil; busy = false; phase = hasSession ? .locked : .welcome
+        writeBlocked = false; query = ""; error = nil; notice = nil; busy = false; phase = hasSession ? .locked : .welcome
     }
     var isWorkspaceOpen: Bool { phase == .preview || phase == .connected }
-    var canEdit: Bool { phase == .preview }
+    var editableCalendars: [CalendarCollection] { calendars.filter { phase == .preview || $0.writable == true } }
+    var canEdit: Bool { phase == .preview || (phase == .connected && !writeBlocked && !editableCalendars.isEmpty) }
+    func canEditEvent(_ event: CalendarEventRecord) -> Bool { canEdit && (phase == .preview || (!event.recurring && event.writeToken != nil && editableCalendars.contains { $0.id == event.calendarID })) }
     var requestRange: CalendarQueryRange {
         let days = mode == .month ? math.month(date) : mode == .week ? math.week(date) : (0..<14).map { math.addingDays($0,to:date) }
         let start = math.calendar.startOfDay(for:days.first!), end = math.addingDays(1,to:math.calendar.startOfDay(for:days.last!))

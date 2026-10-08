@@ -5,6 +5,35 @@ macOS 26.6.2, Xcode 27 / Swift 6.4 and Rust 1.99.0. Automated test content is
 synthetic and uses isolated storage. Private account contents and credentials
 are excluded from public artifacts.
 
+## Calendar event creation and editing — 2026-10-08
+
+- All 219 Swift contracts passed locally. After the final editor focus adjustment,
+  all 42 selected Calendar/date/navigation contracts passed again. New coverage
+  exercises connected create/edit, timed-to-all-day conversion, a stable create
+  identity across uncertain saves, mandatory refresh before retry, retained drafts
+  on conflicts and rejection of late saves after lock. Closed command and date/
+  text/token bounds retain compatibility with older read-only fixtures.
+- The native Calendar helper and pinned public PGP/event/calendar/recurrence/
+  iCalendar/time-zone tests passed. Synthetic Proton OpenPGP fixtures exercise
+  encrypted creation and update, verified owned-calendar bootstrap signatures,
+  current primary-key selection, tampered event rejection, revoked permissions,
+  unchanged reminders/colour/properties and complete-row metadata conflicts.
+- Single-event fencing rejects deletion, batches, overwrite/import, a different
+  member/calendar/event and repeat dispatch. Synthetic transport tests show one
+  write attempt for HTTP 401/429/500. Lost-response recovery reconciles the retained
+  create UID without a duplicate. The compiled helper refuses unauthenticated
+  saves and creates only its private coordination lock file.
+- The optimized Calendar helper, suite and isolated preview built and passed
+  strict nested signature verification using the configured local identity.
+  A synthetic native walkthrough verified create/save via ⌘S, reopening the editor,
+  all-day conversion, retained editor state across Mail/Calendar switching,
+  cancellation, automatic title focus and dark appearance.
+- No real-account event was created or edited during validation. The row check is
+  an optimistic GET-before-PUT preflight, not an atomic server revision guarantee.
+  Recurring/invited/shared events and deletion remain closed. Cross-client write
+  interoperability and independent protocol/security review remain release gates;
+  write signature checks do not establish complete reader signature verification.
+
 ## Calendar account handoff — 2026-10-08
 
 - All 213 Swift contracts passed locally using the native build system. Coverage

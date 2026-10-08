@@ -41,7 +41,7 @@ import ProtonXCore
         switch selected {
         case .pass: pass?.canCreate == true
         case .mail: mail.map { $0.phase == .open && !$0.busy && $0.draft == nil } ?? false
-        case .calendar: calendar.map { $0.phase == .preview && !$0.busy && $0.editor == nil } ?? false
+        case .calendar: calendar.map { $0.canEdit && !$0.busy && $0.editor == nil } ?? false
         case nil: false
         }
     }

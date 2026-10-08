@@ -163,6 +163,26 @@ with tempfile.TemporaryDirectory(prefix="ProtonX-calendar-source-") as tmp:
         keys.read_text()
         + "\nfunc (k *Keychain) Clear() { k.mu.Lock(); defer k.mu.Unlock(); for id,a:=range k.cache {a.KR.ClearPrivateParams();delete(k.cache,id)} }\n"
     )
+    info = stage / "pkg/calendar/calendar.go"
+    v = info.read_text().replace('MemberID    string //', 'Permissions int\n    Flags int\n    MemberID    string //')
+    v = v.replace('MemberID:    member.ID,', 'MemberID:    member.ID, Permissions: member.Permissions, Flags: member.Flags,')
+    info.write_text(v)
+    shutil.copy2(root / "Tools/CalendarEventWrites/event.go", stage / "pkg/event/protonx_write.go")
+    shutil.copy2(root / "Tools/CalendarEventWrites/keys.go", stage / "pkg/calendar/protonx_write.go")
+    for name, package in [("event_test.go","event"),("keys_test.go","calendar"),("transport_test.go","papi")]:
+        shutil.copy2(root / "Tools/CalendarEventWrites" / name, stage / "pkg" / package / "protonx_write_test.go")
+    calendar_test = stage / "pkg/calendar/calendar_test.go"
+    calendar_test.write_text(calendar_test.read_text().replace('Type: 0, MemberID: "m1",', 'Permissions:112, Flags:1, Type: 0, MemberID: "m1",'))
+
+    shutil.copy2(root / "Tools/CalendarEventWrites/transport.go", stage / "pkg/papi/protonx_write.go")
+    # Mutations are never retried, including rate-limit and authentication errors.
+    api.write_text(api.read_text().replace('refreshed := false', 'if method != http.MethodGet { return c.nativeWriteOnce(ctx,method,path,query,body,out) }; refreshed := false'))
+    # Include unknown row metadata in optimistic conflict detection.
+    types = stage / "pkg/caltypes/types.go"
+    v=types.read_text().replace('import "encoding/json"', 'import ("encoding/json"; "crypto/sha256"; "encoding/hex")')
+    v=v.replace('ID         string `json:"ID"`', 'NativeVersion string `json:"-"`\n    ID         string `json:"ID"`')
+    v=v.replace('*e = RawEvent(a)', '*e = RawEvent(a); var canonical any; if json.Unmarshal(data,&canonical)!=nil {return json.Unmarshal(data,&canonical)}; normalized,_:=json.Marshal(canonical); hash:=sha256.Sum256(normalized); e.NativeVersion=hex.EncodeToString(hash[:])')
+    types.write_text(v)
     # Reader rejects degraded decryption in its own projection; no partial event is exposed.
     expected = {p.relative_to(stage) for p in stage.rglob("*") if p.is_file()}
     existing = {p.relative_to(dest) for p in dest.rglob("*") if p.is_file()}

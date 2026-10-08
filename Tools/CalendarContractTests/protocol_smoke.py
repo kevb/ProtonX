@@ -21,10 +21,11 @@ with tempfile.TemporaryDirectory(prefix="ProtonX-Calendar-Protocol-") as directo
         },
         {
             "schema": 1,
-            "id": 2,
+            "id": 3,
             "command": {"method": "create", "password": "synthetic-test-only"},
         },
     ]
+    requests.insert(1,{"schema":1,"id":2,"command":{"method":"save_event","draft":{"id":"synthetic-draft","calendarID":"cal","title":"Synthetic event","location":"","notes":"","start":1791453600,"end":1791457200,"zone":"UTC","allDay":False}}})
     result = subprocess.run(
         [str(Path(sys.argv[1]).resolve())],
         input="".join(json.dumps(r) + "\n" for r in requests),
@@ -41,11 +42,12 @@ with tempfile.TemporaryDirectory(prefix="ProtonX-Calendar-Protocol-") as directo
     replies = [json.loads(line) for line in result.stdout.splitlines()]
     assert replies == [
         {"schema": 1, "id": 1, "failure": "operation_failed"},
-        {"schema": 1, "id": 2, "failure": "invalid_input"},
+        {"schema": 1, "id": 2, "failure": "operation_failed"},
+        {"schema": 1, "id": 3, "failure": "invalid_input"},
     ]
     files = list(Path(directory).iterdir())
     assert len(files) == 1 and files[0].name == ".helper-lock"
     assert files[0].stat().st_mode & 0o777 == 0o600
 print(
-    "Compiled Calendar helper: private protocol, closed mutations and lock-only profile verified"
+    "Compiled Calendar helper: private protocol, unauthenticated writes refused and lock-only profile verified"
 )

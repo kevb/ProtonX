@@ -1,5 +1,5 @@
 // Copyright (c) 2026 ProtonX contributors. SPDX-License-Identifier: GPL-3.0-or-later
-// Native read-only adapter. Proton libraries own SRP, key unlocking and PGP.
+// Native bounded Calendar adapter. Proton libraries own SRP, key unlocking and PGP.
 package main
 
 import (
@@ -44,6 +44,7 @@ type command struct {
 	Start    int64           `json:"start,omitempty"`
 	End      int64           `json:"end,omitempty"`
 	Zone     string          `json:"zone,omitempty"`
+	Draft    *draft          `json:"draft,omitempty"`
 }
 type packet struct {
 	Schema  int     `json:"schema"`
@@ -57,9 +58,10 @@ type reply struct {
 	Failure string `json:"failure,omitempty"`
 }
 type collection struct {
-	ID    string `json:"id"`
-	Name  string `json:"name"`
-	Color int    `json:"color"`
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Color    int    `json:"color"`
+	Writable bool   `json:"writable"`
 }
 type day struct {
 	Year  int `json:"year"`
@@ -79,6 +81,7 @@ type record struct {
 	StartDay   *day   `json:"startDay,omitempty"`
 	EndDay     *day   `json:"endDay,omitempty"`
 	Recurring  bool   `json:"recurring"`
+	WriteToken string `json:"writeToken,omitempty"`
 }
 type result struct {
 	Phase     string       `json:"phase,omitempty"`
@@ -89,7 +92,7 @@ type result struct {
 	Omitted   int          `json:"omitted,omitempty"`
 }
 
-// No command includes event identifiers, writes, files, host overrides or exports.
+// Event drafts are confined to save_event. No files, host overrides or exports.
 func decode(line []byte) (packet, error) {
 	var p packet
 	d := json.NewDecoder(bytes.NewReader(line))
@@ -102,6 +105,9 @@ func decode(line []byte) (packet, error) {
 		return p, errInput
 	}
 	c := p.Command
+	if c.Method != "save_event" && c.Draft != nil {
+		return p, errInput
+	}
 	if c.Method != "account_handoff" && c.Handoff != nil {
 		return p, errInput
 	}
@@ -116,6 +122,10 @@ func decode(line []byte) (packet, error) {
 		}
 	case "mailbox_password":
 		if c.Password == "" || len(c.Password) > 4096 || c.Username != "" || c.Code != "" || c.Start != 0 || c.End != 0 || c.Zone != "" {
+			return p, errInput
+		}
+	case "save_event":
+		if c.Draft == nil || c.Draft.validate() != nil || c.Username != "" || c.Password != "" || c.Code != "" || c.Start != 0 || c.End != 0 || c.Zone != "" {
 			return p, errInput
 		}
 	case "snapshot":
@@ -166,6 +176,10 @@ type engine struct {
 	handoffExpires int64
 	redeem         func(context.Context, string) (papi.CalendarFork, error)
 	unlockHandoff  func(context.Context, *engine) error
+	writeAPI       papi.API // injected only by synthetic tests
+	scope          map[string]editScope
+	collections    map[string]bool
+	writeBlocked   bool
 }
 
 func (e *engine) send(value any, failure string) error {
@@ -178,6 +192,9 @@ func (e *engine) send(value any, failure string) error {
 	return err
 }
 func (e *engine) close() {
+	e.scope = nil
+	e.collections = nil
+	e.writeBlocked = false
 	e.clearHandoff()
 	if e.keys != nil {
 		e.keys.Clear()
@@ -389,6 +406,8 @@ func (e *engine) handle(ctx context.Context, c command) (any, error) {
 			return nil, err
 		}
 		return result{Phase: "welcome"}, nil
+	case "save_event":
+		return e.saveEvent(ctx, c.Draft)
 	case "snapshot":
 		if e.client == nil {
 			return nil, errors.New("invalid_state")
@@ -438,12 +457,15 @@ func (e *engine) snapshot(ctx context.Context, c command) (any, error) {
 	if len(infos) > 64 {
 		return nil, errors.New("too_large")
 	}
+	scope := map[string]editScope{}
+	collections := map[string]bool{}
 	out := result{Phase: "connected", Calendars: make([]collection, 0, len(infos)), Events: []record{}, Start: c.Start, End: c.End}
 	for i, info := range infos {
 		if !identifier.MatchString(info.ID) || len(info.Name) > 512 {
 			return nil, errInput
 		}
-		out.Calendars = append(out.Calendars, collection{ID: info.ID, Name: info.Name, Color: i % 6})
+		out.Calendars = append(out.Calendars, collection{ID: info.ID, Name: info.Name, Color: i % 6, Writable: e.owned(info)})
+		collections[info.ID] = e.owned(info)
 		access, err := e.keys.Unlock(ctx, info)
 		if err != nil {
 			return nil, err
@@ -458,15 +480,31 @@ func (e *engine) snapshot(ctx context.Context, c command) (any, error) {
 				out.Omitted++
 				continue
 			}
+			if collections[info.ID] && editable(l.Event, l.Occurrence.Event) && verifyCards(l.Occurrence.Event, access) == nil {
+				r.WriteToken = fingerprint(l.Occurrence.Event)
+				scope[r.ID] = editScope{calendarID: info.ID, eventID: l.Event.EventID, token: r.WriteToken}
+			}
 			out.Events = append(out.Events, r)
 			if len(out.Events) > 5000 {
 				return nil, errors.New("too_large")
 			}
 		}
 	}
+	e.scope = scope
+	e.collections = collections
+	e.writeBlocked = false
 	return out, nil
 }
 func failure(err error) string {
+	if errors.Is(err, errConflict) {
+		return "conflict"
+	}
+	if errors.Is(err, errUncertain) {
+		return "write_uncertain"
+	}
+	if errors.Is(err, errReadOnly) {
+		return "read_only"
+	}
 	if errors.Is(err, errHandoff) {
 		return "handoff_unavailable"
 	}

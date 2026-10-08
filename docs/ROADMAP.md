@@ -151,7 +151,7 @@ The official [side panel](https://proton.me/support/side-panel) opens contextual
 Calendar, Contacts and account-security tools beside the current app. It is a
 useful reference, but full product tabs are a separate ProtonX design proposal.
 
-## Calendar (experimental read-only connection)
+## Calendar (experimental connection and basic editing)
 
 Calendar now reuses an unlocked Mail or online Pass account through a one-use
 Proton session fork, with local-unlock routing for saved accounts and explicit
@@ -161,7 +161,12 @@ local unlock and bounded calendar/event reads. Week/month/agenda views,
 time zones, filters and search retain state across product switches. The pinned
 adapter expands recurrence/EXDATEs/modified occurrences; synthetic SRP/decryption
 and public upstream tests cover this path. Real-account interoperability remains
-unverified. Connected mutations are disabled; preview edits remain memory-only.
+a separate acceptance gate. Connected single-event creation and editing now
+support owned personal calendars, timed/all-day dates, title/location/notes and
+preservation of existing reminders. Writes verify key/card signatures, use one
+mutation per request and require refresh after an uncertain response. The row
+preflight is optimistic; it is not atomic server conflict protection. Preview
+edits remain memory-only.
 See [Calendar scope and backend boundary](CALENDAR.md).
 
 - Verify detached Calendar passphrase/card signatures using Proton's implementation;
@@ -172,9 +177,12 @@ See [Calendar scope and backend boundary](CALENDAR.md).
   expiry/revocation and upgrade/Keychain continuity with a disposable account.
 - Add encrypted event persistence and cache-first/offline browsing with recovery
   contracts. Add a dedicated day view and accurate repeated-hour DST layout.
-- Connect per-event creation/editing/deletion through Proton's existing protocol;
-  add recurrence editing, conflict detection, reminders, attendees and invitation
-  updates. Test cross-client edits and single-occurrence/whole-series operations.
+- Validate basic event create/edit in both native and official clients, including
+  all-day conversion, time zones, unchanged reminders and lost-response recovery.
+  Investigate server-supported conditional writes before claiming atomic conflict
+  protection. Add confirmed deletion and calendar moves as separate bounded actions.
+- Add recurrence/exception editing, reminder editing, attendees and invitation
+  updates. Test single-occurrence/whole-series operations without disturbing guests.
 - Connect Mail invitations and attachments to event inspection and RSVP actions.
   Preserve an unsaved Mail draft while switching to Calendar and returning.
 - Validate shared/subscribed calendars, server colours, import/export and native

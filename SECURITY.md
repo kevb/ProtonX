@@ -328,16 +328,39 @@ acceptance step.
 
 ## Calendar native adapter
 
-Calendar has an independent, experimental read-only helper. `upstream.lock.json`
+Calendar has an independent, experimental helper. `upstream.lock.json`
 pins the unofficial Unlicense protocol adapter; pinned official Proton Go
-libraries own SRP, key unlocking and OpenPGP. The adapter currently **does not
-verify detached signatures on Calendar passphrases/cards**. Signature verification,
+libraries own SRP, key unlocking and OpenPGP. The browsing path currently **does not
+verify detached signatures on Calendar passphrases/cards**. The event write path
+adds strict owned-calendar passphrase and event-card signature verification using
+Proton OpenPGP; this does not establish complete reader verification. Signature verification,
 independent review and real account/key-history interoperability remain release
 gates; passing synthetic decryption tests is not evidence of those properties.
 
-The helper has a closed JSON-line command set and a read-only Calendar API fence.
-It exposes no event writes, invitation actions, host overrides, exports or file
-paths. Authentication/session refresh/scope verification and sign-out can still
+The helper has a closed JSON-line command set. Its reader retains a read-only
+API fence. A separate single-event capability permits one create or update in an
+owned personal calendar, bound to the exact calendar/member/event identities.
+It refuses deletion, batch sync, overwrite/import, other routes and repeat writes.
+It exposes no invitation actions, host overrides, exports or file paths.
+
+Writes re-fetch ownership and bootstrap membership; decrypt and verify exactly
+this member's signed passphrase; require one active primary calendar key; and
+unlock that same bootstrap's key material. No fallback member, alternate address
+or cached lenient keychain can authorize a write. Temporary write keys are cleared.
+An update verifies signed/encrypted cards before patching/resealing them with
+Proton libraries. Recurrence, guests, organizers and conference data are rejected
+so unsupported orchestration cannot remove exceptions or invitations. The pinned
+patcher preserves untouched iCal properties, reminders and colour.
+
+The loaded row digest is compared against a fresh exact-event read before an
+update. The sync endpoint has no conditional revision in the referenced official
+interface: this preflight cannot prevent an edit racing between GET and PUT.
+The write transport dispatches once, including for 401/429 failures. Ambiguous
+responses block additional writes until a successful snapshot. Drafts remain in
+memory, and a retained create's random stable UID is reconciled on manual retry;
+lock/quit discards that identity and does not provide durable reconciliation.
+No writes or invitations are queued/replayed automatically.
+ Authentication/session refresh/scope verification and sign-out can still
 change the Proton session through authentication endpoints. Production uses one
 fixed HTTPS origin, normal TLS verification, no inherited proxy and no redirects.
 Raw errors, server diagnostics, prompt text and helper stderr never reach the UI

@@ -48,6 +48,10 @@ assert (
 )
 assert "ExpandOccurrencesStrict" in (source / "pkg/event/decrypt.go").read_text()
 assert "pkg/browser" not in (source / "pkg/auth/auth.go").read_text()
+assert (source / "pkg/event/protonx_write.go").read_bytes() == (root / "Tools/CalendarEventWrites/event.go").read_bytes()
+assert (source / "pkg/calendar/protonx_write.go").read_bytes() == (root / "Tools/CalendarEventWrites/keys.go").read_bytes()
+assert "c.nativeWriteOnce" in api
+assert (source / "pkg/papi/protonx_write.go").read_bytes() == (root / "Tools/CalendarEventWrites/transport.go").read_bytes()
 print(
     "Calendar source pin, protocol, storage, transport and strict recurrence contracts match"
 )
