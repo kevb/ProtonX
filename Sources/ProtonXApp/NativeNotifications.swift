@@ -4,7 +4,7 @@ import Combine
 import UserNotifications
 import ProtonXCore
 
-enum NotificationPermission: Equatable { case unknown, notDetermined, denied, authorized, unavailable }
+enum NotificationPermission: Equatable, Sendable { case unknown, notDetermined, denied, authorized, unavailable }
 struct MailNotificationOptions: Equatable {
     var enabled = false
     var sound = true
@@ -150,12 +150,19 @@ struct DesktopNotice: Equatable {
     }
     func permission() async -> NotificationPermission {
         guard let center else { return .unavailable }
-        let settings = await center.notificationSettings()
-        switch settings.authorizationStatus {
-        case .notDetermined: return .notDetermined
-        case .denied: return .denied
-        case .authorized, .provisional, .ephemeral: return .authorized
-        @unknown default: return .denied
+        // Project the callback to a value instead of transferring the SDK's
+        // non-Sendable settings object into the main actor on older toolchains.
+        return await withCheckedContinuation { continuation in
+            center.getNotificationSettings { settings in
+                let permission: NotificationPermission
+                switch settings.authorizationStatus {
+                case .notDetermined: permission = .notDetermined
+                case .denied: permission = .denied
+                case .authorized, .provisional, .ephemeral: permission = .authorized
+                @unknown default: permission = .denied
+                }
+                continuation.resume(returning: permission)
+            }
         }
     }
     func authorize() async throws -> Bool {

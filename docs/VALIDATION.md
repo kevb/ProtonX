@@ -20,6 +20,11 @@ are excluded from public artifacts.
 - A corrected view selector was inspected in the final preview. Month grids have
   a vertical scroll fallback for shorter windows; minimum-OS and transition-day
   rendering remain acceptance work.
+- An existing Xcode 16.4 CI compile failure was traced to async APIs moving
+  non-Sendable Apple SDK objects across actors. Local authentication and notification
+  settings now use callbacks and transfer only result values. The full 186-test
+  run passed locally after this compatibility change; older-SDK CI verification
+  remains separate.
 - Calendar has no account adapter. These checks establish a native memory-only
   preview, not live Calendar browsing, encrypted persistence or server writes.
 

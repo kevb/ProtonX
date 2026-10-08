@@ -44,7 +44,16 @@ import ProtonXCore
         do {
             let success: Bool
             if let evaluate { success = try await evaluate() }
-            else { success = try await current.evaluatePolicy(mode == .touchID ? .deviceOwnerAuthenticationWithBiometrics : .deviceOwnerAuthentication, localizedReason: reason) }
+            else {
+                // Keep LAContext on the main actor. Older Apple SDKs do not mark
+                // it Sendable; only the callback's result crosses the boundary.
+                success = try await withCheckedThrowingContinuation { continuation in
+                    current.evaluatePolicy(mode == .touchID ? .deviceOwnerAuthenticationWithBiometrics : .deviceOwnerAuthentication, localizedReason: reason) { accepted, error in
+                        if let error { continuation.resume(throwing: error) }
+                        else { continuation.resume(returning: accepted) }
+                    }
+                }
+            }
             try Task.checkCancellation()
             guard generation == captured else { throw CancellationError() }
             activeContext = nil; state = success ? .authenticated : .cancelled
