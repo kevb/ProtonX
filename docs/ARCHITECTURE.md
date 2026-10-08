@@ -11,7 +11,7 @@ We considered four models:
 | Separate apps plus coordinator | Independent sandboxes with one menu-bar entry | IPC, coordinator lifecycle and version negotiation; the coordinator can become a hidden mandatory service |
 | One suite, separate product windows | Shared OS integration with familiar task boundaries; no coordinator process | Shared process/address space and update cadence; closing a product isn't quitting an app |
 
-**0.1 chooses one suite with separate product windows.** Pass and Mail have
+**0.1 chooses one suite workspace with a product rail.** Pass and Mail have
 independent sessions, state, unlock prompts and adapters. A shared menu-bar icon
 is optional. Product views don't call each other's APIs. The navigation does not
 turn the vault into a tab inside an email app. A future separately distributed
@@ -207,3 +207,13 @@ Settings and preview/lock behavior are described in [NOTIFICATIONS.md](NOTIFICAT
 OS delivery is injected for contract tests. Real app bundles install a retained
 UserNotifications delegate before launch completes; command-line tests and
 synthetic preview bundles never instantiate the native notification center.
+
+## Calendar preview boundary
+
+The suite lazily creates an independent Calendar store. Native week/month/agenda
+views and an inline editor retain their state across product switches. Preview
+events are synthetic and memory-only; lock clears visible and hidden state.
+The bounded `CalendarDataSource` contract separates date/layout logic from a future
+Proton adapter. All-day civil dates use exclusive model ends, timed events use
+absolute instants, and writes bind individual event revisions. No existing
+product helper or account session is used. See [Calendar scope](CALENDAR.md).

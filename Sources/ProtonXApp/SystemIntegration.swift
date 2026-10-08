@@ -4,6 +4,8 @@ import Carbon
 import ProtonXCore
 
 extension Notification.Name {
+    static let protonXNewEvent = Notification.Name("ProtonX.newEvent")
+    static let protonXFocusCalendarSearch = Notification.Name("ProtonX.focusCalendarSearch")
     static let protonXNewMessage = Notification.Name("ProtonX.newMessage")
     static let protonXRefreshMail = Notification.Name("ProtonX.refreshMail")
     static let protonXFocusMailSearch = Notification.Name("ProtonX.focusMailSearch")
@@ -19,6 +21,7 @@ final class SystemIntegration: NSObject {
     var openPassForSearch: (() -> Void)?
     var openPass: (() -> Void)? = { ProductWindows.shared.open(.pass) }
     var openMail: (() -> Void)? = { ProductWindows.shared.open(.mail) }
+    var openCalendar: (() -> Void)? = { ProductWindows.shared.open(.calendar) }
     var openSettings: (() -> Void)?
     var lockSuite: (() -> Void)?
     private var statusItem: NSStatusItem?
@@ -62,11 +65,12 @@ final class SystemIntegration: NSObject {
         guard statusItem == nil else { return }
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         item.button?.image = NSImage(systemSymbolName: "shield.lefthalf.filled", accessibilityDescription: "ProtonX")
-        item.button?.toolTip = "ProtonX · Pass and Mail"
+        item.button?.toolTip = "ProtonX · Pass, Mail and Calendar"
         let menu = NSMenu()
         menu.addItem(actionItem("Open ProtonX", #selector(showHome)))
         menu.addItem(actionItem("Open Pass", #selector(showPass)))
         menu.addItem(actionItem("Open Mail", #selector(showMail)))
+        menu.addItem(actionItem("Open Calendar", #selector(showCalendar)))
         menu.addItem(.separator())
         menu.addItem(actionItem("Lock ProtonX", #selector(lockNow)))
         menu.addItem(actionItem("Settings…", #selector(showSettings)))
@@ -80,6 +84,7 @@ final class SystemIntegration: NSObject {
     @objc private func showPass() { openPass?(); lastActivity = ProcessInfo.processInfo.systemUptime }
     @objc private func showHome() { openHome?(); lastActivity = ProcessInfo.processInfo.systemUptime }
     @objc private func showMail() { openMail?(); lastActivity = ProcessInfo.processInfo.systemUptime }
+    @objc private func showCalendar() { openCalendar?(); lastActivity = ProcessInfo.processInfo.systemUptime }
     @objc private func showSettings() { openSettings?() }
     @objc private func lockNow() { lockSuite?() }
     @objc private func quit() { lockSuite?(); NSApp.terminate(nil) }

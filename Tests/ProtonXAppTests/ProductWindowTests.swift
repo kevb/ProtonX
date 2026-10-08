@@ -135,12 +135,14 @@ import ProtonXCore
         }
         router.installOpener { opened.append($0) }
         router.didFinishLaunching()
-        router.register(window, for: .pass); router.register(window, for: .mail)
+        router.register(window, for: .pass); router.register(window, for: .mail); router.register(window, for: .calendar)
         router.open(.pass); router.open(.mail); queue.drain()
         #expect(selected == [.mail] && window.focusCount == 1 && opened.isEmpty)
         router.open(.pass); queue.drain()
         #expect(selected == [.mail, .pass] && window.focusCount == 2 && opened.isEmpty)
+        router.open(urls: [URL(string: "protonx://calendar")!]); queue.drain()
+        #expect(selected == [.mail, .pass, .calendar] && window.focusCount == 3 && opened.isEmpty)
         router.showSuite()
-        #expect(selected == [.mail, .pass] && window.focusCount == 3)
+        #expect(selected == [.mail, .pass, .calendar] && window.focusCount == 4)
     }
 }

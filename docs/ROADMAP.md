@@ -112,14 +112,14 @@ remain separate gates.
 
 The initial implementation has one window with Home and a labelled Pass/Mail rail.
 Product stores are created on first use and retained across switches. Startup
-preferences select Home, the last product, Pass or Mail; explicit launcher routes
+preferences select Home, the last product, Pass, Mail or Calendar; explicit launcher routes
 override them. Unsaved Mail content belongs to its Mail editor model and the
-composer is nonmodal. Lock/close clears both product workspaces and unsaved drafts.
+composer is nonmodal. Lock/close clears every product workspace and unsaved drafts.
 The following describes the broader direction and remaining acceptance, not a
-claim that detached windows, Calendar or contextual inspectors are implemented.
+claim that detached windows or contextual inspectors are implemented. Calendar
+currently has a synthetic native preview; its account backend is not implemented.
 
-- Provide a narrow product icon rail for Pass, Mail and, when implemented,
-  Calendar/Drive. Give icons accessible names, tooltips, a clear selected state
+- Provide a narrow product icon rail for Pass, Mail and Calendar; extend to Drive when implemented. Give icons accessible names, tooltips, a clear selected state
   and native keyboard commands. Only expose usable products as navigation targets.
 - Preserve each product's selected item/folder, search, scroll position and draft
   when switching products. Do not rebuild a store, relaunch a helper or refresh
@@ -151,21 +151,27 @@ The official [side panel](https://proton.me/support/side-panel) opens contextual
 Calendar, Contacts and account-security tools beside the current app. It is a
 useful reference, but full product tabs are a separate ProtonX design proposal.
 
-## Calendar (planned)
+## Calendar (native preview; account integration planned)
 
-Calendar is not implemented. Treat it as a product/backend feasibility project,
-not just another screen in the suite. Keep Pass reliability and everyday Mail
-completion ahead of expanding the product set.
+The first native preview provides week/month/agenda views, Today/date navigation,
+mini-month selection, calendar visibility/colours, time zones, title/location
+search, and timed/all-day event creation/editing/deletion with overlapping and
+multi-day layouts. It retains unfinished Calendar and Mail editors across product
+switches. All events are synthetic and changes stay in memory until lock/quit.
+See [Calendar scope and backend boundary](CALENDAR.md).
+
+Account operations remain a separate source/crypto/storage project. Keep the
+preview label until Proton interoperability is established.
 
 - Identify a source-pinned Proton implementation for Calendar authentication,
   key handling, encrypted event storage and sync; review licensing and helper
   contracts before choosing a native integration. Do not invent Calendar crypto
   or silently reuse a Mail/Pass session or export decrypted data to Apple Calendar.
-- Start with read-only calendar/event browsing: week view, date navigation,
-  Today, mini-month picker, time-zone display, multiple calendar visibility and
-  colours. Consider day/month/agenda views after the core reader is usable.
-- Add event creation/editing/deletion, recurrence, all-day events, time-zone/DST
-  handling, reminders, attendees and invitation updates through Proton's existing
+- Connect the existing views to bounded read-only account browsing, encrypted
+  persistence and recovery. Add a dedicated day view and accurate repeated-hour
+  timetable layout for daylight-saving transitions.
+- Connect per-event creation/editing/deletion to Proton; add recurrence,
+  recurring-event exceptions, reminders, attendees and invitation updates through Proton's existing
   implementation. Test recurring-event exceptions and concurrent edits explicitly.
 - Connect Mail invitations and attachments to event inspection and RSVP actions.
   Preserve an unsaved Mail draft while switching to Calendar and returning.

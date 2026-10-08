@@ -78,7 +78,7 @@ import ProtonXCore
     }
 }
 
-/// Both product launch links address the same suite window. Selection is owned
+/// Product launch links address the same suite window. Selection is owned
 /// by the workspace, not whichever product happened to be visible at launch.
 struct SuiteWindowRegistration: NSViewRepresentable {
     let onClose: @MainActor () -> Void
@@ -97,6 +97,7 @@ struct SuiteWindowRegistration: NSViewRepresentable {
             self.target = target
             ProductWindows.shared.register(target, for: .pass)
             ProductWindows.shared.register(target, for: .mail)
+            ProductWindows.shared.register(target, for: .calendar)
         }
     }
 }

@@ -4,8 +4,9 @@ import Testing
 
 @Test func productLaunchLinksOnlyChooseKnownWindows() {
     #expect(ProductRoute(url: URL(string: "protonx://mail")!) == .mail)
+    #expect(ProductRoute(url: URL(string: "protonx://calendar")!) == .calendar)
     #expect(ProductRoute(url: URL(string: "protonx://pass/")!) == .pass)
-    for url in ["https://mail", "protonx://drive", "protonx://mail?password=SYNTHETIC", "protonx://mail#token", "protonx://user:secret@mail", "protonx://mail:443", "protonx://mail/login", "protonx:///mail"] {
+    for url in ["protonx://calendar?token=SYNTHETIC", "protonx://calendar/login", "https://mail", "protonx://drive", "protonx://mail?password=SYNTHETIC", "protonx://mail#token", "protonx://user:secret@mail", "protonx://mail:443", "protonx://mail/login", "protonx:///mail"] {
         #expect(ProductRoute(url: URL(string: url)!) == nil)
     }
 }

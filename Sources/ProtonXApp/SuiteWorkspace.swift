@@ -10,16 +10,18 @@ import ProtonXCore
     @Published private(set) var selected: ProductRoute?
     @Published private(set) var pass: PassStore?
     @Published private(set) var mail: NativeMailStore?
+    @Published private(set) var calendar: CalendarStore?
     @Published var passSearchRequested = false
     let previewOnly: Bool
     private let defaults: UserDefaults
     private let makePass: () -> PassStore
     private let makeMail: () -> NativeMailStore
+    private let makeCalendar: () -> CalendarStore
     private let makeNotificationsAvailable: Bool
     private var observations: Set<AnyCancellable> = []
 
     init(defaults: UserDefaults = .standard, previewOnly: Bool = Bundle.main.bundleIdentifier == "org.kevb.ProtonX.Preview",
-         initialProduct: ProductRoute? = nil, makePass: (() -> PassStore)? = nil, makeMail: (() -> NativeMailStore)? = nil) {
+         initialProduct: ProductRoute? = nil, makePass: (() -> PassStore)? = nil, makeMail: (() -> NativeMailStore)? = nil, makeCalendar: (() -> CalendarStore)? = nil) {
         self.defaults = defaults; self.previewOnly = previewOnly; self.makeNotificationsAvailable = makeMail == nil
         self.makePass = makePass ?? {
             let store = PassStore(previewOnly: previewOnly)
@@ -27,6 +29,7 @@ import ProtonXCore
             return store
         }
         self.makeMail = makeMail ?? { NativeMailStore(previewOnly: previewOnly) }
+        self.makeCalendar = makeCalendar ?? { CalendarStore(previewOnly: previewOnly) }
         let preference = defaults.string(forKey: "suiteStartup") ?? "last"
         let initial = initialProduct ?? (previewOnly ? nil : (preference == "last" ? defaults.string(forKey: "suiteLastProduct").flatMap(ProductRoute.init(rawValue:)) : ProductRoute(rawValue: preference)))
         select(initial)
@@ -35,6 +38,7 @@ import ProtonXCore
         switch selected {
         case .pass: pass?.canCreate == true
         case .mail: mail.map { $0.phase == .open && !$0.busy && $0.draft == nil } ?? false
+        case .calendar: calendar.map { $0.phase == .preview && !$0.busy && $0.editor == nil } ?? false
         case nil: false
         }
     }
@@ -42,6 +46,7 @@ import ProtonXCore
         switch selected {
         case .pass: pass.map { $0.phase == .open && !$0.busy && !$0.isDemo } ?? false
         case .mail: mail.map { $0.phase == .open && !$0.busy && !$0.demo } ?? false
+        case .calendar: calendar.map { $0.phase == .preview && !$0.busy } ?? false
         case nil: false
         }
     }
@@ -61,18 +66,22 @@ import ProtonXCore
             if !previewOnly, makeNotificationsAvailable { store.configureNotifications(NativeNotifications.shared) }
             store.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &observations)
         }
+        if product == .calendar && calendar == nil {
+            let store = makeCalendar(); calendar = store
+            store.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &observations)
+        }
         selected = product
         if let product, !previewOnly { defaults.set(product.rawValue, forKey: "suiteLastProduct") }
     }
     func lock() {
         passSearchRequested = false
         pass?.lock()
-        mail?.lock()
+        mail?.lock(); calendar?.lock()
         NotificationCenter.default.post(name: .protonXLock, object: nil)
     }
     func refresh() {
         guard canRefresh else { return }
-        if selected == .pass { pass?.refresh() } else { mail?.refresh() }
+        switch selected { case .pass: pass?.refresh(); case .mail: mail?.refresh(); case .calendar: calendar?.refresh(); case nil: break }
     }
     func requestPassSearch() { select(.pass); passSearchRequested = true }
 }
@@ -100,11 +109,16 @@ struct SuiteWindow: View {
                         .opacity(workspace.selected == .mail ? 1 : 0)
                         .allowsHitTesting(workspace.selected == .mail).accessibilityHidden(workspace.selected != .mail)
                 }
+                if let calendar = workspace.calendar {
+                    CalendarWindow(store: calendar, isActive: workspace.selected == .calendar)
+                        .opacity(workspace.selected == .calendar ? 1 : 0)
+                        .allowsHitTesting(workspace.selected == .calendar).accessibilityHidden(workspace.selected != .calendar)
+                }
             }.frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(minWidth: 1000, minHeight: 700)
         .background(PassTheme.canvas)
-        .navigationTitle(workspace.selected.map { "ProtonX " + ($0 == .pass ? "Pass" : "Mail") } ?? "ProtonX")
+        .navigationTitle(workspace.selected.map { "ProtonX " + $0.displayName } ?? "ProtonX")
         .focusedSceneValue(\.protonXProduct, workspace.selected)
         .focusedSceneValue(\.protonXCanCreate, workspace.canCreate)
         .focusedSceneValue(\.protonXCanRefresh, workspace.canRefresh)
@@ -120,15 +134,16 @@ struct SuiteWindow: View {
                     }.pickerStyle(.menu).accessibilityIdentifier("mailConversationView")
                 }
                 if (workspace.selected == .pass && workspace.pass?.busy == true) ||
-                   (workspace.selected == .mail && workspace.mail?.busy == true) {
+                   (workspace.selected == .mail && workspace.mail?.busy == true) ||
+                   (workspace.selected == .calendar && workspace.calendar?.busy == true) {
                     ProgressView().controlSize(.small).accessibilityLabel("Working")
                 }
                 if workspace.selected != nil {
                     Button { workspace.refresh() } label: { Label("Refresh", systemImage: "arrow.clockwise") }
                         .disabled(!workspace.canRefresh)
                     Button {
-                        NotificationCenter.default.post(name: workspace.selected == .mail ? .protonXNewMessage : .protonXNewItem, object: nil)
-                    } label: { Label(workspace.selected == .mail ? "New message" : "Create item", systemImage: "plus") }
+                        NotificationCenter.default.post(name: workspace.selected == .calendar ? .protonXNewEvent : workspace.selected == .mail ? .protonXNewMessage : .protonXNewItem, object: nil)
+                    } label: { Label(workspace.selected == .calendar ? "New event" : workspace.selected == .mail ? "New message" : "Create item", systemImage: "plus") }
                         .disabled(!workspace.canCreate).accessibilityIdentifier("suiteCreate")
                 }
             }
@@ -159,6 +174,7 @@ struct SuiteWindow: View {
             Divider().padding(.horizontal, 14)
             railButton("Pass", symbol: "key", product: .pass, shortcut: "⌘1")
             railButton("Mail", symbol: "envelope", product: .mail, shortcut: "⌘2")
+            railButton("Calendar", symbol: "calendar", product: .calendar, shortcut: "⌘3")
             Spacer()
             Button { workspace.lock() } label: { Image(systemName: "lock").frame(width: 46, height: 36) }
                 .buttonStyle(.plain).help("Lock ProtonX (⌘L)").accessibilityLabel("Lock ProtonX")
@@ -190,6 +206,7 @@ struct SuiteWindow: View {
             HStack(spacing: 22) {
                 productCard(.pass, title: "Pass", symbol: "key", subtitle: "Passwords and private notes")
                 productCard(.mail, title: "Mail", symbol: "envelope", subtitle: "Your inbox and conversations")
+                productCard(.calendar, title: "Calendar", symbol: "calendar", subtitle: "Native preview · sample events")
             }
             Text("Switch products anytime. Your place stays with you.")
                 .font(.callout).foregroundStyle(.secondary)

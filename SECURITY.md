@@ -166,7 +166,7 @@ include passwords, tokens, real message bodies or vault exports in public issues
 
 ## Synthetic preview and experiments
 
-The preview has a separate bundle identity, forces synthetic Pass and Mail data,
+The preview has a separate bundle identity, forces synthetic Pass, Mail and Calendar data,
 refuses sign-in/restore and does not register a menu-bar item or global hotkey.
 Its UI cannot start either account helper or open Bridge configuration.
 The credential-provider experiment is typechecked only; it is not embedded,
@@ -232,7 +232,7 @@ added. Proton's durable action queue may still finish after lock/restore. Move u
 uses the SDK's original one-use undo object, with a 30-second native lifetime. Lock
 clears capabilities and undo state; generation checks reject late replies.
 
-Product URLs accept only `protonx://mail` and `protonx://pass` without credentials,
+Product URLs accept only `protonx://mail`, `protonx://pass` and `protonx://calendar` without credentials,
 paths, query data or fragments. Launchers have no helper, account store or Keychain
 access. They open the adjacent installed ProtonX bundle and refuse to route to an
 older development copy that is still running. The local installer verifies bundle
@@ -243,16 +243,16 @@ Keychain access or notarization.
 
 ## Suite workspace navigation
 
-One native window hosts lazy Pass and Mail workspaces. A product switch keeps
+One native window hosts lazy Pass, Mail and Calendar workspaces. A product switch keeps
 selection, search, scroll and unsaved Mail editor state in the existing product
 objects; it does not unlock, restore or merge sessions. Shared defaults contain
 only startup/last-product navigation preferences. Home does not start product
 helpers, and the preview ignores real startup preferences. The product rail
 excludes hidden content from input/accessibility and uses selected-product
 capabilities for commands. Mail authentication-field values clear on switching
-away. Suite-window close, screen/inactivity lock and Quit lock both products,
+away. Suite-window close, screen/inactivity lock and Quit lock all products,
 including hidden ones; late helper replies remain subject to existing epochs.
-Public product links still accept only the two closed routes defined above and
+Public product links still accept only the three closed routes defined above and
 select the product before activating the same suite window. No account data is
 accepted in routes, and no global account/session cache is introduced.
 
@@ -295,3 +295,14 @@ raster images and TXT/CSV are offered in-app preview/open; other types use expli
 Save. Unsaved composer text is preserved during file operations, and uncertain
 upload/removal requires metadata reconciliation before repeating a change/send.
 See docs/MAIL_ATTACHMENTS.md for complete behavior and acceptance limits.
+
+## Calendar preview
+
+Calendar currently uses synthetic, memory-only events behind a separate typed
+data-source boundary. It performs no network, Keychain, EventKit, file-storage or
+notification operations. Locks clear events, filters, selected-event details and
+editors, including hidden Calendar state. Epoch checks reject late snapshots and
+mutation completions; delete intents also bind the disclosed revision and epoch.
+Shared navigation preferences contain no event contents. No Mail/Pass credentials
+or sessions are used by Calendar. Account authentication, encrypted persistence
+and Proton cryptography need independent review before enabling a live backend.

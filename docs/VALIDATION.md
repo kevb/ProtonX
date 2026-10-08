@@ -5,6 +5,24 @@ macOS 26.6.2, Xcode 27 / Swift 6.4 and Rust 1.99.0. Automated test content is
 synthetic and uses isolated storage. Private account contents and credentials
 are excluded from public artifacts.
 
+## Native Calendar preview — 2026-10-08
+
+- The full local Swift test run passed 186 tests, including 13 new Calendar
+  date/layout/data-source/store contracts and a Calendar shared-window route.
+- Optimized normal and isolated preview bundles built with the configured local
+  identity and passed strict nested signature verification. Pass/Mail helper
+  source and protocols did not change; the existing helpers were reused.
+- A synthetic native walkthrough covered week/month/agenda views, overlapping
+  events, preview creation/editing and confirmed deletion, calendar filters,
+  search and time-zone conversion. An unfinished all-day event survived a switch
+  to a synthetic Mail composer and back; that Mail draft also survived Calendar
+  operations. Suite lock returned Calendar to welcome and cleared preview state.
+- A corrected view selector was inspected in the final preview. Month grids have
+  a vertical scroll fallback for shorter windows; minimum-OS and transition-day
+  rendering remain acceptance work.
+- Calendar has no account adapter. These checks establish a native memory-only
+  preview, not live Calendar browsing, encrypted persistence or server writes.
+
 ## Current coverage
 
 | Area | Evidence | Remaining acceptance |
@@ -13,9 +31,10 @@ are excluded from public artifacts.
 | Pass saved/offline browsing | Synthetic encrypted-storage, policy, saved-first/reconnect and lock-race tests | Disconnected account restart and larger-vault measurements |
 | Native Mail | Manual sign-in and message reading; synthetic/public tests for reading, composer, sender selection, message actions, conversations and native attachments | Conversation interoperability, live send/reply/attachment delivery, linked-Gmail delivery and account recovery |
 | Mail secure storage | Opt-in database/file encryption and resumable database/attachment staging contracts | Cache path rebasing/activation, whole-profile cutover and pending-send/draft recovery before enabling ordinary builds |
+| Calendar preview | Synthetic date/DST/layout, editing/revision, filters, cross-product editor retention and lock-epoch tests; native week/month/agenda walkthrough | Proton sign-in, encrypted persistence, live sync/mutations, recurrence, invitations and notifications are not implemented |
 | Product launchers | Synthetic native UI checks for cold/warm requests, minimized/closed windows and reverse product selection; signed installer checks | Minimum-OS runtime and update/Keychain continuity |
 
-The latest local Swift run passed 173 tests; five synthetic atomic-install tests
+The latest local Swift run passed 186 tests; five synthetic atomic-install tests
 passed at the prior installer milestone. These are local results, not a statement about the
 latest GitHub run. Dated entries below record milestone-specific test scope and
 historical limitations. The README and roadmap describe the current feature set.

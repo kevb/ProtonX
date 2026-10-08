@@ -1,7 +1,8 @@
 # ProtonX
 
-Native macOS clients for Proton Pass and Mail. Built with SwiftUI and AppKit,
-Proton's existing Rust cores, separate product windows, and **one optional
+Native macOS clients for Proton Pass and Mail, with an early Calendar preview.
+Built with SwiftUI and AppKit, Proton's existing Rust cores, one product workspace,
+and **one optional
 menu-bar icon**. No bundled Electron or Chromium runtime.
 
 **Developer alpha · macOS 14+ · Pass first.** ProtonX is independent of Proton AG
@@ -14,9 +15,10 @@ interface or contribute. Signed, notarized binary releases are not yet available
 | --- | --- | --- |
 | Pass | Account sign-in and local unlock; vault and Trash browsing; search and sorting; password copy/reveal; TOTP copy/setup/edit; login and note editing with multiple websites and custom fields; revision conflict protection; Trash/restore; encrypted saved-first loading and read-only offline browsing for eligible personal paid accounts | No native browser autofill, passkey operations, attachment handling, sharing UI or account switching. Other item types are readable but have no native editor. Managed accounts stay online-only. |
 | Mail | Native username/password, TOTP and second-password sign-in; independent Keychain-backed session; folders and paged inbox; SDK conversation grouping with expandable message cards; formatted HTML reading on light paper; per-message image loading; read/unread, Archive/Trash/Inbox and move undo; compose, reply and reply-all; sending identity selection, draft saving, attachment save/preview/upload/removal and native notification settings | Live send/reply/attachment delivery and account recovery are acceptance gates. No human verification/FIDO-only login, rich-text editing or inline/CID images. Search covers loaded subjects and senders, capped at 1,000 messages. |
+| Calendar | Native week/month/agenda preview, date navigation, time zones, calendar visibility, search and timed/all-day event editing with retained state across product switches | Synthetic events only, held in memory until lock/quit. No Proton account connection, recurrence, invitations or reminders. See [Calendar preview](docs/CALENDAR.md). |
 | Drive | Planned | No Drive client implemented. |
 
-Pass and Mail share one native workspace with Home and a product rail, while keeping their
+Pass, Mail and Calendar share one native workspace with Home and a product rail, while keeping their
 sessions and data separate. Keyboard commands follow the selected product.
 Optional quick access, Touch ID/Mac-password unlock, screen-lock handling and
 expiring password copies support everyday Mac workflows.
@@ -56,8 +58,8 @@ open build/ProtonX.app
 ```
 
 Choose **Explore with demo data** for Pass or **Explore demo inbox** for Mail.
-Use the visible **ProtonX** product switcher, **Products** menu, or ⌘1 / ⌘2 to
-open either window. Demo data is synthetic and never accesses a Proton account.
+Use the product rail or **Products** menu: ⌘1 for Pass, ⌘2 for Mail and ⌘3
+for Calendar. Choose **Explore Calendar preview** for sample events. Demo data is synthetic and never accesses a Proton account.
 
 Builds use ad-hoc signing by default. An Apple Development identity from a free
 Xcode Personal Team passed the synthetic Keychain rebuild-continuity test on the
@@ -152,13 +154,13 @@ public certificate, subject to Bridge's product limits.
 
 ## Keyboard and menu bar
 
-- ⌘0 / ⌘1 / ⌘2: Home / Pass / Mail.
+- ⌘0 / ⌘1 / ⌘2 / ⌘3: Home / Pass / Mail / Calendar.
 - ⌘N / ⌘F / ⌘R: create, search and refresh in the front product window.
 - In Mail: ⇧⌘U read/unread, ⌘E archive, ⌘Delete Trash, ⌘Return review before sending.
-- ⌘L: lock both products. ⌘,: settings. ⌘Q: quit.
+- ⌘L: lock all products. ⌘,: settings. ⌘Q: quit.
 - Optional ⌃⌥P: bring Pass forward and focus search.
 - Settings can hide the menu-bar icon. The Dock and Window menu remain available.
-  Closing the suite window locks both products and keeps ProtonX running; Quit ends it.
+  Closing the suite window locks all products and keeps ProtonX running; Quit ends it.
 
 ## Contribute
 
