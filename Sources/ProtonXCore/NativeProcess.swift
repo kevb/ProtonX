@@ -45,6 +45,7 @@ public final class NativeProcess: HelperRunning, @unchecked Sendable {
             "PASS_LOG_LEVEL": "off", "MUON_LOG_LEVEL": "off"
         ]
         let stdin = Pipe(), stdout = Pipe(), stderr = Pipe()
+        try PrivatePipe.prepareWriting(stdin.fileHandleForWriting)
         process.standardInput = stdin; process.standardOutput = stdout; process.standardError = stderr
         let id = UUID()
         return try await withTaskCancellationHandler {

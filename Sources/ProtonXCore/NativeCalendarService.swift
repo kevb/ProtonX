@@ -126,6 +126,7 @@ public final class NativeCalendarProcess: NativeCalendarRunning, @unchecked Send
             if let connection, connection.process.isRunning { return connection }
             guard FileManager.default.isExecutableFile(atPath: executable.path) else { throw ProtonXError.helperMissing }
             let process = Process(), input = Pipe(), output = Pipe()
+            try PrivatePipe.prepareWriting(input.fileHandleForWriting)
             process.executableURL = executable; process.arguments = []
             process.environment = ["PATH": "/usr/bin:/bin", "LANG": "en_US.UTF-8", "HOME": FileManager.default.homeDirectoryForCurrentUser.path, "PROTONX_CALENDAR_DIR": directory.path]
             process.standardInput = input; process.standardOutput = output; process.standardError = FileHandle.nullDevice

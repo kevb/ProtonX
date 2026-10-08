@@ -7,7 +7,7 @@ are excluded from public artifacts.
 
 ## Calendar read-only connection — 2026-10-08
 
-- The full local Swift run passed 198 tests in nine suites, including bounded
+- The earlier full local Swift run passed 198 tests in nine suites, including bounded
   native commands/replies, private-pipe credentials/challenges, empty accounts,
   all-day wire dates, range navigation, read-only mutation refusal, product-state
   retention, cancelled local unlock and rejection of late authentication/results.
@@ -36,7 +36,9 @@ are excluded from public artifacts.
 - CI's macOS runner had no Go executable; helper/source-bundle and Calendar jobs
   now explicitly provision pinned Go 1.26.4. Two remaining notification async
   calls were moved to SDK callbacks to avoid older-SDK actor-transfer errors.
-  Local verification passed; the subsequent CI result is recorded separately.
+  Calendar helper build/tests also passed on GitHub. Private helper input pipes
+  suppress SIGPIPE per descriptor so an exited helper fails the request rather
+  than terminating the app; a synthetic closed-reader contract covers this path.
 - No real Calendar account was accessed. Live sign-in, older/shared/subscribed keys,
   recurring exception interoperability and server expiry remain acceptance gates.
   Connected editing, invitations, reminders and persistent caching are not enabled.
@@ -75,9 +77,11 @@ are excluded from public artifacts.
 | Calendar | Synthetic date/DST/layout, preview editing, native helper/session/range/lock contracts, official mock-server SRP and pinned public decryption/recurrence tests; native preview walkthrough | Real-account sign-in/key history, signature verification, server recurrence interoperability, secure caching, mutations, invitations and notifications |
 | Product launchers | Synthetic native UI checks for cold/warm requests, minimized/closed windows and reverse product selection; signed installer checks | Minimum-OS runtime and update/Keychain continuity |
 
-The latest local Swift run passed 198 tests; five synthetic atomic-install tests
-passed at the prior installer milestone. These are local results, not a statement about the
-latest GitHub run. Dated entries below record milestone-specific test scope and
+The latest local Swift run passed 198 of 199 tests. The existing Mail reader
+scroll fixture failed to move its synthetic wheel event; its WebKit rendering,
+image transport and security checks passed. The new private-pipe contract passed.
+Five synthetic atomic-install tests passed at the prior installer milestone.
+These are local results, not a statement about the latest GitHub run. Dated entries below record milestone-specific test scope and
 historical limitations. The README and roadmap describe the current feature set.
 
 ## Native Mail attachments, 2026-10-08

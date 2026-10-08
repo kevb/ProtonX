@@ -59,25 +59,26 @@ private actor CalendarRejectingRunner: NativeCalendarRunning {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("CalendarPipe." + UUID().uuidString)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
-        let script = dir.appendingPathComponent("synthetic-helper.py")
+        let script = dir.appendingPathComponent("synthetic-helper.sh")
         let program = #"""
-        #!/usr/bin/python3
-        import sys,json,os
-        assert len(sys.argv)==1
-        assert 'PROTONX_CALENDAR_DIR' in os.environ
-        assert 'SYNTHETIC_CALENDAR_SECRET' not in os.environ
-        for line in sys.stdin:
-            p=json.loads(line);c=p['command'];m=c['method']
-            if m=='login':
-                assert c['password']=='synthetic-password'
-                result={'phase':'totp'}
-            elif m=='totp':
-                assert c['code']=='123456'
-                result={'phase':'connected'}
-            elif m=='snapshot':
-                result={'phase':'connected','start':c['start'],'end':c['end'],'calendars':[],'events':[]}
-            else: raise Exception('unexpected synthetic command')
-            print(json.dumps({'schema':1,'id':p['id'],'result':result}),flush=True)
+        #!/bin/sh
+        set -eu
+        [ "$#" -eq 0 ]
+        [ -n "$PROTONX_CALENDAR_DIR" ]
+        [ -z "${SYNTHETIC_CALENDAR_SECRET+x}" ]
+        IFS= read -r login
+        case "$login" in *'"password":"synthetic-password"'*) ;; *) exit 1 ;; esac
+        case "$login" in *'"method":"login"'*) ;; *) exit 1 ;; esac
+        printf '%s\n' '{"schema":1,"id":1,"result":{"phase":"totp"}}'
+        IFS= read -r totp
+        case "$totp" in *'"code":"123456"'*) ;; *) exit 1 ;; esac
+        case "$totp" in *'"method":"totp"'*) ;; *) exit 1 ;; esac
+        printf '%s\n' '{"schema":1,"id":2,"result":{"phase":"connected"}}'
+        IFS= read -r snapshot
+        case "$snapshot" in *'"start":1791417600'*) ;; *) exit 1 ;; esac
+        case "$snapshot" in *'"end":1792022400'*) ;; *) exit 1 ;; esac
+        case "$snapshot" in *'"method":"snapshot"'*) ;; *) exit 1 ;; esac
+        printf '%s\n' '{"schema":1,"id":3,"result":{"phase":"connected","start":1791417600,"end":1792022400,"calendars":[],"events":[]}}'
         """#
         try Data(program.utf8).write(to: script)
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: script.path)
