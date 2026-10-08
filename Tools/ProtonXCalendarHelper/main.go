@@ -36,13 +36,14 @@ var errInput = errors.New("invalid_input")
 var errReadOnly = errors.New("read_only")
 
 type command struct {
-	Method   string `json:"method"`
-	Username string `json:"username,omitempty"`
-	Password string `json:"password,omitempty"`
-	Code     string `json:"code,omitempty"`
-	Start    int64  `json:"start,omitempty"`
-	End      int64  `json:"end,omitempty"`
-	Zone     string `json:"zone,omitempty"`
+	Method   string          `json:"method"`
+	Handoff  *accountHandoff `json:"handoff,omitempty"`
+	Username string          `json:"username,omitempty"`
+	Password string          `json:"password,omitempty"`
+	Code     string          `json:"code,omitempty"`
+	Start    int64           `json:"start,omitempty"`
+	End      int64           `json:"end,omitempty"`
+	Zone     string          `json:"zone,omitempty"`
 }
 type packet struct {
 	Schema  int     `json:"schema"`
@@ -101,6 +102,9 @@ func decode(line []byte) (packet, error) {
 		return p, errInput
 	}
 	c := p.Command
+	if c.Method != "account_handoff" && c.Handoff != nil {
+		return p, errInput
+	}
 	switch c.Method {
 	case "login":
 		if c.Username == "" || len(c.Username) > 320 || c.Password == "" || len(c.Password) > 4096 || c.Code != "" || c.Start != 0 || c.End != 0 || c.Zone != "" || strings.ContainsAny(c.Username, "\r\n\x00") {
@@ -121,7 +125,11 @@ func decode(line []byte) (packet, error) {
 		if _, err := time.LoadLocation(c.Zone); err != nil {
 			return p, errInput
 		}
-	case "restore", "sign_out":
+	case "account_handoff":
+		if !c.Handoff.valid(time.Now().Unix()) || c.Username != "" || c.Password != "" || c.Code != "" || c.Start != 0 || c.End != 0 || c.Zone != "" {
+			return p, errInput
+		}
+	case "restore", "sign_out", "commit_handoff":
 		if c.Username != "" || c.Password != "" || c.Code != "" || c.Start != 0 || c.End != 0 || c.Zone != "" {
 			return p, errInput
 		}
@@ -147,13 +155,17 @@ func (b *memoryBackend) Write(d []byte) error {
 func (b *memoryBackend) Delete() error { clear(b.data); b.data = nil; return nil }
 
 type engine struct {
-	input    *bufio.Scanner
-	output   io.Writer
-	id       uint64
-	client   *papi.Client
-	keys     *calendar.Keychain
-	unlocked *auth.Unlocked
-	backend  config.Backend
+	input          *bufio.Scanner
+	output         io.Writer
+	id             uint64
+	client         *papi.Client
+	keys           *calendar.Keychain
+	unlocked       *auth.Unlocked
+	backend        config.Backend
+	pending        *engine
+	handoffExpires int64
+	redeem         func(context.Context, string) (papi.CalendarFork, error)
+	unlockHandoff  func(context.Context, *engine) error
 }
 
 func (e *engine) send(value any, failure string) error {
@@ -166,6 +178,7 @@ func (e *engine) send(value any, failure string) error {
 	return err
 }
 func (e *engine) close() {
+	e.clearHandoff()
 	if e.keys != nil {
 		e.keys.Clear()
 	}
@@ -327,6 +340,10 @@ func (readAPI) Post(context.Context, string, any, any) error { return errReadOnl
 func (readAPI) Delete(context.Context, string, any) error    { return errReadOnly }
 func (e *engine) handle(ctx context.Context, c command) (any, error) {
 	switch c.Method {
+	case "account_handoff":
+		return e.stageHandoff(ctx, c.Handoff)
+	case "commit_handoff":
+		return e.commitHandoff(ctx)
 	case "login":
 		e.close()
 		staging := &memoryBackend{}
@@ -450,6 +467,9 @@ func (e *engine) snapshot(ctx context.Context, c command) (any, error) {
 	return out, nil
 }
 func failure(err error) string {
+	if errors.Is(err, errHandoff) {
+		return "handoff_unavailable"
+	}
 	if errors.Is(err, config.ErrNoSession) {
 		return "session_expired"
 	}

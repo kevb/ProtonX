@@ -54,6 +54,10 @@ public final class PassService: Sendable {
     public func login(interactive: Bool = true, challenge: @escaping ChallengeHandler) async throws {
         _ = try await execute(HelperCommand(interactive ? ["login", "--interactive"] : ["login"]), challenge: challenge)
     }
+    public func calendarHandoff() async throws -> AccountHandoff {
+        let result = try JSONDecoder().decode(AccountHandoff.self, from: await execute(HelperCommand(["native-calendar-handoff"])))
+        try result.validate(); return result
+    }
     public func logout() async throws { _ = try await execute(HelperCommand(["logout"])) }
     public func snapshot() async throws -> PassSnapshot {
         try JSONDecoder().decode(PassSnapshot.self, from: await execute(HelperCommand(["native-snapshot"])))

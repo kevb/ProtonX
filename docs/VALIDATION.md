@@ -5,6 +5,36 @@ macOS 26.6.2, Xcode 27 / Swift 6.4 and Rust 1.99.0. Automated test content is
 synthetic and uses isolated storage. Private account contents and credentials
 are excluded from public artifacts.
 
+## Calendar account handoff — 2026-10-08
+
+- All 213 Swift contracts passed locally using the native build system. Coverage
+  includes automatic Calendar connection from an unlocked Mail account, local
+  unlock and return routing, waiting for initial account loading, explicit
+  alternate-account choice, failed handoff without automatic retries, source lock
+  during staging, late-result rejection, missing saved hints, preview exclusion
+  and offline-to-online Pass eligibility.
+- Pass's original CLI, native desktop and SDK public tests passed: 503 tests,
+  with two upstream SDK tests ignored. A new primary-key selection contract
+  refuses missing/inactive/ambiguous keys. The original CLI cannot expose the new
+  handoff command; native PAT/agent/automation restrictions remain intact.
+- All 218 selected Mail helper/upstream contracts passed, including the closed
+  handoff command, rendering, paging, composer/sender/send/action queues,
+  conversations, notifications, attachments and storage preflight. No production
+  Keychain backend or Proton account was used for validation.
+- Calendar's native/public Go tests passed. The anonymous fork transport checks
+  the fixed client header, selector path, response bounds and absence of parent
+  authorization/cookies. Identity mismatch, expiry, existing credentials,
+  cancelled staging/commit and replay refusal preserve the target store.
+- An official local Proton mock server exercised SRP-derived key compatibility,
+  genuine key unlocking and publication of distinct child tokens without changing
+  parent credentials. Fork HTTP framing is tested separately; this fixture does
+  not establish live server fork acceptance or parent/child revocation behavior.
+- Optimized Mail, Pass and Calendar helpers and the suite bundle built. Packaging
+  verifies strict nested signatures using the existing configured local identity.
+  Live Mail/Pass-to-Calendar handoff and Calendar account interoperability remain
+  manual acceptance steps; detached Calendar signature verification remains an
+  independent release gate.
+
 ## Calendar read-only connection — 2026-10-08
 
 - The earlier full local Swift run passed 198 tests in nine suites, including bounded

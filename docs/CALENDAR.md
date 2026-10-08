@@ -1,15 +1,24 @@
 # Native Calendar
 
 Open Calendar from Home, the product rail, **Products → Open Calendar** (⌘3),
-or `protonx://calendar`. The normal app offers a native sign-in form and an
-explicit synthetic preview. The isolated preview bundle uses sample data only.
+or `protonx://calendar`. The normal app reuses an unlocked ProtonX account and
+offers an explicit synthetic preview. The isolated preview bundle uses sample data only.
 
 ## Connected browsing (experimental)
 
-Sign in with a Proton username and password. TOTP and two-password accounts
-have native challenge fields. CAPTCHA and security-key-only authentication are
-not supported yet; these flows stop with a verification message. Calendar owns
-its session independently of Mail and Pass.
+Calendar connects from an unlocked Mail or online Pass account using Proton's
+one-use session fork. There is no second username/password form in the normal
+suite flow. If the existing account is locked, **Unlock Mail/Pass to continue**
+opens its local Touch ID screen and returns to Calendar after unlock. Switching
+elsewhere cancels that return. With two unlocked accounts, choose the source;
+Calendar never silently replaces its already-saved account.
+
+**Use another account** retains native password/TOTP/two-password sign-in.
+CAPTCHA and security-key-only authentication are not supported yet. Proton may
+refuse to fork an existing child/limited session; the UI shows a retry/fallback
+rather than duplicating tokens or bypassing server rules. Calendar still owns
+separate child tokens, keys, local unlock and sign-out. Parent-account revocation
+can affect a linked child session according to Proton's server policy.
 
 The read-only adapter lists calendars and decrypts events for the displayed date
 range. Changing the date, view or time zone fetches that range; Refresh fetches
@@ -39,7 +48,14 @@ and disposable-account interoperability remain release gates. See [SECURITY.md](
 
 The macOS helper stores session tokens and the derived key-unlock passphrase in
 `org.kevb.ProtonX.Calendar.Native`, a dedicated, nonsynchronizing Keychain entry.
-The login password is not persisted. Saved-session restore follows native local
+The login password is not persisted. Account handoff carries a one-use selector,
+canonical user ID and derived key-unlock secret over private pipes only, with a
+120-second local lifetime. The child account and unlocked key identity must both
+match the source. Keys/tokens are staged in memory until the app rechecks the
+unlocked source and explicitly commits; existing Calendar credentials are never
+replaced by this path. There is no automatic replay after ambiguous failure.
+An interrupted handoff may leave an unused child session on Proton's server;
+clearing local state does not guarantee remote revocation. Saved-session restore follows native local
 Touch ID/Mac-password authentication. The configured stable signing identity also
 signs the Calendar helper; ad-hoc builds can need new Keychain authorization after
 rebuilds. No Keychain access rule is weakened.
@@ -79,9 +95,11 @@ preserves original source notices while replacing storage, removing CAPTCHA
 console/browser workarounds and imposing transport/recurrence limits.
 
 The helper uses private, bounded JSON lines on stdin/stdout. It accepts only
-sign-in, TOTP, mailbox-password, restore, date-range snapshot and sign-out.
+sign-in, TOTP, mailbox-password, one-use account handoff/commit, restore,
+date-range snapshot and sign-out.
 Credentials never enter process arguments/environment or diagnostic output.
-`Resources/CalendarProtocol.json` records the fixed API origin and limits:
+`Resources/CalendarProtocol.json` pins the Calendar client identity from the
+public web bundle (URL and SHA-256), fixed API origin and limits:
 62 days per range, 64 calendars, 5,000 occurrences and 8 MiB per reply.
 
 Run `scripts/build-calendar-helper.sh`, `scripts/test-calendar-helper.sh` and

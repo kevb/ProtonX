@@ -203,6 +203,31 @@ import ProtonXCore
             if self.busy { self.needsRangeReload = true } else { self.refresh() }
         }
     }
+    /// No target credentials are stored until both the source lease and the
+    /// staged child account/key identity have been checked after async work.
+    func connectAccount(produce: @escaping @MainActor () async throws -> AccountHandoff,
+                        sourceIsValid: @escaping @MainActor () -> Bool) {
+        guard !previewOnly, !hasSession, phase == .welcome, !busy, sourceIsValid() else { return }
+        phase = .signingIn
+        let ticket = epoch.value
+        perform { [self] in
+            let handoff = try await produce()
+            guard !Task.isCancelled, epoch.accepts(ticket), sourceIsValid() else { throw CancellationError() }
+            let staged = try await runner.request(NativeCalendarCommand("account_handoff", handoff: handoff))
+            guard !Task.isCancelled, epoch.accepts(ticket), sourceIsValid() else { throw CancellationError() }
+            if staged.phase == "locked" {
+                return { [self] in hasSession = true; defaults.set(true,forKey:"nativeCalendarConnected"); runner.cancelAll(); phase = .locked }
+            }
+            guard staged.phase == "handoff_ready" else { throw ProtonXError.invalidResponse }
+            let result = try await runner.request(NativeCalendarCommand("commit_handoff"))
+            guard result.phase == "connected", !Task.isCancelled, epoch.accepts(ticket), sourceIsValid() else { throw CancellationError() }
+            return { [self] in
+                hasSession = true; defaults.set(true,forKey:"nativeCalendarConnected")
+                source = NativeCalendarDataSource(runner:runner); phase = .connected
+                visibleCalendarIDs = []; needsRangeReload = true
+            }
+        }
+    }
     func signIn(username: String, password: String) {
         guard !previewOnly, !busy, [.welcome,.locked].contains(phase) else { return }
         do {

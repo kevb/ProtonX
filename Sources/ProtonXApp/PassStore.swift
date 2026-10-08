@@ -31,6 +31,14 @@ final class PassStore: ObservableObject {
     @Published private(set) var challenge: AuthChallenge?
     private var credentialRequestID: UUID?
     private var credentialContinuation: CheckedContinuation<String, Error>?
+    var accountHandoffGeneration: UInt64? { phase == .open && !isDemo && !previewOnly && !isUsingSavedVault && !requiresSignIn && lastSyncedAt != nil && !mustRefreshBeforeWriting ? epoch.value : nil }
+    var canConnectCalendar: Bool { accountHandoffGeneration != nil && !busy }
+    func calendarHandoff() async throws -> AccountHandoff {
+        guard let ticket = accountHandoffGeneration else { throw NativeCalendarFailure.handoffUnavailable }
+        let handoff = try await service.calendarHandoff()
+        guard accountHandoffGeneration == ticket, !Task.isCancelled else { throw CancellationError() }
+        return handoff
+    }
     private var epoch = SessionEpoch()
     private var selectionEpoch = SessionEpoch()
     private var operation: Task<Void, Never>?

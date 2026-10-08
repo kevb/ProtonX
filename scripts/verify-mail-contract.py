@@ -75,4 +75,8 @@ assert (native / "project/mail/rust/mail/mail-common/tests/protonx_attachment_ex
 assert "protonx_attachment_content" in (native / "project/mail/rust/mail/mail-uniffi/src/mail/mailbox/attachments.rs").read_text()
 assert "cache_storage::read" in (native / "project/mail/rust/mail/mail-common/src/mailbox/attachments.rs").read_text()
 
-print("Independent native Mail protocol, privacy and notification contracts verified")
+handoff = (native / "project/mail/rust/mail/mail-uniffi/src/mail/user_session.rs").read_text()
+assert (root / "Tools/MailAccountHandoff/sdk.rs").read_text() in handoff
+assert 'fork("web", "calendar")' in handoff and "CalendarHandoff" in helper
+assert "encode_handoff_key" not in helper
+print("Independent native Mail protocol, privacy, notifications and account handoff contracts verified")

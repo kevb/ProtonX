@@ -85,6 +85,7 @@ struct Request {
 #[serde(tag = "method", rename_all = "snake_case", deny_unknown_fields)]
 enum Command {
     Initialize,
+    CalendarHandoff {},
     NotificationsStart,
     NotificationsPoll,
     NotificationsStop,
@@ -591,6 +592,18 @@ impl Backend {
                     .map_err(|e| action_failure(e, "snapshot_failed"))?;
                 let unread = systems.iter().find(|f| inbox_actions::folder_kind(&f.description) == "inbox").map(|f| f.count).unwrap_or(0);
                 Ok(json!({"notifications":notifications, "unreadCount":unread}))
+            }
+            Command::CalendarHandoff {} => {
+                let user = self.user.as_ref().ok_or("invalid_state")?;
+                let (selector, account_id, mut key_pass) = block_on(user.protonx_calendar_handoff()).map_err(|_| "handoff_unavailable")?;
+                if selector.is_empty() || selector.len() > 512 || account_id.is_empty() || account_id.len() > 128 {
+                    key_pass.fill(0); return Err("handoff_unavailable");
+                }
+                let expires = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_err(|_| "handoff_unavailable")?.as_secs() + 120;
+                // The derived key-unlock secret travels only on private IPC; no parent tokens are exported.
+                let handoff = json!({"selector":selector,"accountID":account_id,"keyPassHex":key_pass.iter().map(|b| format!("{b:02x}")).collect::<String>(),"expires":expires});
+                key_pass.fill(0);
+                Ok(json!({"handoff":handoff}))
             }
             Command::Initialize => {
                 let sessions = sdk_result!(
@@ -1285,6 +1298,8 @@ mod tests {
     use super::*;
     #[test]
     fn protocol_refuses_unknown_fields_and_methods() {
+        assert!(serde_json::from_value::<Request>(json!({"schema":1,"id":1,"command":{"method":"calendar_handoff"}})).is_ok());
+        assert!(serde_json::from_value::<Request>(json!({"schema":1,"id":1,"command":{"method":"calendar_handoff","child_client":"evil"}})).is_err());
         assert!(serde_json::from_value::<Request>(json!({"schema":1,"id":1,"command":{"method":"login","username":"test@example.com","password":"synthetic","extra":"bad"}})).is_err());
         assert!(
             serde_json::from_value::<Request>(

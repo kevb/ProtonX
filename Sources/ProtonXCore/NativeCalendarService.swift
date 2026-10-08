@@ -3,10 +3,12 @@ import Foundation
 import Darwin
 
 public enum NativeCalendarFailure: String, Codable, Error, LocalizedError, Sendable {
+    case handoffUnavailable = "handoff_unavailable"
     case invalidInput = "invalid_input", invalidState = "invalid_state", operationFailed = "operation_failed"
     case sessionExpired = "session_expired", storageUnavailable = "storage_unavailable", verificationRequired = "verification_required", tooLarge = "too_large", readOnly = "read_only"
     public var errorDescription: String? {
         switch self {
+        case .handoffUnavailable: "Proton could not connect Calendar from this account session. Try an unlocked Mail account, or sign in separately."
         case .sessionExpired: "Your Calendar session ended. Sign in again."
         case .storageUnavailable: "Calendar could not access its saved Keychain session. Your existing credentials have been retained."
         case .verificationRequired: "This sign-in requires verification that Calendar does not support yet. CAPTCHA and security-key-only sign-in are not available."
@@ -19,16 +21,18 @@ public enum NativeCalendarFailure: String, Codable, Error, LocalizedError, Senda
     }
 }
 public struct NativeCalendarCommand: Encodable, Sendable {
+    public let handoff: AccountHandoff?
     public let method: String
     public let username: String?, password: String?, code: String?
     public let start: Int64?, end: Int64?, zone: String?
-    public init(_ method: String, username: String? = nil, password: String? = nil, code: String? = nil, range: CalendarQueryRange? = nil) throws {
-        self.method = method; self.username = username; self.password = password; self.code = code
+    public init(_ method: String, username: String? = nil, password: String? = nil, code: String? = nil, range: CalendarQueryRange? = nil, handoff: AccountHandoff? = nil) throws {
+        self.handoff = handoff; self.method = method; self.username = username; self.password = password; self.code = code
         if let range { try range.validate() }
         start = range.map { Int64($0.start.timeIntervalSince1970) }; end = range.map { Int64($0.end.timeIntervalSince1970) }; zone = range?.timeZoneID
         try validate()
     }
     public func validate() throws {
+        guard method == "account_handoff" || handoff == nil else { throw NativeCalendarFailure.invalidInput }
         let noRange = start == nil && end == nil && zone == nil
         switch method {
         case "login":
@@ -41,7 +45,9 @@ public struct NativeCalendarCommand: Encodable, Sendable {
         case "snapshot":
             guard let start, let end, let zone, username == nil, password == nil, code == nil else { throw NativeCalendarFailure.invalidInput }
             try CalendarQueryRange(start: Date(timeIntervalSince1970: Double(start)), end: Date(timeIntervalSince1970: Double(end)), timeZoneID: zone).validate()
-        case "restore", "sign_out": guard username == nil, password == nil, code == nil, noRange else { throw NativeCalendarFailure.invalidInput }
+        case "account_handoff":
+            guard let handoff, username == nil, password == nil, code == nil, noRange else { throw NativeCalendarFailure.invalidInput }; try handoff.validate()
+        case "restore", "sign_out", "commit_handoff": guard username == nil, password == nil, code == nil, noRange else { throw NativeCalendarFailure.invalidInput }
         default: throw NativeCalendarFailure.invalidInput
         }
     }
@@ -194,7 +200,7 @@ public final class NativeCalendarProcess: NativeCalendarRunning, @unchecked Send
         let reply = try JSONDecoder().decode(Reply.self, from: data)
         guard reply.schema == 1, reply.id == expectedID, (reply.result == nil) != (reply.failure == nil) else { throw ProtonXError.invalidResponse }
         if let failure = reply.failure { throw failure }
-        guard let result = reply.result, ["welcome","connected","totp","mailbox_password"].contains(result.phase ?? ""),
+        guard let result = reply.result, ["welcome","connected","totp","mailbox_password","handoff_ready","locked"].contains(result.phase ?? ""),
               (result.calendars?.count ?? 0) <= 64, (result.events?.count ?? 0) <= 5000,
               (result.omitted ?? 0) >= 0, (result.omitted ?? 0) <= 100000 else { throw ProtonXError.invalidResponse }
         return result

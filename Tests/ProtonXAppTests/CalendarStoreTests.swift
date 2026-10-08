@@ -99,7 +99,8 @@ private actor CalendarSnapshotGate: CalendarDataSource {
     @Test func calendarFiltersSearchAndStartupRouting() async throws {
         let defaults = UserDefaults(suiteName: "CalendarSuiteTests." + UUID().uuidString)!
         defaults.set("calendar", forKey: "suiteStartup")
-        let workspace = SuiteWorkspace(defaults: defaults, previewOnly: false)
+        defaults.set(false,forKey:"nativeMailConnected");defaults.set(false,forKey:"nativeCalendarConnected")
+        let workspace = SuiteWorkspace(defaults: defaults, previewOnly: false,makePass:{PassStore(previewOnly:true)})
         #expect(workspace.selected == .calendar && workspace.calendar?.phase == .welcome && workspace.mail == nil && workspace.pass == nil)
         let store = CalendarStore(previewOnly: true, now: { fixed }); try await wait { !store.busy }
         store.query = "Weekly"; #expect(store.filteredEvents.map(\.id) == ["planning"])

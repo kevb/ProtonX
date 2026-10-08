@@ -245,7 +245,9 @@ Keychain access or notarization.
 
 One native window hosts lazy Pass, Mail and Calendar workspaces. A product switch keeps
 selection, search, scroll and unsaved Mail editor state in the existing product
-objects; it does not unlock, restore or merge sessions. Shared defaults contain
+objects. Calendar may request a one-use account handoff from an already unlocked
+Mail or online Pass session, as described below; switching never bypasses a saved
+product's local unlock or merges product stores. Shared defaults contain
 only startup/last-product navigation preferences. Home does not start product
 helpers, and the preview ignores real startup preferences. The product rail
 excludes hidden content from input/accessibility and uses selected-product
@@ -295,6 +297,34 @@ raster images and TXT/CSV are offered in-app preview/open; other types use expli
 Save. Unsaved composer text is preserved during file operations, and uncertain
 upload/removal requires metadata reconciliation before repeating a change/send.
 See docs/MAIL_ATTACHMENTS.md for complete behavior and acceptance limits.
+
+## Calendar account handoff
+
+An already unlocked native Mail or online Pass account can create a child
+`web-calendar` session using Proton's fixed session-fork endpoint. Only the
+one-use selector, canonical user ID and SDK-derived key-unlock passphrase travel
+between helpers on private pipes. Parent access/refresh tokens and login passwords
+are never exported. The envelope is bounded, locally expires in 120 seconds and
+is never published in observable state, preferences, URLs, arguments, environment,
+logs or clipboard. String/data copies do not provide reliable zeroization.
+
+Calendar redeems the selector anonymously at the fixed production origin, with
+no cookies, proxies, redirects or automatic retry. Both the returned user ID and
+the unlocked user/key identity must match before the child is usable. A staging
+step retains child tokens/keys in memory; commit requires another source-session
+and target-epoch check in the app. Existing Calendar Keychain data is never
+replaced. Source lock, suite lock and switching away cancel in-flight connection;
+late results cannot reopen a workspace. Parent/child revocation semantics remain
+Proton's policy; cancelled consumption may leave an unused remote child session.
+
+Saved source accounts require their normal local authentication before helper
+access. Demo, preview, offline Pass, PAT and agent sessions cannot produce a
+handoff. Original CLI eligibility and command policy are unchanged. If more than
+one account is unlocked, the source is an explicit choice. This is account SSO,
+not a global credential store; separate sessions, data stores and product lock
+boundaries remain. Synthetic tests cover transport, identity mismatch, staging,
+expiry, cancellation and navigation; real server interoperability is a separate
+acceptance step.
 
 ## Calendar native adapter
 

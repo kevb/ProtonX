@@ -94,6 +94,7 @@ private func offlineSession() throws -> URL {
     defer { store.lock() }
     #expect(store.phase == .locked); #expect(runner.calls.isEmpty)
     store.unlock(); await awaitOffline { store.isUsingSavedVault }
+    #expect(store.accountHandoffGeneration == nil && !store.canConnectCalendar)
     #expect(unlocks == 1); #expect(store.busy); #expect(store.lastSyncedAt == Date(timeIntervalSince1970: 1_800_000_000))
     #expect(!store.canCreate); #expect(!store.canTrash); #expect(store.mustRefreshBeforeWriting)
     store.selectedItem = "s:i"; await awaitOffline { store.detail != nil }
@@ -105,6 +106,7 @@ private func offlineSession() throws -> URL {
     await awaitOffline { !store.busy }
     #expect(!store.isUsingSavedVault); #expect(!store.mustRefreshBeforeWriting); #expect(store.items.first?.title == "Updated online")
     #expect(store.lastSyncedAt == offlineNow); #expect(store.offlineCacheStatus == "ready")
+    #expect(store.accountHandoffGeneration != nil && store.canConnectCalendar)
 }
 
 @Test @MainActor func offlinePassNeverQueuesWritesAndReconnectUsesAuthoritativePermissions() async throws {

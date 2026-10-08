@@ -59,7 +59,7 @@ with tempfile.TemporaryDirectory(prefix="ProtonX-calendar-source-") as tmp:
     )
     auth.write_text(s)
     api = stage / "pkg/papi/papi.go"
-    s = api.read_text().replace(
+    s = api.read_text().replace('AppVersion = "Other"', 'AppVersion = "' + json.loads((root / "Resources/CalendarProtocol.json").read_text())["appVersion"] + '"').replace(
         'UserAgent = "proton-cal/0.1"', 'UserAgent = "ProtonX-Calendar/0.1"'
     )
     s = s.replace(
@@ -99,6 +99,8 @@ with tempfile.TemporaryDirectory(prefix="ProtonX-calendar-source-") as tmp:
     )
     s += "\n" + (root / "Tools/CalendarContractTests/transport.go").read_text()
     api.write_text(s)
+    shutil.copy2(root / "Tools/CalendarAccountHandoff/transport.go", stage / "pkg/papi/protonx_handoff.go")
+    shutil.copy2(root / "Tools/CalendarAccountHandoff/transport_test.go", stage / "pkg/papi/protonx_handoff_test.go")
     shutil.copy2(
         root / "Tools/CalendarContractTests/transport_test.go",
         stage / "pkg/papi/protonx_transport_test.go",

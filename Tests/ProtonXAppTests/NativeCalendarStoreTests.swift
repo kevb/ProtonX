@@ -7,6 +7,8 @@ import ProtonXCore
 private actor CalendarRunnerFixture: NativeCalendarRunning {
     private(set) var calls: [String] = []
     private(set) var ranges: [(Int64,Int64)] = []
+    var existingTarget = false
+    func configureExistingTarget() { existingTarget = true }
     var challenge: String?
     var fail: NativeCalendarFailure?
     private var held: CheckedContinuation<Void,Never>?
@@ -22,8 +24,9 @@ private actor CalendarRunnerFixture: NativeCalendarRunning {
             let data = Data("{\"schema\":1,\"id\":1,\"result\":{\"phase\":\"connected\",\"start\":\(start),\"end\":\(end),\"calendars\":[{\"id\":\"synthetic-cal\",\"name\":\"Synthetic calendar\",\"color\":0}],\"events\":[{\"id\":\"synthetic-event\",\"calendarID\":\"synthetic-cal\",\"title\":\"Synthetic event\",\"location\":\"\",\"notes\":\"\",\"start\":\(start+3600),\"end\":\(start+7200),\"zone\":\"UTC\",\"allDay\":false,\"recurring\":true}]}}".utf8)
             return try NativeCalendarProcess.decode(data, expectedID: 1)
         }
+        if command.method == "account_handoff", existingTarget { return .init(phase:"locked") }
         if command.method == "login", let challenge { return .init(phase: challenge) }
-        return .init(phase: command.method == "sign_out" ? "welcome" : "connected")
+        return .init(phase: command.method == "account_handoff" ? "handoff_ready" : command.method == "sign_out" ? "welcome" : "connected")
     }
     nonisolated func cancelAll() {}
 }
@@ -87,5 +90,51 @@ private actor CalendarRunnerFixture: NativeCalendarRunning {
         s.signIn(username:"synthetic@example.com",password:"synthetic");try await wait { !s.busy }
         await runner.configure(fail:.sessionExpired);s.refresh();try await wait { !s.busy }
         #expect(s.phase == .welcome && s.events.isEmpty && !d.bool(forKey:"nativeCalendarConnected"))
+    }
+}
+
+@Suite @MainActor struct CalendarHandoffStoreTests {
+    func defaults()->UserDefaults { UserDefaults(suiteName:"CalendarHandoffTests."+UUID().uuidString)! }
+    func handoff()->AccountHandoff { .init(selector:"synthetic-selector",accountID:"synthetic-account",keyPassHex:"73796e746865746963",expires:Int64(Date().timeIntervalSince1970)+120) }
+    func wait(_ condition:()async->Bool)async throws {
+        let limit = ContinuousClock.now.advanced(by:.seconds(5))
+        while !(await condition()) && ContinuousClock.now < limit { try await Task.sleep(for:.milliseconds(10)) }
+        #expect(await condition())
+    }
+    @Test func signedInAccountConnectsWithoutPasswordAndPersistsOnlyAfterCommit() async throws {
+        let r = CalendarRunnerFixture(), d = defaults()
+        let s = CalendarStore(runner:r,defaults:d)
+        var produced = 0
+        s.connectAccount(produce:{ produced += 1; return handoff() },sourceIsValid:{ true })
+        try await wait { !s.busy }
+        #expect(produced == 1 && s.phase == .connected && d.bool(forKey:"nativeCalendarConnected"))
+        #expect(await r.calls == ["account_handoff","commit_handoff","snapshot"])
+        s.connectAccount(produce:{ produced += 1; return handoff() },sourceIsValid:{ true })
+        #expect(produced == 1)
+    }
+    @Test func invalidatedSourceAfterStagingCannotCommitOrReopen()async throws {
+        let r = CalendarRunnerFixture(); await r.configure(hold:true)
+        let d = defaults(), s = CalendarStore(runner:r,defaults:d)
+        var valid = true
+        s.connectAccount(produce:{ handoff() },sourceIsValid:{ valid })
+        try await wait { await r.calls.count == 1 }
+        valid = false; await r.release(); try await wait { !s.busy }
+        #expect(s.phase == .welcome && !d.bool(forKey:"nativeCalendarConnected"))
+        #expect(await r.calls == ["account_handoff"])
+    }
+    @Test func missingSavedHintReturnsToLocalUnlockWithoutCommit()async throws {
+        let r = CalendarRunnerFixture(), d = defaults();await r.configureExistingTarget()
+        let s = CalendarStore(runner:r,defaults:d)
+        s.connectAccount(produce:{ handoff() },sourceIsValid:{ true });try await wait { !s.busy }
+        #expect(s.phase == .locked && d.bool(forKey:"nativeCalendarConnected"))
+        #expect(await r.calls == ["account_handoff"])
+    }
+    @Test func lockAndPreviewNeverCreateChildSessions()async throws {
+        let r = CalendarRunnerFixture(), d = defaults();d.set(true,forKey:"nativeCalendarConnected")
+        let saved = CalendarStore(runner:r,defaults:d)
+        let preview = CalendarStore(previewOnly:true,runner:r,defaults:defaults())
+        saved.connectAccount(produce:{ handoff() },sourceIsValid:{ true })
+        preview.connectAccount(produce:{ handoff() },sourceIsValid:{ true })
+        #expect(await r.calls.isEmpty && saved.phase == .locked)
     }
 }

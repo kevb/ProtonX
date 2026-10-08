@@ -79,6 +79,14 @@ final class NativeMailStore: ObservableObject {
     private var notificationInterval: Duration = .seconds(5)
     private var sendPolling: Task<Void, Never>?
     let previewOnly: Bool
+    var accountHandoffGeneration: UInt64? { phase == .open && !demo && !previewOnly ? epoch.value : nil }
+    var canConnectCalendar: Bool { accountHandoffGeneration != nil && !busy }
+    func calendarHandoff() async throws -> AccountHandoff {
+        guard let ticket = accountHandoffGeneration else { throw NativeCalendarFailure.handoffUnavailable }
+        let result = try await runner.request(NativeMailCommand("calendar_handoff"))
+        guard accountHandoffGeneration == ticket, !Task.isCancelled, let handoff = result.handoff else { throw CancellationError() }
+        try handoff.validate(); return handoff
+    }
     private let runner: any NativeMailRunning
     private let defaults: UserDefaults
     let localAuthentication: LocalUnlockAuthentication

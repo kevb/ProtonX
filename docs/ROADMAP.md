@@ -153,8 +153,11 @@ useful reference, but full product tabs are a separate ProtonX design proposal.
 
 ## Calendar (experimental read-only connection)
 
-Calendar now has native sign-in/TOTP/two-password challenges, a dedicated Keychain
-session, local unlock and bounded calendar/event reads. Week/month/agenda views,
+Calendar now reuses an unlocked Mail or online Pass account through a one-use
+Proton session fork, with local-unlock routing for saved accounts and explicit
+source choice when both products are open. Native password/TOTP/two-password
+sign-in remains an alternate-account path. It has a dedicated Keychain session,
+local unlock and bounded calendar/event reads. Week/month/agenda views,
 time zones, filters and search retain state across product switches. The pinned
 adapter expands recurrence/EXDATEs/modified occurrences; synthetic SRP/decryption
 and public upstream tests cover this path. Real-account interoperability remains
@@ -164,7 +167,8 @@ See [Calendar scope and backend boundary](CALENDAR.md).
 - Verify detached Calendar passphrase/card signatures using Proton's implementation;
   review key provenance and shared/subscribed/older-key handling. Complete an
   independent adapter/security/license review before production release.
-- Validate read-only sign-in, recurring exceptions, key recovery, session
+- Validate account handoff from Mail/Pass (including server fork restrictions),
+  read-only sign-in, recurring exceptions, key recovery, session
   expiry/revocation and upgrade/Keychain continuity with a disposable account.
 - Add encrypted event persistence and cache-first/offline browsing with recovery
   contracts. Add a dedicated day view and accurate repeated-hour DST layout.

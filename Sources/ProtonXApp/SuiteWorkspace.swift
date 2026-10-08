@@ -18,6 +18,9 @@ import ProtonXCore
     private let makeMail: () -> NativeMailStore
     private let makeCalendar: () -> CalendarStore
     private let makeNotificationsAvailable: Bool
+    private var waitingForAccount: ProductRoute?
+    private var returnToCalendarFrom: ProductRoute?
+    private var accountSourceIsValid: (@MainActor () -> Bool)?
     private var observations: Set<AnyCancellable> = []
 
     init(defaults: UserDefaults = .standard, previewOnly: Bool = Bundle.main.bundleIdentifier == "org.kevb.ProtonX.Preview",
@@ -52,6 +55,9 @@ import ProtonXCore
     }
     func select(_ product: ProductRoute?) {
         if selected != product {
+            if selected == .calendar { waitingForAccount = nil }
+            if selected == .calendar && calendar?.phase == .signingIn { calendar?.lock(); accountSourceIsValid = nil }
+            if let pending = returnToCalendarFrom, product != pending { returnToCalendarFrom = nil }
             pass?.cancelLocalUnlock(); mail?.cancelLocalUnlock(); calendar?.cancelLocalUnlock()
             if product == .pass { pass?.localAuthentication.arm() }
             if product == .mail { mail?.localAuthentication.arm() }
@@ -60,21 +66,101 @@ import ProtonXCore
         if product != .pass { passSearchRequested = false }
         if product == .pass && pass == nil {
             let store = makePass(); pass = store
-            store.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &observations)
+            store.objectWillChange.sink { [weak self] _ in self?.productChanged() }.store(in: &observations)
         }
         if product == .mail && mail == nil {
             let store = makeMail(); mail = store
             if !previewOnly, makeNotificationsAvailable { store.configureNotifications(NativeNotifications.shared) }
-            store.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &observations)
+            store.objectWillChange.sink { [weak self] _ in self?.productChanged() }.store(in: &observations)
         }
         if product == .calendar && calendar == nil {
             let store = makeCalendar(); calendar = store
-            store.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &observations)
+            store.objectWillChange.sink { [weak self] _ in self?.productChanged() }.store(in: &observations)
         }
         selected = product
         if let product, !previewOnly { defaults.set(product.rawValue, forKey: "suiteLastProduct") }
+        if product == .calendar, !previewOnly {
+            prepareAccountSources()
+            let available = calendarAccounts.filter { !$0.needsUnlock }
+            if available.count == 1 {
+                if available[0].canContinue { connectCalendar(using:available[0].product) }
+                else { waitingForAccount = available[0].product }
+            }
+        }
+    }
+    struct CalendarAccountOption: Identifiable {
+        let product: ProductRoute
+        let title: String
+        let needsUnlock: Bool
+        let canContinue: Bool
+        var id: String { product.rawValue }
+    }
+    var calendarAccounts: [CalendarAccountOption] {
+        guard !previewOnly else { return [] }
+        var result: [CalendarAccountOption] = []
+        if let mail, !mail.demo, !mail.previewOnly, mail.accountHandoffGeneration != nil || mail.phase == .locked {
+            result.append(.init(product:.mail,title:mail.email.isEmpty ? "Your Mail account" : mail.email,needsUnlock:mail.phase == .locked,canContinue:mail.phase == .locked || mail.canConnectCalendar))
+        }
+        if let pass, !pass.isDemo, !pass.previewOnly, pass.accountHandoffGeneration != nil || pass.phase == .locked {
+            result.append(.init(product:.pass,title:"Your Pass account",needsUnlock:pass.phase == .locked,canContinue:pass.phase == .locked || pass.canConnectCalendar))
+        }
+        return result
+    }
+    private func prepareAccountSources() {
+        // Saved-state hints may construct a locked view, never read credentials or restore.
+        if mail == nil && defaults.bool(forKey:"nativeMailConnected") {
+            let store = makeMail(); mail = store
+            if makeNotificationsAvailable { store.configureNotifications(NativeNotifications.shared) }
+            store.objectWillChange.sink { [weak self] _ in self?.productChanged() }.store(in:&observations)
+        }
+        if pass == nil {
+            let store = makePass()
+            if store.hasSession {
+                pass = store
+                store.objectWillChange.sink { [weak self] _ in self?.productChanged() }.store(in:&observations)
+            }
+        }
+    }
+    func cancelCalendarAccountIntent() { waitingForAccount = nil; returnToCalendarFrom = nil }
+    func connectCalendar(using product: ProductRoute) {
+        guard selected == .calendar, !previewOnly, calendar?.phase == .welcome, calendar?.busy == false else { return }
+        waitingForAccount = nil
+        if product == .mail, let mail {
+            if mail.phase == .locked { select(.mail); returnToCalendarFrom = .mail; return }
+            guard mail.canConnectCalendar, let ticket = mail.accountHandoffGeneration else { return }
+            let valid: @MainActor @Sendable () -> Bool = { [weak mail] in mail?.accountHandoffGeneration == ticket }
+            accountSourceIsValid = valid
+            calendar?.connectAccount(produce:{ try await mail.calendarHandoff() },sourceIsValid:valid)
+        } else if product == .pass, let pass {
+            if pass.phase == .locked { select(.pass); returnToCalendarFrom = .pass; return }
+            guard pass.canConnectCalendar, let ticket = pass.accountHandoffGeneration else { return }
+            let valid: @MainActor @Sendable () -> Bool = { [weak pass] in pass?.accountHandoffGeneration == ticket }
+            accountSourceIsValid = valid
+            calendar?.connectAccount(produce:{ try await pass.calendarHandoff() },sourceIsValid:valid)
+        }
+    }
+    private func productChanged() {
+        objectWillChange.send()
+        // Published callbacks arrive before the new value is set.
+        Task { [weak self] in
+            await Task.yield()
+            guard let self else { return }
+            if let valid = accountSourceIsValid {
+                if calendar?.phase != .signingIn { accountSourceIsValid = nil }
+                else if !valid() { calendar?.lock(); calendar?.error = "Your account was locked while Calendar was connecting. Unlock it and try again."; accountSourceIsValid = nil }
+            }
+            if let product = waitingForAccount, selected == .calendar, calendar?.phase == .welcome,
+               calendar?.error == nil, calendarAccounts.first(where:{$0.product == product})?.canContinue == true {
+                waitingForAccount = nil; connectCalendar(using:product)
+            }
+            if let product = returnToCalendarFrom, selected == product,
+               (product == .mail ? mail?.canConnectCalendar == true : pass?.canConnectCalendar == true) {
+                returnToCalendarFrom = nil; select(.calendar)
+            }
+        }
     }
     func lock() {
+        waitingForAccount = nil; returnToCalendarFrom = nil; accountSourceIsValid = nil
         passSearchRequested = false
         pass?.lock()
         mail?.lock(); calendar?.lock()
@@ -111,7 +197,7 @@ struct SuiteWindow: View {
                         .allowsHitTesting(workspace.selected == .mail).accessibilityHidden(workspace.selected != .mail)
                 }
                 if let calendar = workspace.calendar {
-                    CalendarWindow(store: calendar, isActive: workspace.selected == .calendar)
+                    CalendarWindow(store: calendar, isActive: workspace.selected == .calendar, accounts: workspace.calendarAccounts, connectAccount: { workspace.connectCalendar(using:$0) }, useAnotherAccount: { workspace.cancelCalendarAccountIntent() })
                         .opacity(workspace.selected == .calendar ? 1 : 0)
                         .allowsHitTesting(workspace.selected == .calendar).accessibilityHidden(workspace.selected != .calendar)
                 }

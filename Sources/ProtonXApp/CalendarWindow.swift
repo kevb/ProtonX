@@ -7,6 +7,10 @@ private let calendarColors: [Color] = [.purple, .blue, .pink, .orange, .green, .
 struct CalendarWindow: View {
     @ObservedObject var store: CalendarStore
     var isActive = true
+    var accounts: [SuiteWorkspace.CalendarAccountOption] = []
+    var connectAccount: (ProductRoute) -> Void = { _ in }
+    var useAnotherAccount: () -> Void = {}
+    @State private var separateAccount = false
     @FocusState private var searchFocused: Bool
     @State private var deletion: CalendarStore.DeleteIntent?
     @State private var username = ""
@@ -59,7 +63,7 @@ struct CalendarWindow: View {
                 LocalUnlockCard(product:"Calendar",authentication:store.localAuthentication,isActive:isActive,busy:store.busy,
                                 unlock:{ store.unlock(mode:$0) },cancel:{ store.lock() })
             } else if store.phase == .signingIn {
-                Text("Signing in to Calendar").font(.title.weight(.semibold))
+                Text("Connecting your Calendar").font(.title.weight(.semibold))
                 ProgressView().controlSize(.large)
                 Button("Cancel") { store.lock() }
             } else if store.phase == .totp || store.phase == .mailboxPassword {
@@ -71,14 +75,34 @@ struct CalendarWindow: View {
                 Button("Cancel") { store.lock() }
             } else {
                 Text("Your Calendar, at home on Mac").font(.largeTitle.weight(.semibold))
-                Text(store.previewOnly ? "Explore a native Calendar with sample events." : "Sign in to read your Proton calendars and events.\nYour Calendar session stays separate from Mail and Pass.")
+                Text(store.previewOnly ? "Explore a native Calendar with sample events." : "Read your calendars using your Proton account.")
                     .multilineTextAlignment(.center).foregroundStyle(.secondary)
-                if !store.previewOnly { VStack(spacing:12) {
+                if !store.previewOnly && !accounts.isEmpty && !separateAccount {
+                    VStack(spacing:12) {
+                        Text("Continue with an account in ProtonX").font(.headline)
+                        ForEach(accounts) { account in
+                            Button { connectAccount(account.product) } label: {
+                                HStack(spacing:12) {
+                                    Image(systemName:account.needsUnlock ? "touchid" : account.product == .mail ? "envelope" : "key")
+                                    VStack(alignment:.leading,spacing:3) {
+                                        Text(!account.canContinue ? "Waiting for \(account.product.displayName)…" : account.needsUnlock ? "Unlock \(account.product.displayName) to continue" : "Connect with \(account.product.displayName)").fontWeight(.medium)
+                                        Text(account.title).font(.caption).foregroundStyle(.secondary)
+                                    }
+                                    Spacer(); Image(systemName:"arrow.right")
+                                }.padding(14).frame(width:340)
+                            }.buttonStyle(.plain).background(PassTheme.accent.opacity(0.12),in:RoundedRectangle(cornerRadius:16))
+                                .disabled(!account.canContinue).accessibilityIdentifier("calendarContinue" + account.product.displayName)
+                        }
+                    }
+                    Button("Use another account") { useAnotherAccount(); separateAccount = true }.buttonStyle(.plain).foregroundStyle(.secondary)
+                }
+                if !store.previewOnly && (accounts.isEmpty || separateAccount) { VStack(spacing:12) {
                     TextField("Proton email or username",text:$username).textFieldStyle(.roundedBorder).accessibilityIdentifier("calendarUsername")
                     SecureField("Password",text:$password).textFieldStyle(.roundedBorder).onSubmit { signIn() }.accessibilityIdentifier("calendarPassword")
                     Button("Sign in to Calendar") { signIn() }.buttonStyle(.borderedProminent).controlSize(.large)
                         .disabled(store.busy || username.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty || password.isEmpty).accessibilityIdentifier("calendarSignIn")
                 }.frame(width:340)
+                if !accounts.isEmpty { Button("Use an account in ProtonX") { separateAccount = false }.buttonStyle(.plain) }
                 Text("Experimental connection · read-only").font(.caption).foregroundStyle(.secondary) }
             }
             if !store.busy && store.phase != .totp && store.phase != .mailboxPassword {

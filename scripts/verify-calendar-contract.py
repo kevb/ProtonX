@@ -12,7 +12,11 @@ pin = next(
 )
 assert protocol == {
     "schema": 1,
-    "appVersion": "Other",
+    "appVersion": "web-calendar@5.0.135.5",
+    "clientID": "web-calendar",
+    "webVersionSource": "https://calendar.proton.me/assets/static/index.78f6076c.js",
+    "webAssetSHA256": "c045b345f9ec40fed1acfe81a09d5288d26f297afe673c340d903249028bb6ee",
+    "reviewedOn": "2026-10-08",
     "userAgent": "ProtonX-Calendar/0.1",
     "apiHost": "https://mail-api.proton.me",
     "source": pin["revision"],
@@ -36,7 +40,7 @@ assert (
 )
 assert "https://mail-api.proton.me" in config and 'return "", ErrStorage' in config
 api = (source / "pkg/papi/papi.go").read_text()
-assert 'UserAgent = "ProtonX-Calendar/0.1"' in api and 'AppVersion = "Other"' in api
+assert 'UserAgent = "ProtonX-Calendar/0.1"' in api and ('AppVersion = "' + protocol['appVersion'] + '"') in api
 assert (
     "t.Proxy=nil" in api
     and "Calendar redirect refused" in api

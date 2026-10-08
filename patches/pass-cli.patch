@@ -274,7 +274,7 @@ index 2fed7a9..5673a84 100644
  const XOR_KEY_LENGTH: usize = 32;
  
 diff --git a/pass-cli/src/main.rs b/pass-cli/src/main.rs
-index 5530278..4b352da 100644
+index 5530278..c40d990 100644
 --- a/pass-cli/src/main.rs
 +++ b/pass-cli/src/main.rs
 @@ -40,6 +40,11 @@ mod env_config;
@@ -289,7 +289,7 @@ index 5530278..4b352da 100644
  mod storage;
  mod telemetry;
  mod utils;
-@@ -167,6 +172,44 @@ enum Commands {
+@@ -167,6 +172,47 @@ enum Commands {
          #[command(subcommand)]
          command: commands::share::ShareCommands,
      },
@@ -299,6 +299,9 @@ index 5530278..4b352da 100644
 +    #[cfg(feature = "protonx-desktop")]
 +    #[command(name = "native-snapshot", hide = true)]
 +    NativeSnapshot,
++    #[cfg(feature = "protonx-desktop")]
++    #[command(name = "native-calendar-handoff", hide = true)]
++    NativeCalendarHandoff,
 +    #[cfg(feature = "protonx-desktop")]
 +    #[command(name = "native-cache-snapshot", hide = true)]
 +    NativeCacheSnapshot,
@@ -334,7 +337,7 @@ index 5530278..4b352da 100644
      #[command(about = "User operations")]
      User {
          #[command(subcommand)]
-@@ -229,13 +272,41 @@ impl Commands {
+@@ -229,13 +275,41 @@ impl Commands {
  #[tokio::main]
  async fn main() -> Result<()> {
      if let Err(e) = run().await {
@@ -376,7 +379,7 @@ index 5530278..4b352da 100644
          return Err(e);
      }
  
-@@ -245,6 +316,12 @@ async fn main() -> Result<()> {
+@@ -245,6 +319,12 @@ async fn main() -> Result<()> {
  async fn run() -> Result<()> {
      logs::setup_logs();
      let cli = Cli::parse();
@@ -389,7 +392,7 @@ index 5530278..4b352da 100644
  
      if cli.command.is_force_logout() {
          return commands::logout::force_logout().await;
-@@ -260,10 +337,12 @@ async fn run() -> Result<()> {
+@@ -260,10 +340,12 @@ async fn run() -> Result<()> {
  
      // Check for updates in the background (non-blocking, weekly check)
      // This runs for all commands except update itself to avoid recursion
@@ -406,7 +409,7 @@ index 5530278..4b352da 100644
          let _ = commands::update::check_for_updates_background(&base_dir).await;
      }
  
-@@ -275,6 +354,35 @@ async fn run() -> Result<()> {
+@@ -275,6 +357,35 @@ async fn run() -> Result<()> {
      let (client, store) = client::get_client(base_dir.clone(), client_features.clone())
          .await
          .context("Error getting client")?;
@@ -442,10 +445,12 @@ index 5530278..4b352da 100644
      match &cli.command {
          Commands::Login {
              username,
-@@ -375,6 +483,27 @@ async fn run() -> Result<()> {
+@@ -375,6 +486,29 @@ async fn run() -> Result<()> {
          .await;
  
      match cli.command {
++        #[cfg(feature = "protonx-desktop")]
++        Commands::NativeCalendarHandoff => native_ui::calendar_handoff(client).await,
 +        #[cfg(feature = "protonx-desktop")]
 +        Commands::NativeSnapshot => native_ui::snapshot(client, native_cache::session_binding(&store)?).await,
 +        #[cfg(feature = "protonx-desktop")]
@@ -470,7 +475,7 @@ index 5530278..4b352da 100644
          Commands::Logout { .. } => commands::logout::run(client).await,
          Commands::Info { output } => commands::info::run(client, base_dir, output, store).await,
          Commands::Inject {
-@@ -407,3 +536,174 @@ async fn run() -> Result<()> {
+@@ -407,3 +541,177 @@ async fn run() -> Result<()> {
          _ => Ok(()),
      }
  }
@@ -511,6 +516,7 @@ index 5530278..4b352da 100644
 +            #[cfg(feature = "protonx-desktop")]
 +            Self::NativeCapabilities
 +            | Self::NativeSnapshot
++            | Self::NativeCalendarHandoff
 +            | Self::NativeCacheSnapshot
 +            | Self::NativeCacheDetail { .. }
 +            | Self::NativeCreate { .. }
@@ -573,6 +579,7 @@ index 5530278..4b352da 100644
 +    fn native_snapshot_and_editor_commands_are_desktop_only() {
 +        for args in [
 +            vec!["pass-cli", "native-snapshot"],
++            vec!["pass-cli", "native-calendar-handoff"],
 +            vec!["pass-cli", "native-cache-snapshot"],
 +            vec!["pass-cli", "native-cache-detail", "--generation", "synthetic", "--share-id", "synthetic", "--item-id", "synthetic"],
 +            vec![
@@ -605,6 +612,7 @@ index 5530278..4b352da 100644
 +    #[test]
 +    fn original_cli_does_not_expose_native_commands() {
 +        assert!(Cli::try_parse_from(["pass-cli", "native-snapshot"]).is_err());
++        assert!(Cli::try_parse_from(["pass-cli", "native-calendar-handoff"]).is_err());
 +        assert!(
 +            Cli::try_parse_from(["pass-cli", "native-create", "--share-id", "synthetic"]).is_err()
 +        );
@@ -1269,10 +1277,10 @@ index 0000000..e13147f
 +}
 diff --git a/pass-cli/src/native_ui.rs b/pass-cli/src/native_ui.rs
 new file mode 100644
-index 0000000..039c293
+index 0000000..d7cae6f
 --- /dev/null
 +++ b/pass-cli/src/native_ui.rs
-@@ -0,0 +1,547 @@
+@@ -0,0 +1,553 @@
 +// Copyright (c) 2026 ProtonX contributors. GPL-3.0-or-later.
 +// Native presentation/transport only: all cryptography and writes use Proton's SDK.
 +use crate::helpers::{CliPassClient, PassClientExt};
@@ -1820,6 +1828,12 @@ index 0000000..039c293
 +        assert_eq!(item.extra_fields[1].name, "Added");
 +    }
 +}
++
++pub async fn calendar_handoff(client:CliPassClient)->Result<()> {
++ ensure!(!crate::protonx::policy().requires_cli_eligibility,"Native transport required");
++ let handoff=client.native_calendar_handoff().await?;
++ println!("{}",serde_json::to_string(&handoff)?);Ok(())
++}
 diff --git a/pass-cli/src/protonx.rs b/pass-cli/src/protonx.rs
 new file mode 100644
 index 0000000..fedd861
@@ -1960,6 +1974,75 @@ index 4138815..0898da4 100644
  default = []
  tokio-runtime = ["dep:tokio", "dep:async-compat", "muon/transport-hyper"]
  wasm = [
+diff --git a/pass/src/account/mod.rs b/pass/src/account/mod.rs
+index 7e10ac2..4e051cb 100644
+--- a/pass/src/account/mod.rs
++++ b/pass/src/account/mod.rs
+@@ -23,3 +23,6 @@ pub(crate) mod key_salts;
+ pub(crate) mod keys;
+ pub(crate) mod org;
+ pub(crate) mod settings;
++
++#[cfg(feature = "protonx-native")]
++mod native_handoff;
+diff --git a/pass/src/account/native_handoff.rs b/pass/src/account/native_handoff.rs
+new file mode 100644
+index 0000000..cd67fed
+--- /dev/null
++++ b/pass/src/account/native_handoff.rs
+@@ -0,0 +1,52 @@
++// Copyright (c) 2026 ProtonX contributors. SPDX-License-Identifier: GPL-3.0-or-later
++// Native desktop account handoff only; not a CLI, PAT or agent capability.
++use crate::{PassClient, PassClientContext};
++use crate::domain::{LockedUserKey, Passphrase};
++use anyhow::{Result, ensure, anyhow};
++use muon::{POST, env::Environment};
++
++#[derive(serde::Deserialize)]
++struct ForkResponse {
++    #[serde(rename="Code")] code:u32,
++    #[serde(rename="Selector")] selector:String,
++}
++#[derive(serde::Serialize)]
++pub struct NativeCalendarHandoff {
++    pub selector:String,
++    #[serde(rename="accountID")] pub account_id:String,
++    #[serde(rename="keyPassHex")] pub key_pass_hex:String,
++    pub expires:i64,
++}
++fn primary<'a>(keys:&'a [LockedUserKey])->Result<&'a str> {
++    let mut primary=keys.iter().filter(|k|k.primary&&k.active);
++    let key=primary.next().ok_or_else(||anyhow!("Account handoff unavailable"))?;
++    ensure!(primary.next().is_none(),"Account handoff unavailable");Ok(&key.id)
++}
++impl<C:PassClientContext> PassClient<C> {
++    pub async fn native_calendar_handoff(&self)->Result<NativeCalendarHandoff>{
++        ensure!(self.is_user_account()&&matches!(self.client.env(),Environment::Prod(_)),"Account handoff unavailable");
++        let user=self.get_user_info_user().await?;
++        ensure!(!user.id.is_empty()&&user.id.len()<=128,"Account handoff unavailable");
++        let keys=self.load_user_keys().await?;
++        let id=primary(&keys)?;
++        let mut phrases=self.get_key_passphrases().await?.into_map();
++        let phrase:Passphrase=phrases.remove(id).ok_or_else(||anyhow!("Account handoff unavailable"))?;
++        ensure!(!phrase.as_ref().is_empty()&&phrase.as_ref().len()<=4096,"Account handoff unavailable");
++        let request=POST!("/auth/v4/sessions/forks").body_json(serde_json::json!({"ChildClientID":"web-calendar","Independent":0}))?;
++        let res=self.send(request).await?;
++        let response:ForkResponse=assert_response!(res);
++        ensure!(response.code==1000&&!response.selector.is_empty()&&response.selector.len()<=512&&response.selector.bytes().all(|b|b.is_ascii_alphanumeric()||b"_=-".contains(&b)),"Account handoff unavailable");
++        Ok(NativeCalendarHandoff{selector:response.selector,account_id:user.id,
++            key_pass_hex:phrase.as_ref().iter().map(|b|format!("{b:02x}")).collect(),expires:jiff::Timestamp::now().as_second()+120})
++    }
++}
++#[cfg(test)]mod tests {
++ use super::*;
++ fn key(id:&str,primary:bool,active:bool)->LockedUserKey{LockedUserKey{id:id.into(),private_key:String::new(),token:None,signature:None,primary,active}}
++ #[test]fn primary_requires_unique_active_key(){
++  assert!(primary(&[]).is_err());
++  assert!(primary(&[key("old",true,false)]).is_err());
++  assert!(primary(&[key("a",true,true),key("b",true,true)]).is_err());
++  assert_eq!(primary(&[key("old",false,true),key("current",true,true)]).unwrap(),"current");
++ }
++}
 diff --git a/pass/src/auth/callbacks.rs b/pass/src/auth/callbacks.rs
 index 72c33c5..316d156 100644
 --- a/pass/src/auth/callbacks.rs
