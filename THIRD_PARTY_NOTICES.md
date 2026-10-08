@@ -56,6 +56,26 @@ accompany any candidate binary distribution. The new lockfile adds
 Sources: https://github.com/sqlcipher/sqlcipher and https://github.com/openssl/openssl.
 The default helper does not enable this candidate. No public binary is released.
 
+## Calendar helper
+
+`Tools/ProtonXCalendarHelper` and native build patches are GPL-3.0-or-later.
+The materialized helper links the unofficial `cheeseandcereal/proton-cal`
+protocol/recurrence adapter (Unlicense), pinned at
+`5ff2791a0823ffbd592c3c95808819d40d4e639a`. Its original UNLICENSE/source notices
+remain in the materialized tree and corresponding-source archive. It is neither
+made nor endorsed by Proton.
+
+Official Proton `go-proton-api`, `go-srp` and `gopenpgp/v2` dependencies are MIT;
+their original notices and those of all transitive dependencies must accompany
+binary distribution. `Resources/CalendarHelper.mod` and `.sum` pin resolutions.
+The Go dependency graph also includes test/CLI dependencies from the pinned
+adapter; linking the native command does not expose the community CLI/MCP.
+The materializer replaces plaintext config/session/cache access with an injected
+Keychain store, removes CAPTCHA workarounds and adds bounded, read-only native
+protocol and transport contracts. Cryptographic primitives are unchanged.
+`source-bundle.sh` includes exact materialized source, vendored Go dependencies,
+their license files and `CALENDAR_DEPENDENCIES.txt`. No public binary is released.
+
 ## Reference source (downloaded for review; not linked or redistributed)
 
 - ProtonMail/WebClients: desktop Mail/Pass UX, authentication and OS integration.
@@ -72,7 +92,7 @@ Reference repositories retain their own licenses. `scripts/bootstrap.py
 
 Do not distribute a helper-containing binary without the corresponding source
 and dependency notices. `scripts/source-bundle.sh` creates a source bundle with
-both pinned helpers, patches, Cargo lockfiles, vendored Rust dependencies and their
+all three pinned helpers, patches, Cargo/Go lockfiles, vendored dependencies and their
 licenses. Keep the resulting bundle beside any binary, and include this file and
 `LICENSE` and `LICENSE-MAIL-HELPER` in the app. No official Proton release binaries are repackaged.
 

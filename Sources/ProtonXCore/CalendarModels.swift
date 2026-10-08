@@ -2,7 +2,7 @@
 import Foundation
 
 /// Civil dates stay independent of UTC offsets. All-day ends are exclusive.
-public struct CalendarDay: Equatable, Hashable, Sendable {
+public struct CalendarDay: Codable, Equatable, Hashable, Sendable {
     public let year: Int, month: Int, day: Int
     public init(year: Int, month: Int, day: Int) { self.year = year; self.month = month; self.day = day }
 }
@@ -10,7 +10,7 @@ public enum CalendarEventTime: Equatable, Sendable {
     case timed(start: Date, end: Date, timeZoneID: String)
     case allDay(start: CalendarDay, endExclusive: CalendarDay)
 }
-public struct CalendarCollection: Identifiable, Equatable, Sendable {
+public struct CalendarCollection: Codable, Identifiable, Equatable, Sendable {
     public let id: String, name: String
     public let color: Int
     public init(id: String, name: String, color: Int) { self.id = id; self.name = name; self.color = color }
@@ -20,6 +20,7 @@ public struct CalendarEventRecord: Identifiable, Equatable, Sendable {
     public var calendarID: String, title: String, location: String, notes: String
     public var time: CalendarEventTime
     public var revision: Int
+    public var recurring: Bool = false
     public init(id: String, calendarID: String, title: String, location: String = "", notes: String = "", time: CalendarEventTime, revision: Int = 0) {
         self.id = id; self.calendarID = calendarID; self.title = title; self.location = location; self.notes = notes; self.time = time; self.revision = revision
     }
@@ -52,9 +53,10 @@ public enum CalendarFailure: Error, LocalizedError, Equatable, Sendable {
 }
 public struct CalendarSnapshot: Sendable {
     public let calendars: [CalendarCollection], events: [CalendarEventRecord]
-    public init(calendars: [CalendarCollection], events: [CalendarEventRecord]) { self.calendars = calendars; self.events = events }
+    public let omitted: Int
+    public init(calendars: [CalendarCollection], events: [CalendarEventRecord], omitted: Int = 0) { self.calendars = calendars; self.events = events; self.omitted = omitted }
     public func validate() throws {
-        guard calendars.count <= 64, events.count <= 5000, Set(calendars.map(\.id)).count == calendars.count,
+        guard omitted >= 0, omitted <= 100000, calendars.count <= 64, events.count <= 5000, Set(calendars.map(\.id)).count == calendars.count,
               Set(events.map(\.id)).count == events.count,
               calendars.allSatisfy({ !$0.id.isEmpty && $0.id.utf8.count <= 128 && !$0.name.isEmpty && $0.name.utf8.count <= 512 && (0...5).contains($0.color) }) else { throw CalendarFailure.unavailable }
         try events.forEach { try $0.validate(in: calendars) }
@@ -64,6 +66,7 @@ public struct CalendarSnapshot: Sendable {
 /// Data boundary deliberately accepts events, never credentials or Mail sessions.
 public protocol CalendarDataSource: Sendable {
     func snapshot() async throws -> CalendarSnapshot
+    func snapshot(in range: CalendarQueryRange) async throws -> CalendarSnapshot
     func save(_ event: CalendarEventRecord, expectedRevision: Int?) async throws -> CalendarEventRecord
     func delete(id: String, expectedRevision: Int) async throws
 }
@@ -90,4 +93,17 @@ public actor PreviewCalendarDataSource: CalendarDataSource {
         guard let index = events.firstIndex(where: { $0.id == id }), events[index].revision == expectedRevision else { throw CalendarFailure.conflict }
         events.remove(at: index)
     }
+}
+
+public struct CalendarQueryRange: Equatable, Sendable {
+    public let start: Date, end: Date, timeZoneID: String
+    public init(start: Date, end: Date, timeZoneID: String) { self.start = start; self.end = end; self.timeZoneID = timeZoneID }
+    public func validate() throws {
+        guard start.timeIntervalSince1970.isFinite, end.timeIntervalSince1970.isFinite,
+              start.timeIntervalSince1970 >= 0, end.timeIntervalSince1970 <= 7289654400,
+              start < end, end.timeIntervalSince(start) <= 62*86400, TimeZone(identifier: timeZoneID) != nil else { throw CalendarFailure.invalidEvent }
+    }
+}
+public extension CalendarDataSource {
+    func snapshot(in range: CalendarQueryRange) async throws -> CalendarSnapshot { try await snapshot() }
 }

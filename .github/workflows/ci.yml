@@ -52,3 +52,13 @@ jobs:
           scripts/test-mail-helper.sh
       - name: Opt-in encrypted Mail storage and cache-first contracts
         run: scripts/test-mail-storage.sh
+  calendar:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build pinned native Calendar adapter and test synthetic SRP, keys and recurrence
+        run: |
+          scripts/build-calendar-helper.sh
+          scripts/test-calendar-helper.sh

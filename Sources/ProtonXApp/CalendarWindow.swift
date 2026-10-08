@@ -9,10 +9,13 @@ struct CalendarWindow: View {
     var isActive = true
     @FocusState private var searchFocused: Bool
     @State private var deletion: CalendarStore.DeleteIntent?
+    @State private var username = ""
+    @State private var password = ""
+    @State private var challenge = ""
     private var zone: TimeZone { store.math.calendar.timeZone }
     var body: some View {
         Group {
-            if store.phase == .welcome { welcome }
+            if !store.isWorkspaceOpen { welcome }
             else {
                 HStack(spacing: 0) {
                     sidebar.frame(width: 210)
@@ -39,6 +42,8 @@ struct CalendarWindow: View {
                 }
             }
         }.background(PassTheme.canvas).environment(\.timeZone, zone)
+            .onChange(of: isActive) { _, active in if !active { password = ""; challenge = ""; if store.phase == .signingIn || store.phase == .totp || store.phase == .mailboxPassword { store.lock() } } }
+            .onChange(of: store.phase) { _, _ in password = ""; challenge = "" }
             .onReceive(NotificationCenter.default.publisher(for: .protonXNewEvent)) { _ in if isActive { store.beginEvent() } }
             .onReceive(NotificationCenter.default.publisher(for: .protonXFocusCalendarSearch)) { _ in if isActive { searchFocused = true } }
             .alert("Delete this preview event?", isPresented: Binding(get: { deletion != nil }, set: { if !$0 { deletion = nil } })) {
@@ -50,19 +55,45 @@ struct CalendarWindow: View {
         VStack(spacing: 20) {
             Image(systemName: "calendar").font(.system(size: 56, weight: .light)).foregroundStyle(PassTheme.accent)
                 .frame(width: 116, height: 116).background(PassTheme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 28))
-            Text("Calendar preview").font(.largeTitle.weight(.semibold))
-            Text("Explore native Calendar with sample events.\nProton sign-in and sync are coming next.")
-                .multilineTextAlignment(.center).foregroundStyle(.secondary)
-            Button("Explore Calendar preview") { store.enterPreview() }.buttonStyle(.borderedProminent).controlSize(.large)
-                .accessibilityIdentifier("calendarExplore")
-            Text("Edits stay in memory and reset when you lock or quit.").font(.caption).foregroundStyle(.secondary)
+            if store.phase == .locked {
+                LocalUnlockCard(product:"Calendar",authentication:store.localAuthentication,isActive:isActive,busy:store.busy,
+                                unlock:{ store.unlock(mode:$0) },cancel:{ store.lock() })
+            } else if store.phase == .signingIn {
+                Text("Signing in to Calendar").font(.title.weight(.semibold))
+                ProgressView().controlSize(.large)
+                Button("Cancel") { store.lock() }
+            } else if store.phase == .totp || store.phase == .mailboxPassword {
+                Text(store.phase == .totp ? "Verify your account" : "Unlock your Calendar keys").font(.title.weight(.semibold))
+                Text(store.phase == .totp ? "Enter the code from your authenticator." : "Enter your Proton mailbox password.").foregroundStyle(.secondary)
+                SecureField(store.phase == .totp ? "Verification code" : "Mailbox password",text:$challenge).textFieldStyle(.roundedBorder)
+                    .frame(width:320).onSubmit { submitChallenge() }.accessibilityIdentifier("calendarChallenge")
+                Button("Continue") { submitChallenge() }.buttonStyle(.borderedProminent).disabled(store.busy || challenge.isEmpty)
+                Button("Cancel") { store.lock() }
+            } else {
+                Text("Your Calendar, at home on Mac").font(.largeTitle.weight(.semibold))
+                Text(store.previewOnly ? "Explore a native Calendar with sample events." : "Sign in to read your Proton calendars and events.\nYour Calendar session stays separate from Mail and Pass.")
+                    .multilineTextAlignment(.center).foregroundStyle(.secondary)
+                if !store.previewOnly { VStack(spacing:12) {
+                    TextField("Proton email or username",text:$username).textFieldStyle(.roundedBorder).accessibilityIdentifier("calendarUsername")
+                    SecureField("Password",text:$password).textFieldStyle(.roundedBorder).onSubmit { signIn() }.accessibilityIdentifier("calendarPassword")
+                    Button("Sign in to Calendar") { signIn() }.buttonStyle(.borderedProminent).controlSize(.large)
+                        .disabled(store.busy || username.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty || password.isEmpty).accessibilityIdentifier("calendarSignIn")
+                }.frame(width:340)
+                Text("Experimental connection · read-only").font(.caption).foregroundStyle(.secondary) }
+            }
+            if !store.busy && store.phase != .totp && store.phase != .mailboxPassword {
+                Button("Explore Calendar preview") { store.enterPreview() }.buttonStyle(.plain).foregroundStyle(PassTheme.accent).accessibilityIdentifier("calendarExplore")
+                Text("Sample events only · edits reset on lock or quit").font(.caption).foregroundStyle(.secondary)
+            }
             if let error = store.error { Text(error).font(.callout).foregroundStyle(.red) }
-        }.frame(maxWidth: .infinity, maxHeight: .infinity)
+        }.padding(24).frame(maxWidth: .infinity, maxHeight: .infinity)
     }
+    private func signIn() { let value = password; password = ""; store.signIn(username:username,password:value) }
+    private func submitChallenge() { let value = challenge; challenge = ""; store.submitChallenge(value) }
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 18) {
             Button { store.beginEvent() } label: { Label("New event", systemImage: "plus").frame(maxWidth: .infinity).padding(.vertical, 8) }
-                .buttonStyle(.borderedProminent).disabled(store.busy || store.editor != nil).accessibilityIdentifier("calendarNewEvent")
+                .buttonStyle(.borderedProminent).disabled(!store.canEdit || store.busy || store.editor != nil).accessibilityIdentifier("calendarNewEvent").help(store.canEdit ? "Create a sample event" : "Event creation will be available after sync validation")
             miniMonth
             Divider()
             Text("My calendars").font(.headline)
@@ -72,8 +103,11 @@ struct CalendarWindow: View {
                 }.toggleStyle(.checkbox)
             }
             Spacer()
-            Text("Calendar preview").font(.callout.weight(.medium))
-            Text("Sample events only. Proton Calendar is not connected.").font(.caption).foregroundStyle(.secondary)
+            Text(store.phase == .connected ? "Proton Calendar" : "Calendar preview").font(.callout.weight(.medium))
+            Text(store.phase == .connected ? "Connected · read-only\nEvents stay in memory until lock." : "Sample events only. Proton Calendar is not connected.").font(.caption).foregroundStyle(.secondary)
+            if store.phase == .connected {
+                HStack { Button("Lock") { store.lock() }; Spacer(); Button("Sign out") { store.signOut() }.disabled(store.busy) }
+            }
         }.padding(16).background(PassTheme.sidebar)
     }
     private var miniMonth: some View {
@@ -104,11 +138,15 @@ struct CalendarWindow: View {
             }
             HStack {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                TextField("Search events", text: $store.query).textFieldStyle(.plain).focused($searchFocused).accessibilityIdentifier("calendarSearch")
+                TextField(store.phase == .connected ? "Search this date range" : "Search events", text: $store.query).textFieldStyle(.plain).focused($searchFocused).accessibilityIdentifier("calendarSearch")
                 Spacer()
                 Picker("Time zone", selection: $store.timeZoneID) { ForEach(calendarZoneIDs(store.timeZoneID), id: \.self) { Text($0).tag($0) } }.labelsHidden().frame(maxWidth: 210).accessibilityLabel("Calendar time zone")
             }.padding(8).background(PassTheme.sidebar, in: RoundedRectangle(cornerRadius: 9))
-            Text(store.notice ?? "Preview · edits stay in memory").font(.caption).foregroundStyle(.secondary)
+            HStack(spacing:8) {
+                if store.busy { ProgressView().controlSize(.small) }
+                Text(store.busy ? "Loading calendars and events…" : store.notice ?? (store.phase == .connected ? "Connected to Proton · read-only" : "Preview · edits stay in memory"))
+                    .font(.caption).foregroundStyle(.secondary)
+            }
         }.padding(16)
     }
     private func inspector(_ event: CalendarEventRecord) -> some View {
@@ -121,8 +159,10 @@ struct CalendarWindow: View {
                 Label(store.calendars.first(where: { $0.id == event.calendarID })?.name ?? "Calendar", systemImage: "calendar")
                 if !event.location.isEmpty { Label(event.location, systemImage: "mappin.and.ellipse").textSelection(.enabled) }
                 if !event.notes.isEmpty { Text(event.notes).textSelection(.enabled) }
-                Button("Edit event") { store.beginEvent(event) }.buttonStyle(.borderedProminent).disabled(store.busy).accessibilityIdentifier("calendarEditEvent")
-                Button("Delete event", role: .destructive) { deletion = store.deleteIntent() }.disabled(store.busy).accessibilityIdentifier("calendarDeleteEvent")
+                if event.recurring { Label("Repeating event",systemImage:"repeat").font(.caption).foregroundStyle(.secondary) }
+                if store.canEdit { Button("Edit event") { store.beginEvent(event) }.buttonStyle(.borderedProminent).disabled(store.busy).accessibilityIdentifier("calendarEditEvent")
+                Button("Delete event", role: .destructive) { deletion = store.deleteIntent() }.disabled(store.busy).accessibilityIdentifier("calendarDeleteEvent") }
+                else { Text("Event editing and invitations are coming next.").font(.caption).foregroundStyle(.secondary) }
                 Divider()
                 Text("Preview · no event is sent to Proton.").font(.caption).foregroundStyle(.secondary)
             }.padding(18).frame(maxWidth: .infinity, alignment: .leading)

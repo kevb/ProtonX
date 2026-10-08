@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "appVersion": "Other",
+  "userAgent": "ProtonX-Calendar/0.1",
+  "apiHost": "https://mail-api.proton.me",
+  "source": "5ff2791a0823ffbd592c3c95808819d40d4e639a",
+  "maxRequestBytes": 65536,
+  "maxResponseBytes": 8388608,
+  "maxCalendars": 64,
+  "maxEvents": 5000,
+  "maxRangeDays": 62
+}

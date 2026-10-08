@@ -1,6 +1,6 @@
 # ProtonX
 
-Native macOS clients for Proton Pass and Mail, with an early Calendar preview.
+Native macOS clients for Proton Pass and Mail, with experimental read-only Calendar browsing.
 Built with SwiftUI and AppKit, Proton's existing Rust cores, one product workspace,
 and **one optional
 menu-bar icon**. No bundled Electron or Chromium runtime.
@@ -15,7 +15,7 @@ interface or contribute. Signed, notarized binary releases are not yet available
 | --- | --- | --- |
 | Pass | Account sign-in and local unlock; vault and Trash browsing; search and sorting; password copy/reveal; TOTP copy/setup/edit; login and note editing with multiple websites and custom fields; revision conflict protection; Trash/restore; encrypted saved-first loading and read-only offline browsing for eligible personal paid accounts | No native browser autofill, passkey operations, attachment handling, sharing UI or account switching. Other item types are readable but have no native editor. Managed accounts stay online-only. |
 | Mail | Native username/password, TOTP and second-password sign-in; independent Keychain-backed session; folders and paged inbox; SDK conversation grouping with expandable message cards; formatted HTML reading on light paper; per-message image loading; read/unread, Archive/Trash/Inbox and move undo; compose, reply and reply-all; sending identity selection, draft saving, attachment save/preview/upload/removal and native notification settings | Live send/reply/attachment delivery and account recovery are acceptance gates. No human verification/FIDO-only login, rich-text editing or inline/CID images. Search covers loaded subjects and senders, capped at 1,000 messages. |
-| Calendar | Native week/month/agenda preview, date navigation, time zones, calendar visibility, search and timed/all-day event editing with retained state across product switches | Synthetic events only, held in memory until lock/quit. No Proton account connection, recurrence, invitations or reminders. See [Calendar preview](docs/CALENDAR.md). |
+| Calendar | Native sign-in, independent Keychain session, bounded read-only calendar/event browsing and recurrence; week/month/agenda, time zones, filters and retained product state | Experimental and not yet validated against a real Calendar account. Detached signature verification remains a release gate. Editing works only in the memory-only synthetic preview. No persistent cache, invitations or reminders. See [Calendar](docs/CALENDAR.md). |
 | Drive | Planned | No Drive client implemented. |
 
 Pass, Mail and Calendar share one native workspace with Home and a product rail, while keeping their
@@ -46,7 +46,8 @@ ordinary builds; migration and recovery remain release blockers. Read
 ## Build and run
 
 Requires macOS 14+, Xcode 16+ / Swift 6, Python 3.11+, Git, and Rust 1.93+
-(tested with Rust 1.99). Open Xcode and accept its license before building.
+(tested with Rust 1.99), plus Go 1.26.4 and cgo/Clang for Calendar.
+Go can fetch its pinned toolchain when the installed Go supports toolchain selection. Open Xcode and accept its license before building.
 No Proton account or Apple signing account is needed to explore demo mode.
 The build scripts do not install global dependencies.
 

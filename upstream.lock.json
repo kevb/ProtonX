@@ -50,6 +50,13 @@
       "revision": "b9c5dac1651437100c40896dacd778a0518a26f2",
       "role": "Mail protocol and TLS reference; separate runtime",
       "license": "GPL-3.0"
+    },
+    {
+      "name": "proton-cal",
+      "url": "https://github.com/cheeseandcereal/proton-cal.git",
+      "revision": "5ff2791a0823ffbd592c3c95808819d40d4e639a",
+      "role": "Calendar protocol, key hierarchy and recurrence adapter; Proton crypto dependencies pinned in CalendarHelper.mod/sum",
+      "license": "Unlicense; Proton Go dependencies retain their own licenses"
     }
   ]
 }

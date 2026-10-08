@@ -40,9 +40,11 @@ fi
 if ! $PROTONX_SKIP_HELPER; then
   scripts/build-helper.sh
   scripts/build-mail-helper.sh
+  scripts/build-calendar-helper.sh
 fi
 [[ -f upstream/pass-cli/target/release/pass-cli ]] || { echo 'Build the helper first.' >&2; exit 1; }
 [[ -f .tools/mail-helper/protonx-mail ]] || { echo 'Build the Mail helper first.' >&2; exit 1; }
+[[ -f .tools/calendar-helper/protonx-calendar ]] || { echo 'Build the Calendar helper first.' >&2; exit 1; }
 "$PROTONX_SWIFT" build --build-system native -c release ${PROTONX_SWIFT_OPTIONS[@]+"${PROTONX_SWIFT_OPTIONS[@]}"}
 PROTONX_BIN_DIR="$("$PROTONX_SWIFT" build --build-system native -c release --show-bin-path ${PROTONX_SWIFT_OPTIONS[@]+"${PROTONX_SWIFT_OPTIONS[@]}"})"
 mkdir -p "$PROTONX_ROOT/build"
@@ -53,6 +55,7 @@ mkdir -p "$PROTONX_BUNDLE/Contents/"{MacOS,Helpers,Resources}
 cp "$PROTONX_BIN_DIR/ProtonX" "$PROTONX_BUNDLE/Contents/MacOS/$PROTONX_EXECUTABLE"
 cp upstream/pass-cli/target/release/pass-cli "$PROTONX_BUNDLE/Contents/Helpers/protonx-pass"
 cp .tools/mail-helper/protonx-mail "$PROTONX_BUNDLE/Contents/Helpers/protonx-mail"
+cp .tools/calendar-helper/protonx-calendar "$PROTONX_BUNDLE/Contents/Helpers/protonx-calendar"
 cp Resources/Info.plist "$PROTONX_BUNDLE/Contents/Info.plist"
 if $PROTONX_PREVIEW; then
   /usr/libexec/PlistBuddy -c 'Delete :CFBundleURLTypes' "$PROTONX_BUNDLE/Contents/Info.plist"
@@ -61,7 +64,8 @@ if $PROTONX_PREVIEW; then
   /usr/libexec/PlistBuddy -c 'Set :CFBundleName ProtonX Preview' "$PROTONX_BUNDLE/Contents/Info.plist"
   /usr/libexec/PlistBuddy -c 'Set :CFBundleDisplayName ProtonX Preview' "$PROTONX_BUNDLE/Contents/Info.plist"
 fi
-cp LICENSE LICENSE-MAIL-HELPER THIRD_PARTY_NOTICES.md upstream.lock.json Resources/MailProtocol.json Resources/DesktopProtocol.json "$PROTONX_BUNDLE/Contents/Resources/"
+cp LICENSE LICENSE-MAIL-HELPER THIRD_PARTY_NOTICES.md upstream.lock.json Resources/MailProtocol.json Resources/DesktopProtocol.json Resources/CalendarProtocol.json "$PROTONX_BUNDLE/Contents/Resources/"
+cp -R Resources/CalendarLicenses "$PROTONX_BUNDLE/Contents/Resources/"
 if [[ -f Resources/AppIcon.icns ]]; then cp Resources/AppIcon.icns "$PROTONX_BUNDLE/Contents/Resources/"; fi
 # A configured local certificate preserves Keychain designated requirements across
 # rebuilds. The portable default stays ad-hoc. No Keychain ACL is relaxed here.
@@ -72,6 +76,7 @@ fi
 PROTONX_SIGN_IDENTITY="${PROTONX_SIGN_IDENTITY:--}"
 codesign --force --sign "$PROTONX_SIGN_IDENTITY" --timestamp=none --options runtime --identifier org.kevb.ProtonX.PassHelper "$PROTONX_BUNDLE/Contents/Helpers/protonx-pass"
 codesign --force --sign "$PROTONX_SIGN_IDENTITY" --timestamp=none --options runtime --identifier org.kevb.ProtonX.MailHelper "$PROTONX_BUNDLE/Contents/Helpers/protonx-mail"
+codesign --force --sign "$PROTONX_SIGN_IDENTITY" --timestamp=none --options runtime --identifier org.kevb.ProtonX.CalendarHelper "$PROTONX_BUNDLE/Contents/Helpers/protonx-calendar"
 codesign --force --sign "$PROTONX_SIGN_IDENTITY" --timestamp=none --options runtime "$PROTONX_BUNDLE"
 codesign --verify --deep --strict "$PROTONX_BUNDLE"
 # Replace the generated bundle only after signing succeeds. Do not overwrite

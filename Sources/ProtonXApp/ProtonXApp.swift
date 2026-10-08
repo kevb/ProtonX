@@ -32,7 +32,7 @@ struct ProtonXApp: App {
                     else if focusedProduct == .mail { NotificationCenter.default.post(name: .protonXFocusMailSearch, object: nil) }
                     else { SystemIntegration.shared.openPass?(); NotificationCenter.default.post(name: .protonXFocusSearch, object: nil) }
                 }.keyboardShortcut("f").disabled(workspace.selected == nil ||
-                    (workspace.selected == .calendar ? workspace.calendar?.phase != .preview : workspace.selected == .pass ? workspace.pass?.phase != .open : workspace.mail?.phase != .open || workspace.mail?.draft != nil))
+                    (workspace.selected == .calendar ? workspace.calendar?.isWorkspaceOpen != true : workspace.selected == .pass ? workspace.pass?.phase != .open : workspace.mail?.phase != .open || workspace.mail?.draft != nil))
                 Button("Refresh " + (focusedProduct?.displayName ?? "ProtonX")) {
                     workspace.refresh()
                 }.keyboardShortcut("r").disabled(focusedCanRefresh != true)

@@ -49,14 +49,14 @@ import ProtonXCore
 
 @MainActor final class CalendarStore: ObservableObject {
     enum ViewMode: String, CaseIterable { case week = "Week", month = "Month", agenda = "Agenda" }
-    enum Phase { case welcome, preview }
+    enum Phase { case welcome, preview, signingIn, locked, totp, mailboxPassword, connected }
     @Published private(set) var phase: Phase = .welcome
     @Published private(set) var calendars: [CalendarCollection] = []
     @Published private(set) var events: [CalendarEventRecord] = []
     @Published var visibleCalendarIDs: Set<String> = []
-    @Published var date: Date
-    @Published var timeZoneID = TimeZone.current.identifier
-    @Published var mode: ViewMode = .week
+    @Published var date: Date { didSet { rangeChanged() } }
+    @Published var timeZoneID = TimeZone.current.identifier { didSet { rangeChanged() } }
+    @Published var mode: ViewMode = .week { didSet { rangeChanged() } }
     @Published var query = ""
     @Published var selectedEventID: String?
     @Published private(set) var editor: CalendarEditor?
@@ -66,10 +66,25 @@ import ProtonXCore
     private var source: (any CalendarDataSource)?
     private var operation: Task<Void,Never>?
     private var epoch = SessionEpoch()
+    let localAuthentication: LocalUnlockAuthentication
+    let previewOnly: Bool
+    private let defaults: UserDefaults
+    private let runner: any NativeCalendarRunning
+    private var hasSession = false
+    private var needsRangeReload = false
+    private var loadedRange: CalendarQueryRange?
+    private var debounce: Task<Void,Never>?
     private let now: () -> Date
     private let makeSource: (() throws -> any CalendarDataSource)?
-    init(previewOnly: Bool = false, now: @escaping () -> Date = Date.init, makeSource: (() throws -> any CalendarDataSource)? = nil) {
+    init(previewOnly: Bool = false, now: @escaping () -> Date = Date.init, makeSource: (() throws -> any CalendarDataSource)? = nil,
+         runner: (any NativeCalendarRunning)? = nil, defaults: UserDefaults = .standard,
+         localUnlock: (@MainActor @Sendable () async throws -> Bool)? = nil) {
         self.now = now; self.makeSource = makeSource; date = now()
+        self.previewOnly = previewOnly; self.defaults = defaults
+        self.localAuthentication = LocalUnlockAuthentication(evaluate: localUnlock)
+        self.runner = runner ?? NativeCalendarProcess(executable: Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/protonx-calendar"), directory: FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/ProtonX/Calendar"))
+        hasSession = !previewOnly && defaults.bool(forKey: "nativeCalendarConnected")
+        if hasSession { phase = .locked }
         if previewOnly { enterPreview() }
     }
     var math: CalendarDateMath { .init(timeZoneID:timeZoneID) }
@@ -91,17 +106,21 @@ import ProtonXCore
         guard !busy else { return }
         do { source = try makeSource?() ?? PreviewCalendarDataSource(snapshot: Self.samples(now:now(),zone:timeZoneID)) }
         catch { self.error = "Calendar preview could not start."; return }
-        phase = .preview; load(initial:true)
+        runner.cancelAll(); localAuthentication.cancel(); phase = .preview; load(initial:true)
     }
-    func refresh() { guard phase == .preview, !busy else { return }; load(initial:false) }
+    func refresh() { guard phase == .preview || phase == .connected, !busy else { return }; needsRangeReload = false; load(initial:false) }
     private func load(initial: Bool) {
         guard let source else { return }
+        let requestedRange = requestRange
         perform { [self] in
-            let snapshot = try await source.snapshot(); try snapshot.validate()
+            let snapshot = try await source.snapshot(in: requestedRange); try snapshot.validate()
             return { [self] in
-                calendars = snapshot.calendars; events = snapshot.events
+                if phase == .connected && requestedRange != requestRange { needsRangeReload = true; return }
+                let previousIDs = Set(calendars.map(\.id))
+                calendars = snapshot.calendars; events = snapshot.events; loadedRange = requestedRange
+                if phase == .connected { notice = snapshot.omitted > 0 ? "\(snapshot.omitted) event occurrences could not be decrypted or displayed. The visible range may be incomplete." : "Connected to Proton · read-only" }
                 if initial { visibleCalendarIDs = Set(calendars.map(\.id)) }
-                else { visibleCalendarIDs.formIntersection(Set(calendars.map(\.id))) }
+                else { visibleCalendarIDs.formIntersection(Set(calendars.map(\.id))); visibleCalendarIDs.formUnion(Set(calendars.map(\.id)).subtracting(previousIDs)) }
                 if !events.contains(where: { $0.id == selectedEventID }) { selectedEventID = nil }
             }
         }
@@ -116,7 +135,7 @@ import ProtonXCore
     }
     func cancelEditor() { guard !busy else { return }; editor = nil; error = nil }
     func saveEditor() {
-        guard !busy, let editor, let source else { return }
+        guard phase == .preview, !busy, let editor, let source else { return }
         let record = editor.record()
         do { try record.validate(in:calendars) } catch { self.error = error.localizedDescription; return }
         perform { [self] in
@@ -131,7 +150,7 @@ import ProtonXCore
     }
     struct DeleteIntent { let id: String; let revision: Int; let epoch: UInt64; let title: String }
     func deleteIntent() -> DeleteIntent? {
-        guard editor == nil, !busy, let event = selectedEvent else { return nil }
+        guard phase == .preview, editor == nil, !busy, let event = selectedEvent else { return nil }
         return .init(id:event.id,revision:event.revision,epoch:epoch.value,title:event.title)
     }
     func delete(_ intent: DeleteIntent) {
@@ -147,18 +166,93 @@ import ProtonXCore
         operation = Task { [weak self] in
             do {
                 let apply = try await work()
-                guard let self, !Task.isCancelled, self.epoch.accepts(ticket), self.phase == .preview else { return }; apply()
+                guard let self, !Task.isCancelled, self.epoch.accepts(ticket), (self.phase == .preview || self.phase == .connected || self.phase == .signingIn || self.phase == .locked || self.phase == .totp || self.phase == .mailboxPassword) else { return }; apply()
             } catch {
                 guard let self, !Task.isCancelled, self.epoch.accepts(ticket) else { return }
-                self.error = (error as? CalendarFailure)?.localizedDescription ?? CalendarFailure.unavailable.localizedDescription
+                if let failure = error as? NativeCalendarFailure, failure == .sessionExpired {
+                    self.lock(); self.hasSession = false; self.defaults.set(false, forKey: "nativeCalendarConnected"); self.phase = .welcome
+                } else if self.phase == .signingIn || self.phase == .totp || self.phase == .mailboxPassword { self.runner.cancelAll(); self.phase = self.hasSession ? .locked : .welcome }
+                self.error = (error as? NativeCalendarFailure)?.localizedDescription ?? (error as? CalendarFailure)?.localizedDescription ?? CalendarFailure.unavailable.localizedDescription
             }
-            if let self, self.epoch.accepts(ticket) { self.busy = false }
+            if let self, self.epoch.accepts(ticket) {
+                self.busy = false
+                if self.needsRangeReload && self.phase == .connected { self.needsRangeReload = false; self.refresh() }
+            }
         }
     }
     func lock() {
-        epoch.invalidate(); operation?.cancel(); operation = nil; source = nil
+        epoch.invalidate(); operation?.cancel(); operation = nil; source = nil; debounce?.cancel(); debounce = nil
+        runner.cancelAll(); localAuthentication.cancel(); loadedRange = nil; needsRangeReload = false
         editor = nil; selectedEventID = nil; events = []; calendars = []; visibleCalendarIDs = []
-        query = ""; error = nil; notice = nil; busy = false; phase = .welcome
+        query = ""; error = nil; notice = nil; busy = false; phase = hasSession ? .locked : .welcome
+    }
+    var isWorkspaceOpen: Bool { phase == .preview || phase == .connected }
+    var canEdit: Bool { phase == .preview }
+    var requestRange: CalendarQueryRange {
+        let days = mode == .month ? math.month(date) : mode == .week ? math.week(date) : (0..<14).map { math.addingDays($0,to:date) }
+        let start = math.calendar.startOfDay(for:days.first!), end = math.addingDays(1,to:math.calendar.startOfDay(for:days.last!))
+        return .init(start:start,end:end,timeZoneID:timeZoneID)
+    }
+    private func rangeChanged() {
+        guard phase == .connected, loadedRange != requestRange else { return }
+        if busy { needsRangeReload = true; return }
+        debounce?.cancel()
+        debounce = Task { [weak self] in
+            try? await Task.sleep(for:.milliseconds(180))
+            guard !Task.isCancelled, let self, self.phase == .connected else { return }
+            if self.busy { self.needsRangeReload = true } else { self.refresh() }
+        }
+    }
+    func signIn(username: String, password: String) {
+        guard !previewOnly, !busy, [.welcome,.locked].contains(phase) else { return }
+        do {
+            let command = try NativeCalendarCommand("login",username:username.trimmingCharacters(in:.whitespacesAndNewlines),password:password)
+            phase = .signingIn
+            authenticate(command)
+        } catch { self.error = error.localizedDescription }
+    }
+    func submitChallenge(_ value: String) {
+        guard !previewOnly, !busy, phase == .totp || phase == .mailboxPassword else { return }
+        do { authenticate(try NativeCalendarCommand(phase == .totp ? "totp" : "mailbox_password",password:phase == .mailboxPassword ? value : nil,code:phase == .totp ? value.trimmingCharacters(in:.whitespacesAndNewlines) : nil)) }
+        catch { self.error = error.localizedDescription }
+    }
+    private func authenticate(_ command: NativeCalendarCommand) {
+        let ticket = epoch.value
+        perform { [self] in
+            let result = try await runner.request(command)
+            guard epoch.accepts(ticket), !Task.isCancelled else { throw CancellationError() }
+            return { [self] in
+                switch result.phase {
+                case "totp": phase = .totp
+                case "mailbox_password": phase = .mailboxPassword
+                case "connected":
+                    hasSession = true; defaults.set(true,forKey:"nativeCalendarConnected")
+                    source = NativeCalendarDataSource(runner:runner); phase = .connected
+                    visibleCalendarIDs = []; needsRangeReload = true
+                default: error = "Calendar returned an unexpected sign-in state."
+                }
+            }
+        }
+    }
+    func unlock(mode: LocalUnlockAuthentication.Mode = .system) {
+        guard !previewOnly, phase == .locked, !busy else { return }
+        let ticket = epoch.value
+        perform { [self] in
+            let allowed = try await localAuthentication.authenticate(mode,reason:"Unlock ProtonX Calendar on this Mac")
+            guard allowed, epoch.accepts(ticket), !Task.isCancelled else { throw CancellationError() }
+            let result = try await runner.request(NativeCalendarCommand("restore"))
+            guard result.phase == "connected" else { throw ProtonXError.invalidResponse }
+            return { [self] in source = NativeCalendarDataSource(runner:runner); phase = .connected; needsRangeReload = true }
+        }
+    }
+    func cancelLocalUnlock() { if phase == .locked && busy { lock() } }
+    func signOut() {
+        guard !previewOnly, phase == .connected, !busy else { return }
+        perform { [self] in
+            let result = try await runner.request(NativeCalendarCommand("sign_out"))
+            guard result.phase == "welcome" else { throw ProtonXError.invalidResponse }
+            return { [self] in hasSession = false; defaults.set(false,forKey:"nativeCalendarConnected"); lock() }
+        }
     }
     func today() { date = now() }
     func navigate(_ direction: Int) {

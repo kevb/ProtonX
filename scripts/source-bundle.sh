@@ -9,6 +9,7 @@ if [[ -n "$(git status --porcelain)" ]]; then
 fi
 scripts/build-helper.sh
 scripts/build-mail-helper.sh
+scripts/build-calendar-helper.sh
 mkdir -p "$PROTONX_ROOT/build"
 # Outside the checkout: git apply otherwise discovers the enclosing ProtonX
 # repository and can silently skip paths outside its current directory prefix.
@@ -59,6 +60,21 @@ for path in filter(None, paths):
         raise SystemExit('Corresponding-source mismatch: '+path)
 print('Corresponding helper source matches every tracked build input')
 PYCHECK
+# Calendar materialization contains pinned public source and build patches only.
+# Its source tree is never used for account/profile state.
+python3 - "$PROTONX_ROOT/.tools/calendar-native" "$PROTONX_SOURCE/calendar-helper" <<'CALENDARSOURCE'
+import pathlib, shutil, sys
+source, destination = map(pathlib.Path, sys.argv[1:])
+shutil.copytree(source, destination)
+for original in source.rglob('*'):
+    if original.is_file():
+        copied = destination/original.relative_to(source)
+        if copied.read_bytes() != original.read_bytes():
+            raise SystemExit('Calendar corresponding-source mismatch')
+print('Calendar corresponding source matches every materialized build input')
+CALENDARSOURCE
+(cd "$PROTONX_SOURCE/calendar-helper" && go mod vendor)
+(cd .tools/calendar-native && go list -m all) > "$PROTONX_SOURCE/CALENDAR_DEPENDENCIES.txt"
 mkdir -p "$PROTONX_SOURCE/helper/.cargo"
 printf '\n' >> "$PROTONX_SOURCE/helper/.cargo/config.toml"
 cat "$PROTONX_SOURCE/helper/vendor-config.toml" >> "$PROTONX_SOURCE/helper/.cargo/config.toml"
@@ -108,7 +124,7 @@ PYNOTICES
 cat > "$PROTONX_SOURCE/BUILDING.md" <<'BUILDING'
 # Rebuild this source bundle
 
-Use a Mac with Xcode 16+/Swift 6, Git, Python 3.11+ and Rust 1.93+ (tested with 1.99).
+Use a Mac with Xcode 16+/Swift 6, Git, Python 3.11+, Rust 1.93+ (tested with 1.99), and Go 1.26.4 with cgo/Clang.
 Accept Xcode's license first. No Proton account is needed. The helper's crates
 are included under `helper/vendor`, including their original license files.
 `SOURCE_REVISION.txt` identifies the ProtonX commit; `DEPENDENCIES.tsv` indexes
@@ -124,11 +140,16 @@ cargo test --offline --locked -p pass-cli --features protonx-desktop
 cd ../mail-helper
 cargo build --offline --locked -p protonx-mail-helper --profile mail-macos
 cargo test --offline --locked -p protonx-mail-helper --profile mail-macos-debug
+cd ../calendar-helper
+CGO_ENABLED=1 CGO_CFLAGS=-mmacosx-version-min=14.0 CGO_LDFLAGS=-mmacosx-version-min=14.0 go build -mod=vendor -o protonx-calendar ./cmd/protonx-calendar
+CGO_ENABLED=1 go test -mod=vendor ./cmd/protonx-calendar ./pkg/pgp ./pkg/event ./pkg/calendar ./pkg/recurrence ./pkg/ical ./pkg/icaltime ./pkg/papi
 cd ../protonx
 mkdir -p upstream/pass-cli/target/release
 cp ../helper/target/release/pass-cli upstream/pass-cli/target/release/pass-cli
 mkdir -p .tools/mail-helper
 cp ../mail-helper/target/mail-macos/protonx-mail .tools/mail-helper/protonx-mail
+mkdir -p .tools/calendar-helper
+cp ../calendar-helper/protonx-calendar .tools/calendar-helper/protonx-calendar
 ./scripts/build-app.sh --skip-helper
 swift test
 ./scripts/test-bridge.sh
@@ -148,7 +169,9 @@ package the default helper. Read `protonx/docs/LOCAL_STORAGE.md`.
 The build produces `protonx/build/ProtonX.app` with local ad-hoc signatures by default.
 It does not notarize or install the app. Keep this source archive available
 alongside any binary distribution. See `LICENSE`, `LICENSE-MAIL-HELPER` and `THIRD_PARTY_NOTICES.md`. The Mail helper
-includes AGPL-3.0-only components; `MAIL_DEPENDENCIES.tsv` indexes its packages.
+includes AGPL-3.0-only components; Calendar uses Unlicense/MIT source plus
+vendored dependencies and their original licenses. `CALENDAR_DEPENDENCIES.txt`
+records the pinned Go module graph; `MAIL_DEPENDENCIES.tsv` indexes its packages.
 BUILDING
 tar -czf "$PROTONX_STAGE/ProtonX-0.1.0-source.tar.gz" -C "$PROTONX_STAGE" ProtonX-0.1.0-source
 # Preserve the previous generated package until its replacement is complete.

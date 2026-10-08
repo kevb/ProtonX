@@ -5,6 +5,38 @@ macOS 26.6.2, Xcode 27 / Swift 6.4 and Rust 1.99.0. Automated test content is
 synthetic and uses isolated storage. Private account contents and credentials
 are excluded from public artifacts.
 
+## Calendar read-only connection — 2026-10-08
+
+- The full local Swift run passed 198 tests in nine suites, including bounded
+  native commands/replies, private-pipe credentials/challenges, empty accounts,
+  all-day wire dates, range navigation, read-only mutation refusal, product-state
+  retention, cancelled local unlock and rejection of late authentication/results.
+- `test-calendar-helper.sh` passed the native helper contracts and pinned public
+  PGP/event/calendar/recurrence/iCalendar/time-zone tests. Official Proton's local
+  mock server exercised genuine SRP login, derived key persistence and key restore
+  using an injected memory store. Synthetic encrypted cards passed decryption and
+  projection; incomplete decryption was refused. These tests do not establish
+  detached signature verification, which the adapter still lacks.
+- Transport contracts refuse other origins, inherited proxies and redirects.
+  A simulated production API failure/missing success envelope cannot appear as an
+  empty calendar. Strict recurrence contracts reject malformed or truncated windows.
+- The compiled helper passed a no-account protocol smoke check: no event write
+  command, no raw stderr/errors and only a private coordination lock file on disk.
+  Tests never installed the production Keychain backend or contacted real accounts.
+- An exact copy of the materialized Calendar source, with vendored Go dependencies,
+  rebuilt offline using the already installed pinned toolchain and passed the same
+  compiled protocol smoke check. Full suite source-archive generation and public
+  binary publication remain separate from this Calendar subset check.
+- The optimized update and isolated preview bundles built with strict nested
+  signature verification. The Calendar helper has its own stable designated
+  requirement and a macOS 14 deployment target. Minimum-OS runtime and real
+  Keychain/account upgrade continuity still need validation.
+- A synthetic native walkthrough checked the Calendar timetable and lock screen;
+  lock cleared event contents, and the preview welcome exposed no account form.
+- No real Calendar account was accessed. Live sign-in, older/shared/subscribed keys,
+  recurring exception interoperability and server expiry remain acceptance gates.
+  Connected editing, invitations, reminders and persistent caching are not enabled.
+
 ## Native Calendar preview — 2026-10-08
 
 - The full local Swift test run passed 186 tests, including 13 new Calendar
@@ -36,10 +68,10 @@ are excluded from public artifacts.
 | Pass saved/offline browsing | Synthetic encrypted-storage, policy, saved-first/reconnect and lock-race tests | Disconnected account restart and larger-vault measurements |
 | Native Mail | Manual sign-in and message reading; synthetic/public tests for reading, composer, sender selection, message actions, conversations and native attachments | Conversation interoperability, live send/reply/attachment delivery, linked-Gmail delivery and account recovery |
 | Mail secure storage | Opt-in database/file encryption and resumable database/attachment staging contracts | Cache path rebasing/activation, whole-profile cutover and pending-send/draft recovery before enabling ordinary builds |
-| Calendar preview | Synthetic date/DST/layout, editing/revision, filters, cross-product editor retention and lock-epoch tests; native week/month/agenda walkthrough | Proton sign-in, encrypted persistence, live sync/mutations, recurrence, invitations and notifications are not implemented |
+| Calendar | Synthetic date/DST/layout, preview editing, native helper/session/range/lock contracts, official mock-server SRP and pinned public decryption/recurrence tests; native preview walkthrough | Real-account sign-in/key history, signature verification, server recurrence interoperability, secure caching, mutations, invitations and notifications |
 | Product launchers | Synthetic native UI checks for cold/warm requests, minimized/closed windows and reverse product selection; signed installer checks | Minimum-OS runtime and update/Keychain continuity |
 
-The latest local Swift run passed 186 tests; five synthetic atomic-install tests
+The latest local Swift run passed 198 tests; five synthetic atomic-install tests
 passed at the prior installer milestone. These are local results, not a statement about the
 latest GitHub run. Dated entries below record milestone-specific test scope and
 historical limitations. The README and roadmap describe the current feature set.

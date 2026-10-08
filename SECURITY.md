@@ -296,13 +296,37 @@ Save. Unsaved composer text is preserved during file operations, and uncertain
 upload/removal requires metadata reconciliation before repeating a change/send.
 See docs/MAIL_ATTACHMENTS.md for complete behavior and acceptance limits.
 
-## Calendar preview
+## Calendar native adapter
 
-Calendar currently uses synthetic, memory-only events behind a separate typed
-data-source boundary. It performs no network, Keychain, EventKit, file-storage or
-notification operations. Locks clear events, filters, selected-event details and
-editors, including hidden Calendar state. Epoch checks reject late snapshots and
-mutation completions; delete intents also bind the disclosed revision and epoch.
-Shared navigation preferences contain no event contents. No Mail/Pass credentials
-or sessions are used by Calendar. Account authentication, encrypted persistence
-and Proton cryptography need independent review before enabling a live backend.
+Calendar has an independent, experimental read-only helper. `upstream.lock.json`
+pins the unofficial Unlicense protocol adapter; pinned official Proton Go
+libraries own SRP, key unlocking and OpenPGP. The adapter currently **does not
+verify detached signatures on Calendar passphrases/cards**. Signature verification,
+independent review and real account/key-history interoperability remain release
+gates; passing synthetic decryption tests is not evidence of those properties.
+
+The helper has a closed JSON-line command set and a read-only Calendar API fence.
+It exposes no event writes, invitation actions, host overrides, exports or file
+paths. Authentication/session refresh/scope verification and sign-out can still
+change the Proton session through authentication endpoints. Production uses one
+fixed HTTPS origin, normal TLS verification, no inherited proxy and no redirects.
+Raw errors, server diagnostics, prompt text and helper stderr never reach the UI
+or logs. Response bytes, page counts, recurrence work and date windows are bounded.
+Malformed recurrence fails the range; undecryptable occurrences produce an omission
+warning rather than partial decrypted event details.
+
+The injected native session store disables community plaintext config/session/cache
+files. Tokens and the salted key-unlock passphrase use only the nonsynchronizing
+`org.kevb.ProtonX.Calendar.Native` Keychain item with device-local, unlocked
+accessibility. Its helper uses the stable `org.kevb.ProtonX.CalendarHelper` signing
+identity. Failed login keeps the prior stored session; token rotation preserves
+its unlock key and refuses persistence failures. The login password is not saved.
+Restore follows native local authentication; Mail/Pass credentials are never reused.
+
+Only a private, locked process-coordination file is created in the Calendar profile.
+Events and decrypted keys stay in memory; there is no persistent event cache.
+Locks clear visible and hidden event/filter/editor state, cancel operations and
+terminate the helper. Epoch checks reject late authentication and event results.
+Shared navigation defaults contain only preferences and a saved-session hint.
+Preview edits stay in memory and have no account backend. All automated fixtures
+use synthetic data and injected memory session stores, never the real Keychain.

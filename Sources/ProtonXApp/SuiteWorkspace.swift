@@ -29,7 +29,7 @@ import ProtonXCore
             return store
         }
         self.makeMail = makeMail ?? { NativeMailStore(previewOnly: previewOnly) }
-        self.makeCalendar = makeCalendar ?? { CalendarStore(previewOnly: previewOnly) }
+        self.makeCalendar = makeCalendar ?? { CalendarStore(previewOnly: previewOnly, defaults: defaults) }
         let preference = defaults.string(forKey: "suiteStartup") ?? "last"
         let initial = initialProduct ?? (previewOnly ? nil : (preference == "last" ? defaults.string(forKey: "suiteLastProduct").flatMap(ProductRoute.init(rawValue:)) : ProductRoute(rawValue: preference)))
         select(initial)
@@ -46,15 +46,16 @@ import ProtonXCore
         switch selected {
         case .pass: pass.map { $0.phase == .open && !$0.busy && !$0.isDemo } ?? false
         case .mail: mail.map { $0.phase == .open && !$0.busy && !$0.demo } ?? false
-        case .calendar: calendar.map { $0.phase == .preview && !$0.busy } ?? false
+        case .calendar: calendar.map { $0.isWorkspaceOpen && !$0.busy } ?? false
         case nil: false
         }
     }
     func select(_ product: ProductRoute?) {
         if selected != product {
-            pass?.cancelLocalUnlock(); mail?.cancelLocalUnlock()
+            pass?.cancelLocalUnlock(); mail?.cancelLocalUnlock(); calendar?.cancelLocalUnlock()
             if product == .pass { pass?.localAuthentication.arm() }
             if product == .mail { mail?.localAuthentication.arm() }
+            if product == .calendar { calendar?.localAuthentication.arm() }
         }
         if product != .pass { passSearchRequested = false }
         if product == .pass && pass == nil {
@@ -152,6 +153,7 @@ struct SuiteWindow: View {
         .onAppear {
             if workspace.selected == .pass { workspace.pass?.localAuthentication.arm() }
             if workspace.selected == .mail { workspace.mail?.localAuthentication.arm() }
+            if workspace.selected == .calendar { workspace.calendar?.localAuthentication.arm() }
             ProductWindows.shared.installSelector { workspace.select($0) }
             ProductWindows.shared.installOpener { _ in openWindow(id: "suite") }
             SystemIntegration.shared.openHome = { workspace.select(nil); ProductWindows.shared.showSuite() }
@@ -206,7 +208,7 @@ struct SuiteWindow: View {
             HStack(spacing: 22) {
                 productCard(.pass, title: "Pass", symbol: "key", subtitle: "Passwords and private notes")
                 productCard(.mail, title: "Mail", symbol: "envelope", subtitle: "Your inbox and conversations")
-                productCard(.calendar, title: "Calendar", symbol: "calendar", subtitle: "Native preview · sample events")
+                productCard(.calendar, title: "Calendar", symbol: "calendar", subtitle: workspace.previewOnly ? "Native preview · sample events" : "Calendars, events and your week")
             }
             Text("Switch products anytime. Your place stays with you.")
                 .font(.callout).foregroundStyle(.secondary)
