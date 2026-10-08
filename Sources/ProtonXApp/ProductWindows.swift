@@ -98,6 +98,7 @@ struct SuiteWindowRegistration: NSViewRepresentable {
             ProductWindows.shared.register(target, for: .pass)
             ProductWindows.shared.register(target, for: .mail)
             ProductWindows.shared.register(target, for: .calendar)
+            ProductWindows.shared.register(target, for: .contacts)
         }
     }
 }

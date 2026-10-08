@@ -4,7 +4,22 @@ See the [official-client gap analysis](GAP_ANALYSIS.md) for the
 ordered Pass-first work plan and acceptance gates. Sign-in and a verified
 end-to-end workflow come before additional products.
 
-## Next priorities (2026-10-07)
+## Product expansion order (2026-10-08)
+
+1. **Contacts next.** The first native address-book screen and Mail To/Cc/Bcc
+   pickers use the existing Mail account. Complete real-account reading/refresh
+   acceptance, then add reviewed single-contact editing, group administration,
+   CSV/vCard import/export and autocomplete. Calendar invitation picking follows
+   the invitation backend. See [Contacts](CONTACTS.md).
+2. **Photos after Contacts, deferred.** Explore native Mac photo apps before
+   choosing between a gallery and deeper Apple Photos integration. Start eventual
+   implementation with read-only browsing and verified original downloads through
+   Proton's SDK, then explicit encrypted offline availability. Treat independent
+   archive/export separately from a cache so cloud deletion cannot silently erase
+   an archive. Check current SDK photo coverage and migration readiness first.
+   No Photos implementation has started.
+
+## Next priorities (2026-10-08)
 
 1. **Finish the secure-storage foundation already in progress.** The opt-in Mail
    candidate encrypts databases and new attachment/MIME cache payloads and supports
@@ -35,8 +50,9 @@ Safari website AutoFill remains covered by the standalone official extension.
 A ProtonX credential provider for system/native-app integration is optional later
 work, not a daily-use release gate; see [the integration decision](CREDENTIAL_PROVIDER.md).
 
-Repository presentation is backlogged below. Drive remains exploratory; prioritise
-Pass and the shared macOS experience before expanding the suite.
+Repository presentation is backlogged below. Contacts is the next expansion;
+Drive Photos follows it after native photo-app exploration. Existing security and
+acceptance gates remain release requirements.
 
 ## Completed native foundations
 
@@ -96,9 +112,31 @@ remain separate gates.
 - Retain Bridge as an optional prototype/compatibility path. Its lifecycle work
   is secondary to proving direct native Mail onboarding.
 
-## Drive and packaging
+## Contacts
 
-- Evaluate Proton's supported native SDK/CLI and File Provider constraints.
+- Implemented first pass: product-rail address book, name/email search, contact
+  groups, selected decrypted details, new-mail actions and To/Cc/Bcc pickers.
+- Contacts follows Mail's existing account and lock state. No extra product login,
+  system Contacts permission or contact mutation is added.
+- Accept real-account listing, SDK event refresh and diverse encrypted cards.
+- Add create/edit/delete with one-contact write protection, full field preservation
+  and conflict handling; then group administration, import/export and autocomplete.
+- Consider Calendar recipient picking and optional explicit Apple Contacts access.
+
+## Drive Photos — after Contacts (deferred)
+
+- Evaluate Proton's native SDK/CLI coverage, third-party integration rules and
+  File Provider constraints.
+- Improve photo handling when Drive work begins. Keep two approaches open:
+  - A native photo gallery similar to Proton Drive's web gallery, with thumbnails,
+    chronological browsing and full-size viewing.
+  - Deeper macOS integration, potentially with Apple Photos or system import/export
+    workflows, subject to feasibility and a clear permission model.
+- Compare the gallery and deeper integration before choosing a direction; neither
+  is committed or implemented yet. Keep Drive's session separate from Pass and Mail.
+
+## Packaging
+
 - Decide separate process/sandbox packaging after proving the suite UX and IPC needs.
 - Measure total memory/CPU (including Bridge and transient helpers) before publishing
   any reduction percentages.
@@ -206,7 +244,7 @@ assets; public captures and fixtures use synthetic content.
 | Attachments | Native listed attachments, bounded download/save, PDF/raster/text Quick Look preview/open and draft upload/remove/drag-drop are implemented. Accept actual send/receive and interrupted-upload recovery; expand preview types and support embedded CID/inline images. Current per-file native limit is 25 MB; Proton limits remain authoritative. See [attachment behavior](MAIL_ATTACHMENTS.md). |
 | Composition | Forward; rich text (font/size/colour, emphasis, lists, alignment, links, quotations, inline images, clear formatting); plain-text option. Multiple/minimizable/pop-out drafts and automatic saving remain; initial nonmodal composing and tab-switch draft retention are implemented. |
 | Sending controls | Undo Send, scheduled send with edit/cancel, read-receipt request/response, password-protected external messages and expiry. Preserve existing queued/confirmed/failed/unknown status handling. |
-| Contacts | Contact book, picker/autocomplete, create/edit/delete, groups and group addressing, CSV/vCard import/export. To/Cc/Bcc and From selection already exist. |
+| Contacts | Native address-book browsing/search, groups, selected decrypted fields, new-mail actions and To/Cc/Bcc pickers are implemented. Real-account read/refresh acceptance, autocomplete, create/edit/delete, group administration and CSV/vCard import/export remain. See [Contacts](CONTACTS.md). |
 | Search | Full-mailbox metadata/body search, recipient/date/attachment and other advanced filters. Current search covers only loaded subjects/senders, within the bounded message window. |
 | Organisation | Star/unstar, snooze, arbitrary folder moves, label application, folder/label creation/edit/deletion/colours/subfolders. Existing custom folders can be browsed. |
 | Bulk/conversation actions | Multi-selection, permanent deletion and empty Trash. Read/unread and Archive/Trash/Spam/Inbox actions work on one message or one conversation, with SDK move undo and keyboard confirmation for whole-conversation Trash. Permanent deletion requires an explicit helper/policy review. |

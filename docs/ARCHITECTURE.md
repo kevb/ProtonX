@@ -208,12 +208,24 @@ OS delivery is injected for contract tests. Real app bundles install a retained
 UserNotifications delegate before launch completes; command-line tests and
 synthetic preview bundles never instantiate the native notification center.
 
-## Calendar preview boundary
+## Calendar account and preview boundary
 
 The suite lazily creates an independent Calendar store. Native week/month/agenda
 views and an inline editor retain their state across product switches. Preview
 events are synthetic and memory-only; lock clears visible and hidden state.
-The bounded `CalendarDataSource` contract separates date/layout logic from a future
-Proton adapter. All-day civil dates use exclusive model ends, timed events use
-absolute instants, and writes bind individual event revisions. No existing
-product helper or account session is used. See [Calendar scope](CALENDAR.md).
+The bounded Calendar adapter owns an independent helper and Keychain session,
+with explicit one-use account handoff from unlocked Mail or online Pass. All-day
+civil dates use exclusive model ends; timed events use absolute instants.
+Single-event writes verify owned-calendar/event signatures and perform a fresh
+row comparison; they are not an atomic server revision condition. Preview events
+remain memory-only and never start the account helper. See [Calendar scope](CALENDAR.md).
+
+## Contacts Mail view
+
+Contacts is a suite-rail view over `NativeMailStore`, with independently retained
+selection/search and list/detail request epochs. It is part of Mail's account
+boundary, not another product credential store. The pinned SDK supplies its
+event-synced contact index and selected decrypted card fields through closed
+read-only helper commands. The composer uses a draft-bound To/Cc/Bcc picker;
+no contact writes or system address-book integration are enabled. See
+[Contacts](CONTACTS.md) for storage and acceptance boundaries.

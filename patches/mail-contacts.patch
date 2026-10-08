@@ -1,0 +1,11 @@
+--- a/project/mail/rust/mail/mail-uniffi/src/mail.rs
++++ b/project/mail/rust/mail/mail-uniffi/src/mail.rs
+@@ -1,7 +1,7 @@
+ mod assigned_actions;
+ mod avatar_information;
+ mod background_execution;
+-mod contacts;
++pub mod contacts;
+ mod content_search_indexing;
+ pub mod conversations;
+ pub mod datatypes;

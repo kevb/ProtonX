@@ -183,7 +183,7 @@ private final class SyntheticImageTask: NSObject, WKURLSchemeTask, @unchecked Se
         #expect(SyntheticImageProtocol.records.requests.count == 1)
         #expect(try await script(nextView, "document.querySelector('img').naturalWidth") as? Int == 0)
     }
-    @Test func layoutTracksLateGrowthAndScrollingMovesTheOuterReader() async throws {
+    @Test func layoutTracksLateGrowthAndScrollingForwardsToTheOuterReader() async throws {
         var height: CGFloat = 240
         var failed = false
         let parent = MailHTMLView(html:"<p>Short synthetic message</p>", height:.init(get:{ height },set:{ height=$0 }), failed:.init(get:{ failed },set:{ failed=$0 }),openLink:{ _ in })
@@ -201,7 +201,14 @@ private final class SyntheticImageTask: NSObject, WKURLSchemeTask, @unchecked Se
         #expect(!failed)
         #expect(!view.hasVerticalOverflow)
         final class FlippedDocument: NSView { override var isFlipped:Bool { true } }
-        let scroll = NSScrollView(frame:NSRect(x:0,y:0,width:620,height:300))
+        // A CGEvent constructed without a live window has no AppKit scroll context.
+        // Verify the reader forwards that event to its outer scroll view; do not
+        // depend on user scrolling preferences or offscreen native animation.
+        final class ForwardedScrollView: NSScrollView {
+            var forwardedEvents = 0
+            override func scrollWheel(with event: NSEvent) { forwardedEvents += 1 }
+        }
+        let scroll = ForwardedScrollView(frame:NSRect(x:0,y:0,width:620,height:300))
         scroll.hasVerticalScroller = true
         let document = FlippedDocument(frame:NSRect(x:0,y:0,width:620,height:height))
         scroll.documentView = document
@@ -213,12 +220,12 @@ private final class SyntheticImageTask: NSObject, WKURLSchemeTask, @unchecked Se
         let wheel = try #require(CGEvent(scrollWheelEvent2Source:nil, units:.pixel, wheelCount:1, wheel1:-120, wheel2:0, wheel3:0))
         let event = try #require(NSEvent(cgEvent:wheel))
         #expect(view.forwardVerticalScroll(event))
-        try await wait { scroll.contentView.bounds.origin.y > 0 }
-        #expect(scroll.contentView.bounds.origin.y > 0)
+        #expect(scroll.forwardedEvents == 1)
         coordinator.applyHeight(70_000)
         #expect(height == MailReaderPolicy.maxHeight)
         #expect(view.hasVerticalOverflow)
         #expect(!view.forwardVerticalScroll(event))
+        #expect(scroll.forwardedEvents == 1)
         coordinator.active = false
         coordinator.applyHeight(400)
         #expect(height == MailReaderPolicy.maxHeight)

@@ -69,6 +69,7 @@ macro_rules! sdk_void {
 mod attachments;
 mod inbox_actions;
 mod threads;
+mod contacts;
 
 const MAX_INPUT: usize = 64 * 1024;
 const MAX_OUTPUT: usize = 8 * 1024 * 1024;
@@ -85,6 +86,8 @@ struct Request {
 #[serde(tag = "method", rename_all = "snake_case", deny_unknown_fields)]
 enum Command {
     Initialize,
+    Contacts {},
+    ContactDetail { item: u64 },
     CalendarHandoff {},
     NotificationsStart,
     NotificationsPoll,
@@ -471,6 +474,7 @@ struct Backend {
     transfers: attachments::Transfers,
     action_state: inbox_actions::State,
     thread: Option<threads::SelectedThread>,
+    contact_ids: std::collections::HashSet<u64>,
 }
 impl Backend {
     fn new(directory: PathBuf) -> Result<Self, &'static str> {
@@ -525,6 +529,7 @@ impl Backend {
             transfers: attachments::Transfers::default(),
             action_state: inbox_actions::State::default(),
             thread: None,
+            contact_ids: std::collections::HashSet::new(),
         })
     }
     fn login_failure(&self, error: LoginError) -> &'static str {
@@ -577,6 +582,7 @@ impl Backend {
             block_on(self.session.set_primary_account(id))
         )
         .map_err(|_| "session_failed")?;
+        self.contact_ids.clear();
         self.user = Some(user);
         self.flow = None;
         Ok(json!({"phase":"connected", "cacheFirst":cfg!(feature = "secure-storage")}))
@@ -616,6 +622,7 @@ impl Backend {
                 )
             }
             Command::Restore => {
+                self.contact_ids.clear();
                 let sessions = sdk_result!(
                     mail_uniffi::mail::MailSessionGetSessionsResult,
                     block_on(self.session.get_sessions())
@@ -698,6 +705,8 @@ impl Backend {
                 if c.token != token { return Err("invalid_state"); } self.composer_value()
             },
             Command::TransferCancel { token } => { self.transfers.cancel(token); Ok(json!({"closed":true})) },
+            Command::Contacts {} => self.contacts(),
+            Command::ContactDetail { item } => self.contact_detail(item),
             Command::Snapshot { folder, more, mode } => self.snapshot(folder, more, mode),
             Command::Thread { folder, item } => self.load_thread(folder, item),
             Command::Message { folder, item } => {
@@ -804,6 +813,7 @@ impl Backend {
                 )
                 .map_err(|_| "sign_out_failed")?;
                 self.user = None;
+                self.contact_ids.clear();
                 self.thread = None;
                 self.mailbox = None;
                 self.scroller = None;

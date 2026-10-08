@@ -6,6 +6,7 @@ struct MailComposer: View {
     @ObservedObject var store: NativeMailStore
     let initial: NativeMailDraft
     @ObservedObject var editor: MailEditorState
+    @State private var contactPickerField: String?
     @State private var confirmDiscard = false
     @State private var confirmSend = false
     @State private var confirmClosePending = false
@@ -105,6 +106,11 @@ struct MailComposer: View {
         HStack {
             Text(title).foregroundStyle(.secondary).frame(width: 60, alignment: .leading)
             TextField("Email addresses, separated by commas", text: text).textFieldStyle(.plain).focused($focus, equals: key)
+            Button { contactPickerField = key } label: { Image(systemName: "person.crop.circle.badge.plus") }
+                .buttonStyle(.plain).help("Add \(title) recipients from Contacts").accessibilityLabel("Add \(title) recipients from Contacts")
+                .popover(isPresented: Binding(get: { contactPickerField == key }, set: { if !$0 { contactPickerField = nil } })) {
+                    ContactRecipientPicker(store: store) { addresses in store.addContactRecipients(addresses, field: key, token: initial.token) }
+                }
         }.padding(.vertical, 15).disabled(!editable)
     }
 }

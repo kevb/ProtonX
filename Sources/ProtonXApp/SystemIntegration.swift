@@ -21,6 +21,7 @@ final class SystemIntegration: NSObject {
     var openPassForSearch: (() -> Void)?
     var openPass: (() -> Void)? = { ProductWindows.shared.open(.pass) }
     var openMail: (() -> Void)? = { ProductWindows.shared.open(.mail) }
+    var openContacts: (() -> Void)? = { ProductWindows.shared.open(.contacts) }
     var openCalendar: (() -> Void)? = { ProductWindows.shared.open(.calendar) }
     var openSettings: (() -> Void)?
     var lockSuite: (() -> Void)?
@@ -65,12 +66,13 @@ final class SystemIntegration: NSObject {
         guard statusItem == nil else { return }
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         item.button?.image = NSImage(systemSymbolName: "shield.lefthalf.filled", accessibilityDescription: "ProtonX")
-        item.button?.toolTip = "ProtonX · Pass, Mail and Calendar"
+        item.button?.toolTip = "ProtonX · Pass, Mail, Calendar and Contacts"
         let menu = NSMenu()
         menu.addItem(actionItem("Open ProtonX", #selector(showHome)))
         menu.addItem(actionItem("Open Pass", #selector(showPass)))
         menu.addItem(actionItem("Open Mail", #selector(showMail)))
         menu.addItem(actionItem("Open Calendar", #selector(showCalendar)))
+        menu.addItem(actionItem("Open Contacts", #selector(showContacts)))
         menu.addItem(.separator())
         menu.addItem(actionItem("Lock ProtonX", #selector(lockNow)))
         menu.addItem(actionItem("Settings…", #selector(showSettings)))
@@ -84,6 +86,7 @@ final class SystemIntegration: NSObject {
     @objc private func showPass() { openPass?(); lastActivity = ProcessInfo.processInfo.systemUptime }
     @objc private func showHome() { openHome?(); lastActivity = ProcessInfo.processInfo.systemUptime }
     @objc private func showMail() { openMail?(); lastActivity = ProcessInfo.processInfo.systemUptime }
+    @objc private func showContacts() { openContacts?(); lastActivity = ProcessInfo.processInfo.systemUptime }
     @objc private func showCalendar() { openCalendar?(); lastActivity = ProcessInfo.processInfo.systemUptime }
     @objc private func showSettings() { openSettings?() }
     @objc private func lockNow() { lockSuite?() }

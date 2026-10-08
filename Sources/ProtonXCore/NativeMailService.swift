@@ -52,6 +52,8 @@ public struct NativeMailNotification: Codable, Equatable, Sendable {
     }
 }
 public struct NativeMailResult: Codable, Sendable {
+    public var contacts: [ContactEntry]?
+    public var contactDetail: ContactDetail?
     public var handoff: AccountHandoff?
     public var phase: NativeMailPhase?
     public var folders: [NativeMailFolder]?
@@ -79,7 +81,8 @@ public struct NativeMailResult: Codable, Sendable {
     public var conversationID: UInt64?
     public var notifications: [NativeMailNotification]?
     public var unreadCount: UInt64?
-    public init(phase: NativeMailPhase? = nil, folders: [NativeMailFolder]? = nil, folder: UInt64? = nil, messages: [NativeMailMessage]? = nil, loading: Bool? = nil, email: String? = nil, id: UInt64? = nil, body: String? = nil, sanitizedHTML: String? = nil, attachments: Int? = nil, draft: NativeMailDraft? = nil, token: UInt64? = nil, sendState: NativeMailSendState? = nil, closed: Bool? = nil, cacheFirst: Bool? = nil, fresh: Bool? = nil, refreshFailed: Bool? = nil, actions: [NativeMailAction]? = nil, queued: Bool? = nil, undoToken: UInt64? = nil, thread: NativeMailThread? = nil, conversationID: UInt64? = nil, notifications: [NativeMailNotification]? = nil, unreadCount: UInt64? = nil, attachmentList: [NativeMailAttachment]? = nil, transfer: NativeMailTransfer? = nil, handoff: AccountHandoff? = nil) {
+    public init(phase: NativeMailPhase? = nil, folders: [NativeMailFolder]? = nil, folder: UInt64? = nil, messages: [NativeMailMessage]? = nil, loading: Bool? = nil, email: String? = nil, id: UInt64? = nil, body: String? = nil, sanitizedHTML: String? = nil, attachments: Int? = nil, draft: NativeMailDraft? = nil, token: UInt64? = nil, sendState: NativeMailSendState? = nil, closed: Bool? = nil, cacheFirst: Bool? = nil, fresh: Bool? = nil, refreshFailed: Bool? = nil, actions: [NativeMailAction]? = nil, queued: Bool? = nil, undoToken: UInt64? = nil, thread: NativeMailThread? = nil, conversationID: UInt64? = nil, notifications: [NativeMailNotification]? = nil, unreadCount: UInt64? = nil, attachmentList: [NativeMailAttachment]? = nil, transfer: NativeMailTransfer? = nil, handoff: AccountHandoff? = nil, contacts: [ContactEntry]? = nil, contactDetail: ContactDetail? = nil) {
+        self.contacts = contacts; self.contactDetail = contactDetail
         self.handoff = handoff; self.phase = phase; self.folders = folders; self.folder = folder; self.messages = messages
         self.loading = loading; self.email = email; self.id = id; self.body = body; self.sanitizedHTML = sanitizedHTML; self.attachments = attachments
         self.draft = draft; self.token = token; self.sendState = sendState; self.closed = closed
@@ -90,6 +93,7 @@ public struct NativeMailResult: Codable, Sendable {
     }
 }
 public enum NativeMailFailure: String, Codable, Error, LocalizedError, Sendable {
+    case contactsFailed = "contacts_failed", contactDetailFailed = "contact_detail_failed", contactsTooLarge = "contacts_too_large"
     case handoffUnavailable = "handoff_unavailable"
     case actionUnavailable = "action_unavailable", actionUncertain = "action_uncertain"
     case initializationFailed = "initialization_failed", invalidState = "invalid_state", invalidInput = "invalid_input"
@@ -107,6 +111,9 @@ public enum NativeMailFailure: String, Codable, Error, LocalizedError, Sendable 
     case storageMigrationPending = "storage_migration_pending", storageVersionUnsupported = "storage_version_unsupported"
     public var errorDescription: String? {
         switch self {
+        case .contactsFailed: "Contacts could not load from Mail’s address book. Retry after Mail has synced."
+        case .contactDetailFailed: "This contact’s details could not be opened. Try again when connected."
+        case .contactsTooLarge: "This address book exceeds the current Contacts window limit."
         case .handoffUnavailable: "Proton could not connect Calendar from this Mail session. Unlock your account again or retry from Mail."
         case .attachmentFailed: "The attachment operation could not be confirmed. Check the attachment list before trying again; your message text is retained."
         case .attachmentTooLarge: "ProtonX currently supports files up to 25 MB. Proton’s total-message and account limits also apply."
@@ -287,6 +294,8 @@ public final class NativeMailProcess: NativeMailRunning, @unchecked Sendable {
         guard let result = reply.result, (result.messages?.count ?? 0) <= 1000, (result.folders?.count ?? 0) <= 1024, (result.body?.utf8.count ?? 0) <= 2 * 1024 * 1024, (result.sanitizedHTML?.utf8.count ?? 0) <= 2 * 1024 * 1024, result.sanitizedHTML == nil || result.body != nil else { throw ProtonXError.invalidResponse }
         guard result.fresh != true || (result.loading != true && result.refreshFailed != true) else { throw ProtonXError.invalidResponse }
         guard (result.actions?.count ?? 0) <= NativeMailAction.allCases.count, result.undoToken == nil || (result.queued == true && result.undoToken! > 0) else { throw ProtonXError.invalidResponse }
+        if let contacts = result.contacts { try ContactEntry.validate(contacts) }
+        if let detail = result.contactDetail { guard detail.localID > 0 else { throw ProtonXError.invalidResponse }; try detail.validate(for: detail.localID) }
         if let handoff = result.handoff { try handoff.validate() }
         if let messages = result.messages { guard Set(messages.map(\.id)).count == messages.count else { throw ProtonXError.invalidResponse } }
         if let notifications = result.notifications {

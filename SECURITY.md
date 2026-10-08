@@ -232,7 +232,7 @@ added. Proton's durable action queue may still finish after lock/restore. Move u
 uses the SDK's original one-use undo object, with a 30-second native lifetime. Lock
 clears capabilities and undo state; generation checks reject late replies.
 
-Product URLs accept only `protonx://mail`, `protonx://pass` and `protonx://calendar` without credentials,
+Product URLs accept only `protonx://mail`, `protonx://pass` `protonx://calendar` and `protonx://contacts` without credentials,
 paths, query data or fragments. Launchers have no helper, account store or Keychain
 access. They open the adjacent installed ProtonX bundle and refuse to route to an
 older development copy that is still running. The local installer verifies bundle
@@ -254,7 +254,7 @@ excludes hidden content from input/accessibility and uses selected-product
 capabilities for commands. Mail authentication-field values clear on switching
 away. Suite-window close, screen/inactivity lock and Quit lock all products,
 including hidden ones; late helper replies remain subject to existing epochs.
-Public product links still accept only the three closed routes defined above and
+Public product links still accept only the four closed routes defined above and
 select the product before activating the same suite window. No account data is
 accepted in routes, and no global account/session cache is introduced.
 
@@ -383,3 +383,21 @@ terminate the helper. Epoch checks reject late authentication and event results.
 Shared navigation defaults contain only preferences and a saved-session hint.
 Preview edits stay in memory and have no account backend. All automated fixtures
 use synthetic data and injected memory session stores, never the real Keychain.
+
+## Contacts address book
+
+Contacts is a Mail feature with its own native view, not a separate account store.
+It reuses only the already-open Mail SDK session; no Pass/Calendar session material
+or system address-book access is used. The read-only helper commands disclose a
+bounded local SDK contact/group list and decrypt one previously disclosed contact
+ID through the pinned SDK. Failed refresh clears the helper disclosure scope.
+Remote IDs, raw cards, arbitrary accounts, contact writes and export paths are
+not exposed. Card photos/logos/URIs cannot cause network requests.
+
+Mail lock/expiry/close clears contact metadata/details/search and cancels pending
+reads; separate list/detail epochs reject late replies. The Mail database storage
+limitations above still apply to its existing contact data. No extra plaintext
+persistent cache is introduced. Recipient pickers bind to the current draft and
+current disclosed address list, preserve unfinished input on failure and deduplicate
+across To/Cc/Bcc without changing an existing address's visibility. Preview and
+contract fixtures are synthetic. See docs/CONTACTS.md for bounds and acceptance.

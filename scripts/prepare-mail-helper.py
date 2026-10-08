@@ -40,6 +40,8 @@ with tempfile.TemporaryDirectory(prefix="ProtonX-mail-source-") as stage:
     subprocess.run(["git", "apply", str(root / "patches/mail-notifications.patch")], cwd=prepared, check=True)
     subprocess.run(["git", "apply", "--check", str(root / "patches/mail-attachments.patch")], cwd=prepared, check=True)
     subprocess.run(["git", "apply", str(root / "patches/mail-attachments.patch")], cwd=prepared, check=True)
+    subprocess.run(["git", "apply", "--check", str(root / "patches/mail-contacts.patch")], cwd=prepared, check=True)
+    subprocess.run(["git", "apply", str(root / "patches/mail-contacts.patch")], cwd=prepared, check=True)
     shutil.copy2(root / "Tools/MailNotifications/native_notifications.rs", prepared / "project/mail/rust/mail/mail-common/src/native_notifications.rs")
     shutil.copy2(root / "Tools/MailContractTests/linked_sender.rs", prepared / "project/mail/rust/mail/mail-common/tests/protonx_linked_sender.rs")
     shutil.copy2(root / "Tools/MailContractTests/local_storage.rs", prepared / "project/mail/rust/mail/mail-common/tests/protonx_local_storage.rs")

@@ -28,6 +28,9 @@ assert 'mod protocol;' in helper
 assert 'mod reader;' in helper
 assert 'mod inbox_actions;' in helper
 assert 'mod threads;' in helper
+assert 'mod contacts;' in helper
+assert (native / 'protonx-mail-helper/src/contacts.rs').read_bytes() == (root / 'Tools/ProtonXMailHelper/src/contacts.rs').read_bytes()
+assert 'pub mod contacts;' in (native / 'project/mail/rust/mail/mail-uniffi/src/mail.rs').read_text()
 assert (native / 'protonx-mail-helper/src/threads.rs').read_bytes() == (root / 'Tools/ProtonXMailHelper/src/threads.rs').read_bytes()
 assert (native / 'protonx-mail-helper/src/inbox_actions.rs').read_bytes() == (root / 'Tools/ProtonXMailHelper/src/inbox_actions.rs').read_bytes()
 assert (native / 'protonx-mail-helper/src/reader.rs').read_bytes() == (root / 'Tools/ProtonXMailHelper/src/reader.rs').read_bytes()

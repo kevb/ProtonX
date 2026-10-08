@@ -1,6 +1,6 @@
 # ProtonX
 
-Native macOS clients for Proton Pass and Mail, with experimental Calendar browsing and event editing.
+Native macOS clients for Proton Pass and Mail, with experimental Calendar browsing/event editing and a native Contacts address book.
 Built with SwiftUI and AppKit, Proton's existing Rust cores, one product workspace,
 and **one optional
 menu-bar icon**. No bundled Electron or Chromium runtime.
@@ -16,10 +16,11 @@ interface or contribute. Signed, notarized binary releases are not yet available
 | Pass | Account sign-in and local unlock; vault and Trash browsing; search and sorting; password copy/reveal; TOTP copy/setup/edit; login and note editing with multiple websites and custom fields; revision conflict protection; Trash/restore; encrypted saved-first loading and read-only offline browsing for eligible personal paid accounts | No native browser autofill, passkey operations, attachment handling, sharing UI or account switching. Other item types are readable but have no native editor. Managed accounts stay online-only. |
 | Mail | Native username/password, TOTP and second-password sign-in; independent Keychain-backed session; folders and paged inbox; SDK conversation grouping with expandable message cards; formatted HTML reading on light paper; per-message image loading; read/unread, Archive/Trash/Inbox and move undo; compose, reply and reply-all; sending identity selection, draft saving, attachment save/preview/upload/removal and native notification settings | Live send/reply/attachment delivery and account recovery are acceptance gates. No human verification/FIDO-only login, rich-text editing or inline/CID images. Search covers loaded subjects and senders, capped at 1,000 messages. |
 | Calendar | Shared-account onboarding with a separate Keychain session; bounded calendar/event browsing and recurrence; week/month/agenda, time zones and filters; encrypted single-event create/edit in owned personal calendars | Experimental. Recurring/invited/shared events remain read-only. No event deletion, persistent cache, reminder editing or invitations. Write signatures are verified; complete reader verification and live cross-client write acceptance remain release gates. See [Calendar](docs/CALENDAR.md). |
+| Contacts | Mail-account address book, name/email search, groups, selected contact details, new-message actions and To/Cc/Bcc recipient pickers | Browsing only. No contact editing, group administration, import/export, system Contacts sync or autocomplete. Real-account read/refresh acceptance remains. See [Contacts](docs/CONTACTS.md). |
 | Drive | Planned | No Drive client implemented. |
 
 Pass, Mail and Calendar share one native workspace with Home and a product rail, while keeping their
-sessions and data separate. Keyboard commands follow the selected product.
+sessions and data separate. Contacts uses the Mail address book and follows Mail’s lock state. Keyboard commands follow the selected product.
 Optional quick access, Touch ID/Mac-password unlock, screen-lock handling and
 expiring password copies support everyday Mac workflows.
 
@@ -155,7 +156,7 @@ public certificate, subject to Bridge's product limits.
 
 ## Keyboard and menu bar
 
-- ⌘0 / ⌘1 / ⌘2 / ⌘3: Home / Pass / Mail / Calendar.
+- ⌘0 / ⌘1 / ⌘2 / ⌘3 / ⌘4: Home / Pass / Mail / Calendar / Contacts.
 - ⌘N / ⌘F / ⌘R: create, search and refresh in the front product window.
 - In Mail: ⇧⌘U read/unread, ⌘E archive, ⌘Delete Trash, ⌘Return review before sending.
 - ⌘L: lock all products. ⌘,: settings. ⌘Q: quit.

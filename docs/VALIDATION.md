@@ -5,6 +5,33 @@ macOS 26.6.2, Xcode 27 / Swift 6.4 and Rust 1.99.0. Automated test content is
 synthetic and uses isolated storage. Private account contents and credentials
 are excluded from public artifacts.
 
+## Contacts browsing and recipient selection — 2026-10-08
+
+- All 229 Swift contracts passed locally, including ten new Contacts model/store
+  contracts. Fixtures cover list/detail limits, group/contact ID separation,
+  name/email search, malformed and duplicate recipients, current-draft binding,
+  lock/expiry, selection races, retained drafts and isolated preview behavior.
+- All 30 Mail helper unit tests and 41 public SDK contact list/card tests passed.
+  Contacts exposes only read commands with current-session disclosure fencing;
+  unknown fields and contact write commands are refused. Cryptography and card
+  interpretation remain in the pinned SDK.
+- A synthetic native preview walkthrough verified the Contacts rail/keyboard
+  shortcut, email search, group filtering, decrypted field layout and new Mail
+  draft handoff. The To/Bcc pickers selected the displayed address, retained
+  the message body and deduplicated across fields without exposing a Bcc address
+  in To. Switching products retained the draft; Contacts refused to replace it.
+  Picker address buttons were corrected after visual checks caught row reuse in
+  the initial macOS list layout.
+- The optimized Mail helper, suite and preview built successfully and passed
+  strict nested signature verification with the configured local identity.
+- The existing reader scrolling test now checks forwarding to its outer native
+  scroll view using a recording view. A fabricated offscreen CGEvent has no live
+  AppKit scroll context, so the test no longer assumes native viewport animation.
+  Mail reader production behavior was not changed.
+- No real-account contacts were read or modified during automated validation.
+  Manual account listing, decrypted fields and event-refresh acceptance remain.
+  Contact editing/import/export and macOS Contacts integration are not enabled.
+
 ## Calendar event creation and editing — 2026-10-08
 
 - All 219 Swift contracts passed locally. After the final editor focus adjustment,

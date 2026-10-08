@@ -27,6 +27,19 @@ final class NativeMailStore: ObservableObject {
         }
     }
     enum Phase: Equatable { case welcome, locked, signingIn, totp, mailboxPassword, securityKey, open }
+    @Published private(set) var contacts: [ContactEntry] = []
+    @Published private(set) var contactsLoaded = false
+    @Published private(set) var contactsBusy = false
+    @Published private(set) var contactsError: String?
+    @Published private(set) var contactDetail: ContactDetail?
+    @Published private(set) var contactDetailBusy = false
+    @Published private(set) var contactDetailError: String?
+    @Published var contactsQuery = ""
+    @Published var selectedContact: String?
+    private var contactsTask: Task<Void, Never>?, contactDetailTask: Task<Void, Never>?
+    private var contactListEpoch = SessionEpoch(), contactDetailEpoch = SessionEpoch()
+    var visibleContacts: [ContactEntry] { contacts.filter { $0.matches(contactsQuery) }.sorted { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending } }
+    var currentContact: ContactEntry? { visibleContacts.first { $0.id == selectedContact } }
     @Published private(set) var phase: Phase = .welcome
     @Published private(set) var folders: [NativeMailFolder] = []
     @Published private(set) var messages: [NativeMailMessage] = []
@@ -422,7 +435,8 @@ final class NativeMailStore: ObservableObject {
         }
     }
     private func clearActionUndo() { undoExpiration?.cancel(); undoExpiration = nil; undoToken = nil; undoExpiry = nil; demoUndo = nil }
-    func compose(_ mode: String = "new") {
+    func compose(_ mode: String = "new", recipients: [String] = []) {
+        guard recipients.count <= 100, recipients.allSatisfy(ContactRecipients.valid) else { return }
         guard phase == .open, !busy, !threadLoading, draft == nil else { return }
         guard mode == "new" || selectedMessage != nil else { return }
         if mode == "open" { guard selectedMessage?.isDraft == true, selectedMessage?.isScheduled != true else { return } }
@@ -437,13 +451,16 @@ final class NativeMailStore: ObservableObject {
             let subject = reply.map { $0.subject.lowercased().hasPrefix("re:") ? $0.subject : "Re: " + $0.subject } ?? ""
             let quote = reply.map { "\n\n" + ($0.senderName.isEmpty ? $0.sender : $0.senderName) + " wrote:\n" + (demoBodies[$0.id] ?? "") } ?? "Alex"
             draft = NativeMailDraft(token: 1, sender: sender, senders: senders, to: reply.map { [ownMessage ? $0.recipient : $0.sender] } ?? [], subject: subject, quote: quote, state: .editing)
+            editorState?.to = recipients.isEmpty ? (editorState?.to ?? "") : recipients.joined(separator: ", ")
             return
         }
         perform { [self] captured in
             let result = try await runner.request(NativeMailCommand("compose", folder: mode == "new" ? nil : selectedFolder, item: mode == "new" ? nil : selectedMessage?.id, mode: mode))
             try check(captured)
             guard let next = result.draft else { throw ProtonXError.invalidResponse }
-            draft = next; startDraftAttachmentPolling()
+            draft = next
+            if !recipients.isEmpty { editorState?.to = recipients.joined(separator: ", ") }
+            startDraftAttachmentPolling()
         }
     }
     func markDraftEdited() {
@@ -629,6 +646,7 @@ final class NativeMailStore: ObservableObject {
     }
     func cancelLocalUnlock() { if localAuthentication.state == .authenticating { lock() } }
     func lock() {
+        clearContacts()
         draftAttachmentPolling?.cancel(); clearAttachments()
         notificationEpoch.invalidate(); notificationTask?.cancel(); notificationTask = nil; notifications?.clearMail()
         epoch.invalidate(); selectionEpoch.invalidate(); operation?.cancel(); selection?.cancel(); polling?.cancel(); sendPolling?.cancel(); localAuthentication.cancel(); runner.cancelAll()
@@ -893,4 +911,80 @@ final class NativeMailStore: ObservableObject {
             if epoch.accepts(captured) { busy = false }
         }
     }
+    private func clearContacts() {
+        contactListEpoch.invalidate(); contactDetailEpoch.invalidate()
+        contactsTask?.cancel(); contactDetailTask?.cancel()
+        contacts = []; contactsLoaded = false; contactsBusy = false; contactsError = nil
+        contactDetail = nil; contactDetailBusy = false; contactDetailError = nil; contactsQuery = ""; selectedContact = nil
+    }
+    func loadContacts(refreshDetails: Bool = true) {
+        guard phase == .open, !contactsBusy else { return }
+        if demo {
+            contacts = [
+                .init(localID: 10, name: "Sam Rivera", emails: [.init(contactID: 10, name: "Sam Rivera", email: "sam@example.com")]),
+                .init(localID: 20, name: "Jamie Chen", emails: [.init(contactID: 20, name: "Jamie Chen", email: "jamie@example.com"), .init(contactID: 20, name: "Jamie Chen", email: "jamie.work@example.com")]),
+                .init(localID: 30, kind: .group, name: "Weekend friends", emails: [.init(contactID: 10, name: "Sam Rivera", email: "sam@example.com"), .init(contactID: 20, name: "Jamie Chen", email: "jamie@example.com")])
+            ]; contactsLoaded = true; contactsError = nil; return
+        }
+        contactsBusy = true; contactsError = nil
+        contactListEpoch.invalidate(); let ticket = contactListEpoch.value, session = epoch.value
+        contactDetailEpoch.invalidate(); contactDetailTask?.cancel(); contactDetailBusy = false
+        contactsTask = Task { [self] in
+            do {
+                let result = try await runner.request(NativeMailCommand("contacts"))
+                try check(session); guard contactListEpoch.accepts(ticket), let entries = result.contacts else { throw ProtonXError.invalidResponse }
+                try ContactEntry.validate(entries)
+                contacts = entries; contactsLoaded = true
+                if !entries.contains(where: { $0.id == selectedContact }) { selectedContact = nil }
+                if selectedContact == nil { contactDetail = nil }
+                else if refreshDetails || contactDetail == nil { selectContact(selectedContact) }
+            } catch {
+                if !Task.isCancelled, epoch.accepts(session), contactListEpoch.accepts(ticket) {
+                    contactsError = safeError(error)
+                    if (error as? NativeMailFailure) == .sessionExpired { expireSession() }
+                }
+            }
+            if epoch.accepts(session), contactListEpoch.accepts(ticket) { contactsBusy = false }
+        }
+    }
+    func selectContact(_ id: String?) {
+        contactDetailEpoch.invalidate(); contactDetailTask?.cancel()
+        selectedContact = id; contactDetail = nil; contactDetailBusy = false; contactDetailError = nil
+        guard phase == .open, let entry = currentContact, entry.kind == .contact else { return }
+        if demo {
+            contactDetail = .init(localID: entry.localID, fields: entry.emails.map { .init("Email", $0.email) } + [.init("Phone", "+1 202 555 0142"), .init("Organisation", "Example Studio"), .init("Note", "Synthetic contact for the ProtonX preview.")]); return
+        }
+        let ticket = contactDetailEpoch.value, session = epoch.value
+        contactDetailBusy = true
+        contactDetailTask = Task { [self] in
+            do {
+                let result = try await runner.request(NativeMailCommand("contact_detail", item: entry.localID))
+                try check(session)
+                guard contactDetailEpoch.accepts(ticket), currentContact?.id == id, let details = result.contactDetail else { throw CancellationError() }
+                try details.validate(for: entry.localID); contactDetail = details
+            } catch {
+                if !Task.isCancelled, epoch.accepts(session), contactDetailEpoch.accepts(ticket), currentContact?.id == id {
+                    contactDetailError = safeError(error)
+                    if (error as? NativeMailFailure) == .sessionExpired { expireSession() }
+                }
+            }
+            if epoch.accepts(session), contactDetailEpoch.accepts(ticket) { contactDetailBusy = false }
+        }
+    }
+    @discardableResult func addContactRecipients(_ addresses: [String], field: String, token: UInt64) -> Bool {
+        guard phase == .open, !busy, draft?.token == token, draft?.state == .editing, let editor = editorState else { return false }
+        // An email may be chosen only from this session's disclosed contact list.
+        let allowed = Set(contacts.flatMap(\.emails).map { $0.email })
+        guard !addresses.isEmpty, addresses.allSatisfy({ allowed.contains($0) }) else { return false }
+        do {
+            switch field {
+            case "to": editor.to = try ContactRecipients.appending(addresses, to: editor.to, otherFields: [editor.cc, editor.bcc])
+            case "cc": editor.cc = try ContactRecipients.appending(addresses, to: editor.cc, otherFields: [editor.to, editor.bcc])
+            case "bcc": editor.bcc = try ContactRecipients.appending(addresses, to: editor.bcc, otherFields: [editor.to, editor.cc])
+            default: return false
+            }
+            markDraftEdited(); return true
+        } catch { return false }
+    }
+
 }
