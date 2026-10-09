@@ -47,7 +47,7 @@ public enum CalendarFailure: Error, LocalizedError, Equatable, Sendable {
     case invalidEvent, conflict, unavailable
     public var errorDescription: String? {
         switch self {
-        case .invalidEvent: "Check the title, calendar and dates. The end must be after the start."
+        case .invalidEvent: "Some event details are invalid or unsupported. Check the title, calendar, dates and text lengths."
         case .conflict: "This event changed. Refresh Calendar before editing it again."
         case .unavailable: "Calendar could not complete this operation. Refresh before trying again."
         }

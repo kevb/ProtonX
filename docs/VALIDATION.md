@@ -5,6 +5,20 @@ macOS 26.6.2, Xcode 27 / Swift 6.4 and Rust 1.99.0. Automated test content is
 synthetic and uses isolated storage. Private account contents and credentials
 are excluded from public artifacts.
 
+## Calendar editor validation feedback — 2026-10-09
+
+- All 44 selected Swift Calendar contracts passed. A regression reproduces a
+  stale date-order warning after correcting an end time, then saves a synthetic
+  11:30–11:35 event in Europe/Istanbul through the native command path.
+- Local validation warnings clear when the editor changes. Native payload
+  validation runs before dispatch; oversized notes are refused without a write
+  or an uncertain-write state. Conflict and uncertain-save messages remain
+  visible when the draft changes. Generic validation errors no longer assert
+  that the end time is wrong; specific date-order wording checks actual dates.
+- The production suite built and passed strict nested signature verification.
+  No real event was read, created or updated. The regression establishes stale
+  feedback behavior; it does not prove the cause of every live save failure.
+
 ## Mail composer scroll handoff — 2026-10-09
 
 - All 50 selected Swift Mail/composer/attachment contracts passed. Three new

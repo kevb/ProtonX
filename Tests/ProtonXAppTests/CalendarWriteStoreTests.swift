@@ -60,6 +60,27 @@ private actor EventWriteRunner: NativeCalendarRunning {
         #expect(store.deleteIntent() == nil)
         let calls = await runner.writes; #expect(calls.count == 2 && calls[0].token == nil && calls[1].token == created.writeToken && calls[1].allDay && calls[1].zone == "UTC")
     }
+    @Test func correctedFiveMinuteEventClearsStaleValidationAndSavesInIstanbul() async throws {
+        let runner = EventWriteRunner(), store = try await connected(runner)
+        store.timeZoneID = "Europe/Istanbul"; store.refresh(); try await wait { !store.busy }
+        store.beginEvent()
+        let editor = try #require(store.editor)
+        editor.title = "Synthetic five-minute event"
+        let math = CalendarDateMath(timeZoneID: "Europe/Istanbul")
+        let day = try #require(math.date(.init(year: 2026, month: 10, day: 9)))
+        editor.start = try #require(math.calendar.date(bySettingHour: 11, minute: 30, second: 0, of: day))
+        editor.end = editor.start.addingTimeInterval(-300)
+        store.saveEditor()
+        #expect(store.error != nil && !store.busy && store.editor === editor)
+        #expect(store.error == "The end time must be after the start time.")
+        #expect(await runner.writes.isEmpty)
+        editor.end = editor.start.addingTimeInterval(300)
+        #expect(store.error == nil)
+        store.saveEditor(); try await wait { !store.busy }
+        #expect(store.error == nil && store.editor == nil)
+        let writes = await runner.writes
+        #expect(writes.count == 1 && writes[0].zone == "Europe/Istanbul" && writes[0].end - writes[0].start == 300)
+    }
     @Test func uncertainSaveKeepsDraftBlocksRetryUntilRefreshAndKeepsCreateIdentity() async throws {
         let runner = EventWriteRunner(), store = try await connected(runner)
         store.beginEvent(); let editor = try #require(store.editor); editor.title = "Synthetic event"; let id = editor.id
@@ -78,8 +99,24 @@ private actor EventWriteRunner: NativeCalendarRunning {
         store.beginEvent(try #require(store.selectedEvent)); store.editor?.title = "Synthetic unsaved changes"
         await runner.configure(.conflict); store.saveEditor(); try await wait { !store.busy }
         #expect(store.editor?.title == "Synthetic unsaved changes" && !store.busy && store.error != nil)
+        let conflictMessage = store.error
+        store.editor?.notes = "Synthetic corrected notes"
+        #expect(store.error == conflictMessage)
         store.cancelEditor(); await runner.configure(); store.refresh(); try await wait { !store.busy }
         store.beginEvent(try #require(store.selectedEvent)); #expect(store.editor?.title == "Synthetic event")
+    }
+    @Test func invalidNativeTextDoesNotBlameDatesOrDispatchAndClearsWhenEdited() async throws {
+        let runner = EventWriteRunner(), store = try await connected(runner)
+        store.beginEvent(); let editor = try #require(store.editor)
+        editor.title = "Synthetic event"; editor.notes = String(repeating: "x", count: 3001)
+        store.saveEditor()
+        #expect(store.error != nil && !store.error!.contains("end time") && !store.busy && !store.writeBlocked)
+        #expect(await runner.writes.isEmpty)
+        editor.notes = "Synthetic shorter notes"
+        #expect(store.error == nil)
+        store.saveEditor(); try await wait { !store.busy }
+        let count = await runner.writes.count
+        #expect(store.error == nil && store.editor == nil && count == 1)
     }
     @Test func lateSaveCannotReopenLockedCalendar() async throws {
         let runner = EventWriteRunner(), store = try await connected(runner)

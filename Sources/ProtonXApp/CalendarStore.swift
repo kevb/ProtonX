@@ -1,5 +1,6 @@
 // Copyright (c) 2026 ProtonX contributors. SPDX-License-Identifier: GPL-3.0-or-later
 import Foundation
+import Combine
 import SwiftUI
 import ProtonXCore
 
@@ -62,12 +63,22 @@ import ProtonXCore
     @Published var mode: ViewMode = .week { didSet { rangeChanged() } }
     @Published var query = ""
     @Published var selectedEventID: String?
-    @Published private(set) var editor: CalendarEditor?
+    @Published private(set) var editor: CalendarEditor? {
+        didSet {
+            editorObservation = editor?.objectWillChange.sink { [weak self] _ in
+                guard let self, self.editorValidationError else { return }
+                self.editorValidationError = false; self.error = nil
+            }
+            editorValidationError = false
+        }
+    }
     @Published private(set) var busy = false
     @Published private(set) var writeBlocked = false
     @Published var error: String?
     @Published private(set) var notice: String?
     private var source: (any CalendarDataSource)?
+    private var editorObservation: AnyCancellable?
+    private var editorValidationError = false
     private var operation: Task<Void,Never>?
     private var epoch = SessionEpoch()
     let localAuthentication: LocalUnlockAuthentication
@@ -141,7 +152,22 @@ import ProtonXCore
     func saveEditor() {
         guard canEdit, !busy, let editor, let source else { return }
         let record = editor.record()
-        do { try record.validate(in:calendars) } catch { self.error = error.localizedDescription; return }
+        do {
+            try record.validate(in:calendars)
+            // Check the stricter native write payload before starting a save.
+            // These are correctable form errors, not uncertain server writes.
+            if phase == .connected { _ = try NativeCalendarDraft(record, token: editor.writeToken) }
+        } catch {
+            editorValidationError = true
+            if case .timed(let start, let end, _) = record.time, end <= start {
+                self.error = "The end time must be after the start time."
+            } else if case .allDay(let start, let end) = record.time,
+                      let s = CalendarDateMath(timeZoneID: "UTC").date(start),
+                      let e = CalendarDateMath(timeZoneID: "UTC").date(end), e <= s {
+                self.error = "The last day must be on or after the first day."
+            } else { self.error = error.localizedDescription }
+            return
+        }
         perform { [self] in
             let saved = try await source.save(record,expectedRevision:editor.expectedRevision)
             try saved.validate(in:calendars)
@@ -166,6 +192,7 @@ import ProtonXCore
         }
     }
     private func perform(_ work: @escaping @MainActor () async throws -> (@MainActor () -> Void)) {
+        editorValidationError = false
         busy = true; error = nil; notice = nil; let ticket = epoch.value
         operation = Task { [weak self] in
             do {
