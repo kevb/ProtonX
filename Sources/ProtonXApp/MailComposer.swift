@@ -60,6 +60,7 @@ struct MailComposer: View {
                             .font(.callout).foregroundStyle(.orange).padding(.vertical, 14)
                     }
                     TextEditor(text: $editor.text).font(.body).scrollContentBackground(.hidden)
+                        .background(MailComposerScrollHandoff().allowsHitTesting(false))
                         .foregroundStyle(MailTheme.ink).padding(12).background(MailTheme.paper, in: RoundedRectangle(cornerRadius: 8))
                         .environment(\.colorScheme, .light)
                         .frame(minHeight: 230).focused($focus, equals: "body").padding(.top, 16)
@@ -72,7 +73,7 @@ struct MailComposer: View {
                     MailAttachmentsView(store: store, composing: true).padding(.vertical, 12)
 
                 }.padding(.horizontal, 24)
-            }.background(MailTheme.canvas)
+            }.accessibilityIdentifier("mailComposerScroll").background(MailTheme.canvas)
             if let error = store.error {
                 Text(error).font(.callout).foregroundStyle(.orange).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 24).padding(.vertical, 10)
             }

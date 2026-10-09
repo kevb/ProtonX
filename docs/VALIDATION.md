@@ -1,9 +1,26 @@
 # Validation record
 
-Last updated: 2026-10-08. Local validation environment: Apple Silicon Mac,
+Last updated: 2026-10-09. Local validation environment: Apple Silicon Mac,
 macOS 26.6.2, Xcode 27 / Swift 6.4 and Rust 1.99.0. Automated test content is
 synthetic and uses isolated storage. Private account contents and credentials
 are excluded from public artifacts.
+
+## Mail composer scroll handoff — 2026-10-09
+
+- All 50 selected Swift Mail/composer/attachment contracts passed. Three new
+  AppKit contracts cover short-body handoff, long-body interior/edge behavior,
+  horizontal gestures, the actual SwiftUI TextEditor/ScrollView hierarchy,
+  enclosing-scroll dispatch and removal of the event monitor on detach.
+- A synthetic native preview reproduced the stuck outer composer when scrolling
+  over a short body. After the change, the outer scrollbar moved through an
+  expanded quote while the Send bar stayed visible. The attachment walkthrough
+  stopped when the Mac locked; no completed multi-attachment visual check is
+  claimed. Real drafts and account contents were not accessed or changed.
+- The production suite built and passed strict nested signature verification.
+  The native text editor and its standard editing behavior remain in place.
+  The handoff handles vertical gestures only within its visible editor bounds,
+  keeps long-body interior scrolling local, and forwards to the enclosing
+  composer at its edges. No sending, attachment or helper protocol was changed.
 
 ## Account-wide Mail metadata search — 2026-10-08
 
