@@ -1021,3 +1021,6 @@ separate from these local checks.
   pinned helpers were reused. Physical fingerprint recognition and real macOS
   focus transitions remain manual acceptance checks. No account data was accessed
   during automated validation.
+- Installed to `/Applications/ProtonX.app` after the running app was closed.
+  The installed executable matches the release build and its nested signature
+  verification passed. The previous installed bundle remains recoverable.
