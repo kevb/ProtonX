@@ -13,6 +13,8 @@ import ProtonXCore
     @Published private(set) var state: State = .ready
     private(set) var mode: Mode = .touchID
     private(set) var automaticAttemptAllowed = true
+    private var foreground = false
+    private var retryOnForegroundReturn = false
     private var generation: UInt64 = 0
     private let evaluate: (@MainActor @Sendable () async throws -> Bool)?
     let supportsTouchID: Bool
@@ -24,9 +26,24 @@ import ProtonXCore
     }
     func arm() {
         guard state != .authenticating else { return }
+        retryOnForegroundReturn = false
         context.invalidate(); context = LAContext(); state = .ready
         automaticAttemptAllowed = true
     }
+    func updateForeground(active: Bool, visible: Bool, cancel: () -> Void) {
+        guard visible else { return }
+        let returning = active && !foreground
+        foreground = active
+        if !active, state == .authenticating, mode == .touchID {
+            // The store must invalidate its restore epoch as well as the LAContext.
+            // Record the interruption after cancellation, which otherwise disarms retries.
+            cancel()
+            retryOnForegroundReturn = true
+        } else if returning, retryOnForegroundReturn, supportsTouchID {
+            arm()
+        }
+    }
+    func disarmInterruptedRetry() { retryOnForegroundReturn = false }
     func consumeAutomaticAttempt(visible: Bool, foreground: Bool, attached: Bool, busy: Bool) -> Bool {
         guard automaticAttemptAllowed, supportsTouchID, visible, foreground, attached, !busy, state == .ready else { return false }
         automaticAttemptAllowed = false
@@ -34,7 +51,7 @@ import ProtonXCore
     }
     func authenticate(_ mode: Mode, reason: String) async throws -> Bool {
         guard state != .authenticating else { return false }
-        automaticAttemptAllowed = false; self.mode = mode
+        automaticAttemptAllowed = false; retryOnForegroundReturn = false; self.mode = mode
         // Password fallback must use a context that isn't paired with an embedded view.
         let current = mode == .touchID ? context : LAContext()
         if mode == .system { context.invalidate() }
@@ -62,6 +79,8 @@ import ProtonXCore
             if generation == captured {
                 activeContext = nil
                 let code = (error as? LAError)?.code
+                // macOS may deliver this before the window's focus notification.
+                retryOnForegroundReturn = mode == .touchID && code == .systemCancel
                 state = error is CancellationError || (error as? ProtonXError) == .cancelled || [.userCancel, .systemCancel, .appCancel, .userFallback].contains(code) ? .cancelled : .failed
             }
             throw error
@@ -69,7 +88,7 @@ import ProtonXCore
     }
     private var activeContext: LAContext?
     func cancel() {
-        generation &+= 1; automaticAttemptAllowed = false
+        generation &+= 1; automaticAttemptAllowed = false; retryOnForegroundReturn = false
         activeContext?.invalidate(); activeContext = nil; context.invalidate()
         state = .cancelled
     }
@@ -93,9 +112,9 @@ struct LocalUnlockCard: View {
                 RoundedRectangle(cornerRadius: 30).strokeBorder(PassTheme.accent.opacity(0.16), lineWidth: 1)
                 if authentication.supportsTouchID {
                     EmbeddedAuthenticationView(context: authentication.context) { context, active in
+                        guard context === authentication.context else { return }
                         attachedContext = context; foreground = active
-                        if !active, authentication.state == .authenticating,
-                           authentication.mode == .touchID { cancel() }
+                        authentication.updateForeground(active: active, visible: isActive, cancel: cancel)
                         attemptAutomatically()
                     }.id(ObjectIdentifier(authentication.context)).frame(width: 64, height: 64)
                     if authentication.state != .authenticating {
@@ -142,10 +161,16 @@ struct LocalUnlockCard: View {
             .accessibilityIdentifier("localUnlock" + product)
             .onChange(of: isActive) { _, active in
                 if active { attemptAutomatically() }
-                else if authentication.state == .authenticating { cancel() }
+                else {
+                    authentication.disarmInterruptedRetry()
+                    if authentication.state == .authenticating { cancel() }
+                }
             }
             .onChange(of: busy) { _, _ in attemptAutomatically() }
-            .onDisappear { if authentication.state == .authenticating { cancel() } }
+            .onDisappear {
+                authentication.disarmInterruptedRetry()
+                if authentication.state == .authenticating { cancel() }
+            }
     }
     private var status: String {
         if authentication.state == .authenticated { return "Authenticated. Reopening your saved \(product) session." }

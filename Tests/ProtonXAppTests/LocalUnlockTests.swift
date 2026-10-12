@@ -70,6 +70,71 @@ private actor AuthenticationReplyGate {
     #expect(authentication.state == .authenticated)
 }
 
+@Test @MainActor func returningToWindowRearmsInterruptedTouchIDOnceAndRejectsLateSuccess() async throws {
+    let gate = AuthenticationReplyGate()
+    let authentication = LocalUnlockAuthentication(evaluate: { await gate.wait() }, supportsTouchID: true)
+    authentication.updateForeground(active: true, visible: true, cancel: { authentication.cancel() })
+    let old = authentication.context
+    let pending = Task { try await authentication.authenticate(.touchID, reason: "Synthetic test") }
+    while authentication.state != .authenticating { await Task.yield() }
+    var storeCancellations = 0
+    let cancel = { storeCancellations += 1; authentication.cancel() }
+    authentication.updateForeground(active: false, visible: true, cancel: cancel)
+    authentication.updateForeground(active: false, visible: true, cancel: cancel)
+    #expect(storeCancellations == 1)
+    #expect(authentication.state == .cancelled)
+    #expect(!authentication.automaticAttemptAllowed)
+    authentication.updateForeground(active: true, visible: true, cancel: cancel)
+    #expect(authentication.context !== old)
+    #expect(authentication.state == .ready)
+    #expect(authentication.consumeAutomaticAttempt(visible: true, foreground: true, attached: true, busy: false))
+    authentication.updateForeground(active: true, visible: true, cancel: cancel)
+    #expect(!authentication.automaticAttemptAllowed)
+    await gate.release(true)
+    do { _ = try await pending.value; Issue.record("Interrupted success must be rejected") } catch {}
+    #expect(authentication.state == .ready)
+}
+
+@Test @MainActor func onlySystemInterruptionRearmsAfterForegroundTransition() async {
+    for code in [LAError.Code.systemCancel, .userCancel, .appCancel, .userFallback, .biometryLockout] {
+        let authentication = LocalUnlockAuthentication(evaluate: { throw LAError(code) }, supportsTouchID: true)
+        let cancel = { authentication.cancel() }
+        authentication.updateForeground(active: true, visible: true, cancel: cancel)
+        do { _ = try await authentication.authenticate(.touchID, reason: "Synthetic test") } catch {}
+        // Duplicate foreground notifications must not cause a prompt loop.
+        authentication.updateForeground(active: true, visible: true, cancel: cancel)
+        #expect(!authentication.automaticAttemptAllowed)
+        authentication.updateForeground(active: false, visible: true, cancel: cancel)
+        authentication.updateForeground(active: true, visible: true, cancel: cancel)
+        #expect(authentication.automaticAttemptAllowed == (code == .systemCancel))
+    }
+}
+
+@Test @MainActor func explicitLockOrProductSwitchDisarmsInterruptedRetry() async {
+    for switchProduct in [false, true] {
+        let authentication = LocalUnlockAuthentication(evaluate: { throw LAError(.systemCancel) }, supportsTouchID: true)
+        let cancel = { authentication.cancel() }
+        authentication.updateForeground(active: true, visible: true, cancel: cancel)
+        do { _ = try await authentication.authenticate(.touchID, reason: "Synthetic test") } catch {}
+        authentication.updateForeground(active: false, visible: true, cancel: cancel)
+        if switchProduct { authentication.disarmInterruptedRetry() }
+        else { authentication.cancel() }
+        authentication.updateForeground(active: true, visible: false, cancel: cancel)
+        authentication.updateForeground(active: true, visible: true, cancel: cancel)
+        #expect(!authentication.automaticAttemptAllowed)
+    }
+}
+
+@Test @MainActor func returningNeverAutomaticallyRetriesPasswordFallback() async {
+    let authentication = LocalUnlockAuthentication(evaluate: { throw LAError(.systemCancel) }, supportsTouchID: true)
+    let cancel = { authentication.cancel() }
+    authentication.updateForeground(active: true, visible: true, cancel: cancel)
+    do { _ = try await authentication.authenticate(.system, reason: "Synthetic test") } catch {}
+    authentication.updateForeground(active: false, visible: true, cancel: cancel)
+    authentication.updateForeground(active: true, visible: true, cancel: cancel)
+    #expect(!authentication.automaticAttemptAllowed)
+}
+
 @Test @MainActor func syntheticUnlockCardRendersInBothAppearances() throws {
     // Synthetic evaluator only: never evaluates LocalAuthentication or starts a helper.
     for (name, appearance) in [("dark", NSAppearance.Name.darkAqua), ("light", .aqua)] {

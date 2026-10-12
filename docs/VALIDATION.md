@@ -1004,3 +1004,20 @@ The optimized Mail helper and normal Swift app built successfully. The staged
 verification using the configured local certificate. No running account-capable
 bundle was replaced, and no app was installed in Applications. CI results remain
 separate from these local checks.
+
+## Touch ID after returning to the window, 2026-10-12
+
+- Interrupted biometric attempts rearm on foreground return with a fresh local
+  authentication context. The shared lock card applies this to Mail, Pass and
+  Calendar. Explicit cancellation/lock and product switches disarm the pending
+  retry; password fallback never restarts automatically. Stale view callbacks
+  cannot cancel a replacement context.
+- All 43 selected Swift tests passed with synthetic authentication and helper
+  responses. Coverage includes focus loss/return, duplicate focus notifications,
+  system interruption versus explicit cancellation, fresh contexts, late biometric
+  success, password fallback and product restore epochs.
+- The desktop, Mail and Calendar source/protocol/privacy contracts passed.
+  The release app built and passed strict nested signature verification; unchanged
+  pinned helpers were reused. Physical fingerprint recognition and real macOS
+  focus transitions remain manual acceptance checks. No account data was accessed
+  during automated validation.

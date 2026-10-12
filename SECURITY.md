@@ -64,9 +64,13 @@ include passwords, tokens, real message bodies or vault exports in public issues
   `LAContext.deviceOwnerAuthenticationWithBiometrics` for Touch ID. One automatic
   attempt requires a visible locked product, its attached native view and an active
   key window. No biometric data is available to ProtonX. Password fallback uses a
-  separate context and the standard `deviceOwnerAuthentication` dialog. Cancellation
-  or explicit lock disarms automatic retries; choosing a product again or reopening
-  the window may arm a new attempt. Switching products cancels pending authentication;
+  separate context and the standard `deviceOwnerAuthentication` dialog. User
+  cancellation or explicit lock disarms automatic retries. A Touch ID attempt
+  interrupted by loss of window/app focus is cancelled, including its restore epoch,
+  then rearmed with a fresh context on foreground return. A system-cancelled biometric
+  attempt can also rearm on that transition; repeated foreground notifications do
+  not retry. Password fallback is never retried automatically. Choosing a product
+  again or reopening the window may arm a new attempt. Switching products cancels pending authentication;
   epochs reject late success before helper access. Products retain separate gates.
   Preview/demo workspaces never evaluate real authentication.
   A UI lock doesn't revoke the remote session or defend against malware
