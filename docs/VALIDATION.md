@@ -1024,3 +1024,22 @@ separate from these local checks.
 - Installed to `/Applications/ProtonX.app` after the running app was closed.
   The installed executable matches the release build and its nested signature
   verification passed. The previous installed bundle remains recoverable.
+
+## Touch ID after inactivity lock, 2026-10-12
+
+- The inactivity timer uses a distinct suite-lock path. Open products clear their
+  contents and cancel operations before preparing a fresh local authentication
+  context. The locked card waits for the selected product's attached foreground
+  view before attempting Touch ID. Already-locked products retain their pending
+  attempt across later idle deadlines; explicit Cancel and manual Lock remain
+  disarmed. Preview/demo products never arm real authentication.
+- All 39 selected Swift tests passed. Synthetic product fixtures cover an open
+  Mail/Pass/Calendar session becoming idle-locked, content clearing, fresh contexts,
+  repeated deadlines, cancellation and no helper access before authentication.
+  A deterministic timer test exercises automatic versus explicit lock callbacks
+  without installing OS observers or waiting for the real idle interval. Existing
+  foreground, password fallback, navigation and late-result contracts passed.
+- Desktop, Mail and Calendar source/protocol/privacy contracts passed. The release
+  app built and passed strict nested signature verification using the unchanged
+  pinned helpers. Real fingerprint recognition following an actual background idle
+  interval remains a manual acceptance check.

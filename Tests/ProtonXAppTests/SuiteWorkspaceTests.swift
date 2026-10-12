@@ -80,6 +80,34 @@ import ProtonXCore
         mail.compose()
         #expect(mail.editorState !== editor && mail.editorState?.text == "")
     }
+    @Test func idleLockClearsHiddenDemoDraftsWithoutArmingRealAuthentication() {
+        let suite = SuiteWorkspace(previewOnly:true, initialProduct:.mail,
+                                   makePass:{ let pass = PassStore(previewOnly:true); pass.enterDemo(); return pass })
+        suite.mail!.compose(); suite.mail!.editorState!.text = "SYNTHETIC unsaved"
+        suite.select(.pass); suite.lock(forInactivity:true)
+        #expect(suite.mail?.draft == nil && suite.mail?.editorState == nil)
+        #expect(suite.pass?.detail == nil && suite.pass?.items.isEmpty == true)
+        #expect(suite.mail?.localAuthentication.automaticAttemptAllowed == false)
+        #expect(suite.pass?.localAuthentication.automaticAttemptAllowed == false)
+    }
+    @Test func inactivityTimerUsesAutomaticLockPathAndWaitsForNextDeadline() {
+        // No configure(): no event monitors, timers, menu item or account operations.
+        let integration = SystemIntegration()
+        var automaticLocks = 0, manualLocks = 0
+        integration.lockSuiteForInactivity = { automaticLocks += 1 }
+        integration.lockSuite = { manualLocks += 1 }
+        let now = ProcessInfo.processInfo.systemUptime
+        integration.checkInactivity(at:now,timeout:300)
+        #expect(automaticLocks == 0 && manualLocks == 0)
+        integration.checkInactivity(at:now+301,timeout:300)
+        integration.checkInactivity(at:now+306,timeout:300)
+        #expect(automaticLocks == 1 && manualLocks == 0)
+        integration.checkInactivity(at:now+602,timeout:300)
+        #expect(automaticLocks == 2 && manualLocks == 0)
+        integration.lockSuiteForInactivity = nil
+        integration.checkInactivity(at:now+903,timeout:300)
+        #expect(manualLocks == 1)
+    }
     @Test func quickAccessRequestSurvivesLazyOpeningAndCancelsOnSwitchOrLock() {
         let suite = SuiteWorkspace(defaults: isolatedDefaults(), previewOnly: true)
         suite.requestPassSearch()

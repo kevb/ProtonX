@@ -66,6 +66,22 @@ private actor CalendarRunnerFixture: NativeCalendarRunning {
         s.signIn(username:"synthetic@example.com",password:"synthetic");s.unlock();s.submitChallenge("123456")
         #expect(await runner.calls.isEmpty && s.phase == .preview)
     }
+    @Test func idleLockArmsCalendarReturnButRepeatedIdleAndManualLockCannotRetry() async throws {
+        let runner = CalendarRunnerFixture(), s = store(runner)
+        s.signIn(username:"synthetic@example.com",password:"synthetic"); try await wait { !s.busy }
+        #expect(s.phase == .connected)
+        let workspace = SuiteWorkspace(previewOnly:true,initialProduct:.calendar,makeCalendar:{ s })
+        let calls = await runner.calls
+        workspace.lock(forInactivity:true)
+        #expect(s.phase == .locked && s.events.isEmpty && s.calendars.isEmpty && s.editor == nil)
+        #expect(s.localAuthentication.state == .ready && s.localAuthentication.automaticAttemptAllowed)
+        let armed = s.localAuthentication.context
+        workspace.lock(forInactivity:true)
+        #expect(s.localAuthentication.context === armed && s.localAuthentication.automaticAttemptAllowed)
+        workspace.lock(); workspace.lock(forInactivity:true)
+        #expect(s.localAuthentication.state == .cancelled && !s.localAuthentication.automaticAttemptAllowed)
+        #expect(await runner.calls == calls)
+    }
     @Test func navigationLoadsNewRangeAndRetainsMailState() async throws {
         let runner = CalendarRunnerFixture(), s = store(runner)
         s.signIn(username:"synthetic@example.com",password:"synthetic");try await wait { !s.busy }

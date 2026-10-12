@@ -172,12 +172,30 @@ import ProtonXCore
             }
         }
     }
-    func lock() {
+    func lock(forInactivity: Bool = false) {
         returnToContacts = false
         waitingForAccount = nil; returnToCalendarFrom = nil; accountSourceIsValid = nil
         passSearchRequested = false
-        pass?.lock()
-        mail?.lock(); calendar?.lock()
+        // Repeated idle ticks must leave already-locked products alone: otherwise
+        // they would disarm a pending return-to-window attempt or undo user Cancel.
+        if let pass, !forInactivity || pass.phase == .open || pass.busy {
+            let rearm = forInactivity && !pass.previewOnly && !pass.isDemo &&
+                (pass.phase == .open || pass.localAuthentication.state == .authenticating)
+            pass.lock()
+            if rearm, pass.phase == .locked { pass.localAuthentication.arm() }
+        }
+        if let mail, !forInactivity || (mail.phase != .locked && mail.phase != .welcome) || mail.busy {
+            let rearm = forInactivity && !mail.previewOnly && !mail.demo &&
+                (mail.phase == .open || mail.localAuthentication.state == .authenticating)
+            mail.lock()
+            if rearm, mail.phase == .locked { mail.localAuthentication.arm() }
+        }
+        if let calendar, !forInactivity || (calendar.phase != .locked && calendar.phase != .welcome) || calendar.busy {
+            let rearm = forInactivity && !calendar.previewOnly &&
+                (calendar.phase == .connected || calendar.localAuthentication.state == .authenticating)
+            calendar.lock()
+            if rearm, calendar.phase == .locked { calendar.localAuthentication.arm() }
+        }
         NotificationCenter.default.post(name: .protonXLock, object: nil)
     }
     func refresh() {
@@ -270,6 +288,7 @@ struct SuiteWindow: View {
                 if let target { workspace.mail?.openNotification(folder: target.folder, item: target.item) }
             }
             SystemIntegration.shared.lockSuite = { workspace.lock() }
+            SystemIntegration.shared.lockSuiteForInactivity = { workspace.lock(forInactivity: true) }
             SystemIntegration.shared.openSettings = { openSettings(); NSApp.activate(ignoringOtherApps: true) }
             SystemIntegration.shared.configure()
         }

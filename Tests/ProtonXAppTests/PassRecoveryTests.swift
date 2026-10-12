@@ -175,6 +175,26 @@ private func syntheticSession() throws -> URL {
     restarted.lock()
 }
 
+@Test @MainActor func passIdleLockArmsReturnWithoutOpeningHelperOrUndoingCancel() async throws {
+    let root = try syntheticSession(); defer { try? FileManager.default.removeItem(at: root) }
+    let runner = RecoveryRunner([
+        .init(method: "native-cache-snapshot", response: "null"), .init(method: "native-snapshot", response: recoverySnapshot())])
+    let store = PassStore(service: PassService(runner: runner), sessionDirectory: root, previewOnly: false, localUnlock: { true })
+    let workspace = SuiteWorkspace(previewOnly: true, initialProduct: .pass, makePass: { store })
+    store.unlock(); await waitForPass { !store.busy }
+    #expect(store.phase == .open)
+    workspace.lock(forInactivity: true)
+    #expect(store.phase == .locked && store.items.isEmpty && store.detail == nil)
+    #expect(store.localAuthentication.state == .ready && store.localAuthentication.automaticAttemptAllowed)
+    let armed = store.localAuthentication.context
+    workspace.lock(forInactivity: true)
+    #expect(store.localAuthentication.context === armed && store.localAuthentication.automaticAttemptAllowed)
+    store.localAuthentication.cancel(); workspace.lock(forInactivity: true)
+    #expect(!store.localAuthentication.automaticAttemptAllowed)
+    #expect(runner.calls == ["native-cache-snapshot", "native-snapshot"])
+    workspace.lock()
+}
+
 @Test @MainActor func passCancelledLocalUnlockNeverStartsHelper() async throws {
     let root = try syntheticSession(); defer { try? FileManager.default.removeItem(at: root) }
     let runner = RecoveryRunner([])

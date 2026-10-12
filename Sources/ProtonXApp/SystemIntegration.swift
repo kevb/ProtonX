@@ -25,6 +25,7 @@ final class SystemIntegration: NSObject {
     var openCalendar: (() -> Void)? = { ProductWindows.shared.open(.calendar) }
     var openSettings: (() -> Void)?
     var lockSuite: (() -> Void)?
+    var lockSuiteForInactivity: (() -> Void)?
     private var statusItem: NSStatusItem?
     private var monitors: [Any] = []
     private var localMonitor: Any?
@@ -53,11 +54,14 @@ final class SystemIntegration: NSObject {
             MainActor.assumeIsolated {
                 guard let self else { return }
                 let seconds = UserDefaults.standard.integer(forKey: "autoLockSeconds")
-                if ProcessInfo.processInfo.systemUptime - self.lastActivity >= Double(seconds == 0 ? 300 : seconds) {
-                    self.lockSuite?(); self.lastActivity = ProcessInfo.processInfo.systemUptime
-                }
+                self.checkInactivity(at: ProcessInfo.processInfo.systemUptime, timeout: Double(seconds == 0 ? 300 : seconds))
             }
         }
+    }
+    func checkInactivity(at uptime: TimeInterval, timeout: TimeInterval) {
+        guard uptime - lastActivity >= timeout else { return }
+        (lockSuiteForInactivity ?? lockSuite)?()
+        lastActivity = uptime
     }
     func updateMenuBar() {
         guard Bundle.main.bundleIdentifier != "org.kevb.ProtonX.Preview" else { return }

@@ -101,6 +101,34 @@ private let mailSnapshot = NativeMailResult(folders: [NativeMailFolder(id: 1, na
     #expect(store.phase == .locked); #expect(runner.calls.isEmpty); #expect(store.error == nil)
 }
 
+@Test @MainActor func mailIdleLockPreparesFingerprintReturnAndPreservesCancellationAcrossIdleTicks() async {
+    let runner = SyntheticMailRunner([
+        .init(method: "restore", result: .init(phase: .connected)), .init(method: "snapshot", result: mailSnapshot),
+        .init(method: "restore", result: .init(phase: .connected)), .init(method: "snapshot", result: mailSnapshot)
+    ])
+    let store = mailStore(runner, saved: true)
+    let workspace = SuiteWorkspace(previewOnly: true, initialProduct: .mail, makeMail: { store })
+    store.unlock(); await waitForMail { !store.busy }
+    #expect(store.phase == .open && store.localAuthentication.state == .authenticated)
+    let previous = store.localAuthentication.context
+    workspace.lock(forInactivity: true)
+    #expect(store.phase == .locked && store.messages.isEmpty && store.body == nil)
+    #expect(store.localAuthentication.context !== previous)
+    #expect(store.localAuthentication.state == .ready && store.localAuthentication.automaticAttemptAllowed)
+    let armed = store.localAuthentication.context
+    workspace.lock(forInactivity: true)
+    #expect(store.localAuthentication.context === armed && store.localAuthentication.automaticAttemptAllowed)
+    #expect(runner.calls == ["restore", "snapshot"])
+    store.localAuthentication.cancel()
+    workspace.lock(forInactivity: true)
+    #expect(store.localAuthentication.state == .cancelled && !store.localAuthentication.automaticAttemptAllowed)
+    store.unlock(); await waitForMail { !store.busy }
+    #expect(store.phase == .open)
+    workspace.lock(); workspace.lock(forInactivity: true)
+    #expect(store.phase == .locked && !store.localAuthentication.automaticAttemptAllowed)
+    #expect(runner.calls == ["restore", "snapshot", "restore", "snapshot"])
+}
+
 @Test @MainActor func mailInitialLoadAndFailureAreNotPresentedAsEmptyFolders() async {
     let runner = SyntheticMailRunner([
         .init(method: "restore", result: .init(phase: .connected)),
