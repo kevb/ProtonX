@@ -84,6 +84,7 @@ struct SettingsView: View {
     var body: some View {
         TabView {
             GeneralSettingsView().tabItem { Label("General", systemImage: "gearshape") }
+            MailTranslationSettingsView().tabItem { Label("Translation", systemImage: "character.bubble") }
             NotificationSettingsView().tabItem { Label("Notifications", systemImage: "bell") }
         }.frame(width: 580, height: 620).tint(PassTheme.accent)
     }

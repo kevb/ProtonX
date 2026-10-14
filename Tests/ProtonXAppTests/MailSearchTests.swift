@@ -81,6 +81,6 @@ private actor SearchRunner: NativeMailRunning {
         #expect(store.visibleMessages.map(\.id).sorted() == [12, 13, 14])
         #expect(await runner.calls.isEmpty)
         store.query = ""; store.searchTextChanged()
-        #expect(store.selectedFolder == 1 && store.messages.map(\.id) == [11, 12])
+        #expect(store.selectedFolder == 1 && store.messages.map(\.id) == [11, 12, 15])
     }
 }

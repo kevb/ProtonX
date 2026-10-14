@@ -720,6 +720,13 @@ final class NativeMailStore: ObservableObject {
         demoBodies[11] = "Welcome to your native inbox\n\nHello Alex,\n\nThis newsletter is synthetic. No account has been accessed.\n\nProduct / Window\nMail / ⌘2\nPass / ⌘1\n\nA comfortable place to read\n• Headings, lists and tables keep their structure.\n• The message stays light in dark appearance.\n\nA synthetic help link: https://example.com/help\n\nEarlier reply: thanks for the update."
         demoBodies[13] = "Hi Sam,\n\nSaturday sounds good. Shall we meet at ten?\n\nAlex"
         demoBodies[14] = "One more thing — I’ll bring the book we talked about.\n\nSee you Saturday!\n\nAlex"
+        if previewOnly {
+            let example = NativeMailMessage(id: 15, subject: "Fatura bilgilendirme", sender: "fatura@example.invalid", senderName: "Örnek Enerji", recipient: "alex@example.com", date: 1791289000, unread: true, conversationID: 1500)
+            messages.append(example); demoMessages.append(example); demoLocations[15] = 1
+            folders[0] = NativeMailFolder(id: 1, name: "Inbox", count: 3, kind: .inbox)
+            demoBodies[15] = "Merhaba Deniz,\n\nElektrik faturanız hazırlanmıştır. Son ödeme tarihi 20 Ekim. Faturanızı incelemek için https://example.invalid/fatura bağlantısını kullanabilirsiniz.\n\nSorularınız için destek@example.invalid adresine yazabilirsiniz.\n\nİyi günler dileriz."
+            demoHTML[15] = "<h2>Faturanız hazır</h2><p>Merhaba Deniz,</p><p>Elektrik faturanız hazırlanmıştır. Son ödeme tarihi <strong>20 Ekim</strong>.</p><p>Faturanızı incelemek için <a href='https://example.invalid/fatura'>bağlantıyı açın</a>.</p><p>Sorularınız için destek@example.invalid adresine yazabilirsiniz.</p><p>İyi günler dileriz.</p>"
+        }
         selectedItem = 11; body = demoBodies[11]; sanitizedHTML = demoHTML[11]; setDemoAttachments(11); setDemoActions()
     }
     private func setDemoActions() {

@@ -24,6 +24,11 @@ sessions and data separate. Contacts uses the Mail address book and follows Mail
 Optional quick access, Touch ID/Mac-password unlock, screen-lock handling and
 expiring password copies support everyday Mac workflows.
 
+Mail offers a compact **on-device translation** ribbon on macOS 15+: detect a
+message's language, translate into your preferred language, switch back to the
+original, and remember language preferences. Initial use may download Apple's
+language models. See [Mail translation](docs/TRANSLATION.md).
+
 The official standalone Proton Pass Safari extension can continue to handle
 website filling and supported browser passkeys. ProtonX does not share its local
 session or lock state with that extension.

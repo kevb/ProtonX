@@ -51,24 +51,42 @@ enum MailReaderPolicy {
 struct MailMessageContent: View {
     let text: String
     let sanitizedHTML: String?
+    var allowsTranslation = true
+    var isActive = true
     @State private var plainText = false
     @State private var allowsRemoteImages = false
     @State private var height: CGFloat = 240
     @State private var failed = false
     @State private var link: URL?
     var body: some View {
+        Group {
+            if #available(macOS 15.0, *), allowsTranslation {
+                MailTranslationReader(text: text, isActive: isActive) { showButton, offer in
+                    original(showTranslateButton: showButton, offerTranslation: offer)
+                }
+            } else { original() }
+        }
+    }
+    private func original(showTranslateButton: Bool = false, offerTranslation: @escaping () -> Void = {}) -> some View {
         VStack(spacing: 0) {
-            if sanitizedHTML != nil {
+            if sanitizedHTML != nil || showTranslateButton {
                 HStack {
-                    Label(allowsRemoteImages ? "Remote images allowed" : "Remote images blocked", systemImage: allowsRemoteImages ? "photo" : "hand.raised").foregroundStyle(.secondary)
-                    Button(allowsRemoteImages ? "Block images" : "Load images") { allowsRemoteImages.toggle() }
-                        .buttonStyle(.plain).foregroundStyle(MailTheme.accent)
-                        .disabled(plainText || failed)
-                        .help("For this message only. Loading images contacts external servers and can tell the sender you opened it.")
-                        .accessibilityIdentifier("mailRemoteImages")
+                    if sanitizedHTML != nil {
+                        Label(allowsRemoteImages ? "Remote images allowed" : "Remote images blocked", systemImage: allowsRemoteImages ? "photo" : "hand.raised").foregroundStyle(.secondary)
+                        Button(allowsRemoteImages ? "Block images" : "Load images") { allowsRemoteImages.toggle() }
+                            .buttonStyle(.plain).foregroundStyle(MailTheme.accent)
+                            .disabled(plainText || failed)
+                            .help("For this message only. Loading images contacts external servers and can tell the sender you opened it.")
+                            .accessibilityIdentifier("mailRemoteImages")
+                    } else { Text("Original message").foregroundStyle(.secondary) }
                     Spacer()
-                    Button(plainText ? "Formatted message" : "Plain text") { plainText.toggle() }
-                        .disabled(failed).buttonStyle(.plain).foregroundStyle(MailTheme.accent)
+                    if showTranslateButton {
+                        Button("Translate…", action: offerTranslation).buttonStyle(.plain).foregroundStyle(MailTheme.accent).accessibilityIdentifier("mailOfferTranslation")
+                    }
+                    if sanitizedHTML != nil {
+                        Button(plainText ? "Formatted message" : "Plain text") { plainText.toggle() }
+                            .disabled(failed).buttonStyle(.plain).foregroundStyle(MailTheme.accent)
+                    }
                 }.font(.caption).padding(12)
             }
             if let sanitizedHTML, !plainText, !failed {

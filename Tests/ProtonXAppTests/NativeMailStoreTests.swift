@@ -183,7 +183,7 @@ private let mailSnapshot = NativeMailResult(folders: [NativeMailFolder(id: 1, na
     #expect(store.phase == .open); #expect(store.body != nil)
     store.signIn(username: "demo@example.com", password: "SYNTHETIC"); store.unlock(); store.signOut(); store.refresh()
     store.selectedFolder = 2; store.changeFolder(); #expect(store.messages.count == 2); #expect(store.body == nil)
-    store.selectedFolder = 1; store.changeFolder(); #expect(store.messages.count == 2)
+    store.selectedFolder = 1; store.changeFolder(); #expect(store.messages.count == 3)
     store.lock(); #expect(store.body == nil); #expect(runner.calls.isEmpty)
 }
 
@@ -417,12 +417,12 @@ private let linkedDraft = NativeMailDraft(token: 3, sender: "alex.demo@gmail.com
 @Test @MainActor func previewMailTrashRestoreAndUndoNeverStartHelper() {
     let runner = SyntheticMailRunner([])
     let store = mailStore(runner, preview: true)
-    store.actOnMessage(.trash); #expect(store.messages.count == 1); #expect(store.canUndoAction)
-    store.undoMessageAction(); #expect(store.messages.count == 2)
+    store.actOnMessage(.trash); #expect(Set(store.messages.map(\.id)) == [12, 15]); #expect(store.canUndoAction)
+    store.undoMessageAction(); #expect(Set(store.messages.map(\.id)) == [11, 12, 15])
     store.selectedItem = 11; store.select(); store.actOnMessage(.trash)
     store.selectedFolder = 4; store.changeFolder(); #expect(store.messages.count == 1)
     store.selectedItem = 11; store.select(); store.actOnMessage(.inbox); #expect(store.messages.isEmpty)
-    store.selectedFolder = 1; store.changeFolder(); #expect(store.messages.count == 2)
+    store.selectedFolder = 1; store.changeFolder(); #expect(Set(store.messages.map(\.id)) == [11, 12, 15])
     #expect(runner.calls.isEmpty); store.lock()
 }
 
@@ -437,9 +437,9 @@ private let threadResult = NativeMailResult(thread: NativeMailThread(anchor: 11,
     let intent = try #require(store.trashIntent(for: 12))
     #expect(intent.conversation == 1200)
     // Preparing or cancelling confirmation never queues a change.
-    #expect(store.messages.count == 2 && !store.canUndoAction)
+    #expect(store.messages.count == 3 && !store.canUndoAction)
     store.actFromList(intent)
-    #expect(store.messages.map(\.id) == [11]); #expect(store.canUndoAction)
+    #expect(store.messages.map(\.id) == [11, 15]); #expect(store.canUndoAction)
     store.selectedFolder = 4; store.changeFolder()
     #expect(Set(store.messages.map(\.id)) == [12,13,14])
     #expect(store.trashIntent(for: 12) == nil) // No permanent delete in Trash.
@@ -528,7 +528,7 @@ private let threadResult = NativeMailResult(thread: NativeMailThread(anchor: 11,
     store.selectedFolder = 5; store.changeFolder(); store.selectedItem = 12; store.select()
     store.actFromList(try #require(store.listActionIntent(for: 12, action: .inbox)))
     store.selectedFolder = 1; store.changeFolder()
-    #expect(Set(store.messages.map(\.id)) == [11,12,13,14])
+    #expect(Set(store.messages.map(\.id)) == [11,12,13,14,15])
     store.undoMessageAction()
     store.selectedFolder = 5; store.changeFolder()
     #expect(Set(store.messages.map(\.id)) == [12,13,14]); store.lock()

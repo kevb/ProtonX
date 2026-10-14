@@ -1043,3 +1043,29 @@ separate from these local checks.
   app built and passed strict nested signature verification using the unchanged
   pinned helpers. Real fingerprint recognition following an actual background idle
   interval remains a manual acceptance check.
+
+## On-device Mail translation, 2026-10-15
+
+- All 262 Swift tests in 21 suites passed. The translation suite covers language
+  detection with English signatures/quoted replies, understood/ignored/always
+  preferences, supported language pairs, paragraph/link preservation, bounds,
+  cancellation, stale availability/results, original toggling and retry. Preview
+  scope/search/action expectations include its new synthetic Turkish message.
+- Apple's installed Turkish/English models translated a synthetic bill through
+  the actual `TranslationSession` batch adapter. The native-engine test verified
+  nonempty changed text, retained date and exact URL/email literals. It never
+  requested downloads, used an account or submitted a private message.
+- A final focused run passed all 23 translation, reader and search tests, including
+  existing script/network/image defenses. Original/translated ribbons and clean
+  text were rendered and visually inspected in dark/light appearances at 340 and
+  820 point widths. The desktop, Mail and Calendar contracts passed.
+- The release app built and passed strict nested signature verification. Both
+  Translation frameworks are weak-linked, and calls are gated to macOS 15+;
+  actual minimum-OS runtime behavior remains a manual check. Pinned account
+  helpers were reused without changes.
+- Installed to `/Applications/ProtonX.app` after confirming it was not running;
+  the installed executable matches the verified release, and the previous bundle
+  remains recoverable. The Mac was locked during the computer-use walkthrough,
+  so interactive ribbon/menu/original-toggle and download/decline UX still require
+  manual acceptance. Installed-model engine execution and synthetic layout tests
+  are separate from that interactive acceptance.

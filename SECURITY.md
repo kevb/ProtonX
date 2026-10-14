@@ -174,6 +174,39 @@ include passwords, tokens, real message bodies or vault exports in public issues
   update checks are skipped by the patched helper in native mode. No auto-updater
   silently replaces this patched executable.
 
+## Mail translation
+
+On macOS 15+, the opened message's existing plaintext body is classified locally
+with Natural Language, using a bounded sample that excludes common quoted replies,
+signatures, URLs and email addresses. No inbox scan, account API or new helper
+command is involved. Low-confidence and short samples do not trigger a ribbon;
+the reader still offers manual language selection.
+
+Apple's Translation framework translates on-device. Required models can be
+downloaded through Apple's permission UI after an explicit Translate action.
+Remembered automatic translation applies only to selected messages and already
+installed models; it cannot request downloads automatically. There is no cloud
+translation provider or fallback. Apple may collect framework usage/performance
+metrics such as bundle identity and language pair, excluding the message and
+translation content, as described in its framework documentation.
+
+The original SDK message is never modified. Translation input is limited to 64 KiB,
+128 prose blocks and 2,000 characters per block; output is bounded to 256 KiB.
+URLs, email addresses and paragraph separators remain literal. Batch responses
+must match request identifiers and the language pair. Results render as native
+text, never HTML; links retain explicit external-open confirmation. The translated
+view cannot load remote images or execute message/model-generated markup.
+Attachments and the composer are not translated.
+
+Source text, translated text and pending work remain in memory. Message replacement,
+reader dismissal and lock invalidate result tickets and release those references;
+product switches cancel pending translation. A late result cannot populate a new
+message or locked view. Task cancellation is not a promise of immediate OS model
+memory zeroization. Only language tags and explicit language preferences persist
+in defaults; no translation cache, message text, sender rule or account data is
+saved or logged. Preview translation uses synthetic messages and the same on-device
+engine; it cannot access account helpers.
+
 ## Synthetic preview and experiments
 
 The preview has a separate bundle identity, forces synthetic Pass, Mail and Calendar data,
