@@ -149,13 +149,21 @@ private actor TranslationAvailabilityGate {
     }
     @Test func appleAdapterTranslatesSyntheticTextWhenModelsAreAlreadyInstalled() async throws {
         // No download/permission UI in tests. Only this synthetic fixture is submitted.
-        guard #available(macOS 26.0, *), await AppleMailTranslation.availability("tr", "en") == .installed else { return }
-        let request = MailTranslationModel.Request(source: "tr", target: "en", document: try MailTranslationDocument(syntheticTurkish))
-        let session = TranslationSession(installedSource: Locale.Language(identifier:"tr"),target:Locale.Language(identifier:"en"))
+        #if compiler(>=6.2)
+        guard #available(macOS 26.0, *), await AppleMailTranslation.availability("tr", "en-GB") == .installed else { return }
+        let request = MailTranslationModel.Request(source: "tr", target: "en-GB", document: try MailTranslationDocument(syntheticTurkish))
+        let session: TranslationSession
+        #if compiler(>=6.3)
+        if #available(macOS 26.4, *) { session = TranslationSession(installedSource: Locale.Language(identifier:"tr"),target:Locale.Language(identifier:"en-GB"),preferredStrategy:.lowLatency) }
+        else { session = TranslationSession(installedSource: Locale.Language(identifier:"tr"),target:Locale.Language(identifier:"en-GB")) }
+        #else
+        session = TranslationSession(installedSource: Locale.Language(identifier:"tr"),target:Locale.Language(identifier:"en-GB"))
+        #endif
         let output = try await AppleMailTranslation.translate(request,session:session)
         #expect(output != syntheticTurkish && !output.isEmpty)
         #expect(output.contains("https://example.invalid/fatura?hesap=42") && output.contains("destek@example.invalid"))
         #expect(output.contains("20"))
+        #endif
     }
     @Test func ribbonLayoutsRenderSyntheticContentInBothAppearances() async throws {
         let preferences = settings(), model = await prepared(preferences)

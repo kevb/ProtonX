@@ -1069,3 +1069,33 @@ separate from these local checks.
   so interactive ribbon/menu/original-toggle and download/decline UX still require
   manual acceptance. Installed-model engine execution and synthetic layout tests
   are separate from that interactive acceptance.
+
+## Formatted Mail translation and latency, 2026-10-15
+
+- All 271 Swift tests in 22 suites passed, including the desktop, Mail and
+  Calendar source/protocol/privacy contracts. A focused 27-test run then passed
+  after the HTML parser lifetime safeguard; all 22 translation tests passed
+  after the final ribbon-state adjustment.
+- Synthetic HTML fixtures cover Turkish detection despite conversion markers,
+  hidden English preheaders, duplicate text, malformed markup, Unicode,
+  tables/headings/lists, exact links and currency literals, parser bounds,
+  cancellation, timeout, lock and stale preparation/results. Generated markup
+  is escaped into text nodes rather than becoming executable HTML.
+- The installed Apple low-latency Turkish/English models translated a nine-block
+  synthetic HTML fixture in about one second during the full test run. Subsequent
+  warm runs were faster. These timings exclude language-model downloads and do
+  not establish latency for arbitrary messages or other Macs.
+- The native preview walkthrough detected Turkish automatically, translated the
+  synthetic bill, and retained its heading, bold date, paragraphs and link.
+  Original/translation switching reused the completed result. Clicking its
+  translated link opened the external-link confirmation, which was cancelled.
+  Remote images remained blocked. No account or private email was accessed.
+- The release app built successfully and was installed at
+  `/Applications/ProtonX.app` while ProtonX was closed. Strict nested signature
+  verification passed; the installed executable, parser license and dependency
+  lockfile match the release sources. The previous installed bundle remains
+  recoverable. Pinned product helpers were reused without changes.
+- First-time model download/decline, minimum-OS runtime behavior, multilingual
+  fluency and the originally reported private messages remain manual acceptance
+  checks. Translation preserves the HTML structure; wording across separate
+  inline text nodes may still need refinement.

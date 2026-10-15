@@ -4,42 +4,58 @@ import SwiftUI
 
 @available(macOS 15.0, *)
 enum AppleMailTranslation {
+    static func availabilityService() -> LanguageAvailability {
+        #if compiler(>=6.3)
+        if #available(macOS 26.4, *) { return LanguageAvailability(preferredStrategy: .lowLatency) }
+        #endif
+        return LanguageAvailability()
+    }
+    static func configuration(source: String, target: String) -> TranslationSession.Configuration {
+        let source = Locale.Language(identifier: source), target = Locale.Language(identifier: target)
+        #if compiler(>=6.3)
+        if #available(macOS 26.4, *) { return .init(source: source, target: target, preferredStrategy: .lowLatency) }
+        #endif
+        return .init(source: source, target: target)
+    }
     static func languages() async -> [String] {
-        await LanguageAvailability().supportedLanguages.map(\.minimalIdentifier).sorted { MailLanguage.name($0).localizedStandardCompare(MailLanguage.name($1)) == .orderedAscending }
+        await availabilityService().supportedLanguages.map(\.minimalIdentifier).sorted { MailLanguage.name($0).localizedStandardCompare(MailLanguage.name($1)) == .orderedAscending }
     }
     static func availability(_ source: String, _ target: String) async -> MailTranslationModel.Availability {
-        switch await LanguageAvailability().status(from: Locale.Language(identifier: source), to: Locale.Language(identifier: target)) {
+        switch await availabilityService().status(from: Locale.Language(identifier: source), to: Locale.Language(identifier: target)) {
         case .installed: .installed
         case .supported: .download
         case .unsupported: .unsupported
         @unknown default: .unsupported
         }
     }
-    static func translate(_ request: MailTranslationModel.Request, session: TranslationSession) async throws -> String {
+    static func translate(_ request: MailTranslationModel.Request, session: TranslationSession, progress: (@MainActor @Sendable (Int) -> Void)? = nil) async throws -> String {
         try Task.checkCancellation()
         try await session.prepareTranslation()
+        await progress?(0)
         let inputs = request.document.strings.enumerated().map { TranslationSession.Request(sourceText: $0.element, clientIdentifier: String($0.offset)) }
-        let responses = try await session.translations(from: inputs)
-        try Task.checkCancellation()
         var results: [Int: String] = [:]
-        for response in responses {
+        for try await response in session.translate(batch: inputs) {
+            try Task.checkCancellation()
             guard let id = response.clientIdentifier, let index = Int(id), inputs.indices.contains(index), results[index] == nil,
                   MailLanguage.base(response.sourceLanguage.minimalIdentifier) == MailLanguage.base(request.source),
                   MailLanguage.base(response.targetLanguage.minimalIdentifier) == MailLanguage.base(request.target) else { throw MailTranslationDocument.Failure.invalidResult }
             results[index] = response.targetText
+            await progress?(results.count)
         }
         guard results.count == inputs.count else { throw MailTranslationDocument.Failure.invalidResult }
-        return try request.document.assemble(inputs.indices.map { results[$0]! })
+        let output = inputs.indices.map { results[$0]! }
+        return try await Task.detached(priority: .userInitiated) { try request.document.assemble(output) }.value
     }
 }
 
 @available(macOS 15.0, *)
 private struct AppleMailTranslationTask: View {
     let request: MailTranslationModel.Request
+    let progress: @MainActor @Sendable (Int) -> Void
     let finished: @MainActor (Result<String, Error>) -> Void
     var body: some View {
-        Color.clear.translationTask(source: Locale.Language(identifier: request.source), target: Locale.Language(identifier: request.target)) { session in
-            do { finished(.success(try await AppleMailTranslation.translate(request, session: session))) }
+        Color.clear.translationTask(AppleMailTranslation.configuration(source: request.source, target: request.target)) { session in
+            do { finished(.success(try await AppleMailTranslation.translate(request, session: session, progress: progress))) }
             catch { finished(.failure(error)) }
         }
     }
@@ -81,7 +97,7 @@ struct MailTranslationRibbon: View {
                 ForEach(targetLanguages, id: \.self) { code in Button(MailLanguage.name(code)) { model.choose(target: code) } }
             } label: { Text(MailLanguage.shortName(model.target)) }
                 .menuStyle(.borderlessButton).fixedSize().accessibilityLabel("Translate to").accessibilityIdentifier("mailTranslationTarget")
-        }.disabled(model.phase == .translating)
+        }.disabled(model.phase == .translating || model.isPreparing)
             .help("Translation happens on this Mac. The original message is kept unchanged.")
     }
     private var sourceLanguages: [String] { uniqueLanguages([model.source].compactMap { $0 } + languages) }
@@ -91,7 +107,7 @@ struct MailTranslationRibbon: View {
         HStack(spacing: 12) {
             if model.phase == .translating {
                 ProgressView().controlSize(.mini).accessibilityLabel("Translating")
-                Text("Translating…").foregroundStyle(.secondary)
+                Text(model.completedBlocks == 0 ? "Translating…" : "Translating \(model.completedBlocks)/\(model.request?.document.strings.count ?? 0)…").foregroundStyle(.secondary)
                 Button("Cancel") { model.cancel() }.buttonStyle(.plain).accessibilityIdentifier("mailTranslationCancel")
             } else if model.translated != nil {
                 Text(model.showingTranslation ? "Translated on this Mac" : "Original").font(.caption).foregroundStyle(.secondary)
@@ -126,8 +142,9 @@ struct MailTranslationRibbon: View {
 @available(macOS 15.0, *)
 struct MailTranslationReader<Original: View>: View {
     let text: String
+    let sanitizedHTML: String?
     let isActive: Bool
-    @ViewBuilder let original: (_ showTranslateButton: Bool, _ offerTranslation: @escaping () -> Void) -> Original
+    @ViewBuilder let original: (_ showTranslateButton: Bool, _ offerTranslation: @escaping () -> Void, _ translatedHTML: String?) -> Original
     @StateObject private var model = MailTranslationModel()
     @ObservedObject private var settings = MailTranslationSettings.shared
     @State private var languages: [String] = []
@@ -135,19 +152,22 @@ struct MailTranslationReader<Original: View>: View {
         VStack(spacing: 0) {
             if !model.dismissed { MailTranslationRibbon(model: model, settings: settings, languages: languages) }
             if let translated = model.translated, model.showingTranslation, !model.dismissed {
-                MailTranslatedPaper(text: translated)
+                if model.translatedIsHTML { original(false, {}, translated) }
+                else { MailTranslatedPaper(text: translated) }
             } else {
-                original(model.dismissed, { model.dismissed = false })
+                original(model.dismissed, { model.dismissed = false }, nil)
             }
         }
         .background {
             if let request = model.request, isActive {
-                AppleMailTranslationTask(request: request) { model.complete(request.id, result: $0) }.id(request.id).allowsHitTesting(false)
+                AppleMailTranslationTask(request: request, progress: { model.progress(request.id, completed: $0) }) { model.complete(request.id, result: $0) }.id(request.id).allowsHitTesting(false)
             }
         }
-        .onAppear { model.load(text, settings: settings) }
-        .onChange(of: text) { _, value in model.load(value, settings: settings) }
-        .onChange(of: settings.target) { _, value in model.choose(target: value); updateOffer() }
+        .task(id: sanitizedHTML ?? text) {
+            if let sanitizedHTML { await model.load(text, sanitizedHTML: sanitizedHTML, settings: settings) }
+            else { model.load(text, settings: settings) }
+        }
+        .onChange(of: settings.target) { _, value in if !model.isPreparing { model.choose(target: value); updateOffer() } }
         .onChange(of: settings.offersEnabled) { _, _ in updateOffer() }
         .onChange(of: settings.understood) { _, _ in updateOffer() }
         .onChange(of: settings.ignored) { _, _ in updateOffer() }
@@ -159,6 +179,11 @@ struct MailTranslationReader<Original: View>: View {
         .task(id: model.pair) {
             await model.check(using: AppleMailTranslation.availability)
             model.beginAutomatically(settings: settings, active: isActive)
+        }
+        .task(id: model.translationStarted ? model.request?.id : nil) {
+            guard model.translationStarted else { return }
+            guard let request = model.request else { return }
+            do { try await Task.sleep(for: .seconds(30)); model.timeout(request.id) } catch {}
         }
         .onDisappear { model.clear() }
     }

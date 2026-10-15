@@ -61,13 +61,13 @@ struct MailMessageContent: View {
     var body: some View {
         Group {
             if #available(macOS 15.0, *), allowsTranslation {
-                MailTranslationReader(text: text, isActive: isActive) { showButton, offer in
-                    original(showTranslateButton: showButton, offerTranslation: offer)
+                MailTranslationReader(text: text, sanitizedHTML: sanitizedHTML, isActive: isActive) { showButton, offer, translatedHTML in
+                    original(showTranslateButton: showButton, offerTranslation: offer, translatedHTML: translatedHTML)
                 }
             } else { original() }
         }
     }
-    private func original(showTranslateButton: Bool = false, offerTranslation: @escaping () -> Void = {}) -> some View {
+    private func original(showTranslateButton: Bool = false, offerTranslation: @escaping () -> Void = {}, translatedHTML: String? = nil) -> some View {
         VStack(spacing: 0) {
             if sanitizedHTML != nil || showTranslateButton {
                 HStack {
@@ -83,14 +83,14 @@ struct MailMessageContent: View {
                     if showTranslateButton {
                         Button("Translate…", action: offerTranslation).buttonStyle(.plain).foregroundStyle(MailTheme.accent).accessibilityIdentifier("mailOfferTranslation")
                     }
-                    if sanitizedHTML != nil {
+                    if sanitizedHTML != nil, translatedHTML == nil {
                         Button(plainText ? "Formatted message" : "Plain text") { plainText.toggle() }
                             .disabled(failed).buttonStyle(.plain).foregroundStyle(MailTheme.accent)
                     }
                 }.font(.caption).padding(12)
             }
-            if let sanitizedHTML, !plainText, !failed {
-                MailHTMLView(html: sanitizedHTML, height: $height, failed: $failed, openLink: { link = $0 }, allowsRemoteImages: allowsRemoteImages)
+            if let html = translatedHTML ?? sanitizedHTML, (translatedHTML != nil || !plainText), !failed {
+                MailHTMLView(html: html, height: $height, failed: $failed, openLink: { link = $0 }, allowsRemoteImages: allowsRemoteImages)
                     .id(allowsRemoteImages)
                     .frame(height: height).background(MailTheme.paper)
                     .environment(\.colorScheme, .light)

@@ -176,11 +176,12 @@ include passwords, tokens, real message bodies or vault exports in public issues
 
 ## Mail translation
 
-On macOS 15+, the opened message's existing plaintext body is classified locally
-with Natural Language, using a bounded sample that excludes common quoted replies,
-signatures, URLs and email addresses. No inbox scan, account API or new helper
-command is involved. Low-confidence and short samples do not trigger a ribbon;
-the reader still offers manual language selection.
+On macOS 15+, the opened message is classified locally with Natural Language.
+For formatted messages a pinned pure Swift parser extracts prose from the helper's
+already-sanitized HTML, excluding style/script/template content, explicitly hidden
+content and quoted history from detection. Plaintext detection skips decorative
+lines before applying its sample budget. No inbox scan, account API or new helper
+command is involved. Low-confidence/short samples still offer manual selection.
 
 Apple's Translation framework translates on-device. Required models can be
 downloaded through Apple's permission UI after an explicit Translate action.
@@ -190,13 +191,26 @@ translation provider or fallback. Apple may collect framework usage/performance
 metrics such as bundle identity and language pair, excluding the message and
 translation content, as described in its framework documentation.
 
-The original SDK message is never modified. Translation input is limited to 64 KiB,
-128 prose blocks and 2,000 characters per block; output is bounded to 256 KiB.
-URLs, email addresses and paragraph separators remain literal. Batch responses
-must match request identifiers and the language pair. Results render as native
-text, never HTML; links retain explicit external-open confirmation. The translated
-view cannot load remote images or execute message/model-generated markup.
-Attachments and the composer are not translated.
+The original SDK message is never modified. HTML parsing is bounded to 2 MiB,
+20,000 nodes and depth 256, off the main actor. Translation input is limited to
+64 KiB of prose, 128 unique blocks and 2,000 characters per block; model output is
+bounded to 256 KiB. URLs/email addresses, numeric-only nodes and currency amounts
+remain literal; duplicate prose is translated once. Responses must match request
+identifiers and the language pair. Formatted results replace only verified text
+nodes in a freshly parsed copy of the original sanitized document. Serialization
+escapes generated markup; tags, CSS and link/image attributes are not translated.
+Serialized HTML is bounded to 2 MiB and passes through the unchanged ephemeral
+WebKit/CSP/resource/navigation defenses. Remote-image consent remains per-message
+and off by default. Plaintext results retain native-text rendering. Attachments
+and the composer are not translated.
+
+Where supported, availability and execution explicitly select Apple's low-latency
+on-device models; no Apple Intelligence high-fidelity default is inherited. Older
+SDK/OS builds retain their traditional-model API. Streaming batches report bounded
+progress and are cancelled by the UI after 30 seconds of translation execution.
+That deadline starts after model preparation/download permission, not while a
+person is deciding whether to download a model. Cancellation rejects late results;
+it is not a guarantee that the OS immediately stops model work.
 
 Source text, translated text and pending work remain in memory. Message replacement,
 reader dismissal and lock invalidate result tickets and release those references;

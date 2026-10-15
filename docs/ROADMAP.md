@@ -23,9 +23,11 @@ end-to-end workflow come before additional products.
 
 Mail reading translation now has an on-device first pass: automatic language
 detection, a compact translation ribbon, language preferences and original/translated
-switching on macOS 15+. Complete interactive download/cancel and multilingual
-quality acceptance; richer HTML fidelity, mixed-language paragraphs, attachments/OCR
-and reply translation remain future work. See [Mail translation](TRANSLATION.md).
+switching on macOS 15+, preserving formatted HTML and using Apple's low-latency
+models. Interactive synthetic detection/translation/original/link confirmation
+passed. Complete download/decline and multilingual fluency acceptance; mixed-language
+paragraphs, attachments/OCR and reply translation remain future work. See
+[Mail translation](TRANSLATION.md).
 
 1. **Finish the secure-storage foundation already in progress.** The opt-in Mail
    candidate encrypts databases and new attachment/MIME cache payloads and supports

@@ -17,11 +17,19 @@ enum MailLanguage {
     }
     static func detect(_ text: String) -> String? {
         var lines: [String] = []
-        for line in text.prefix(12_000).components(separatedBy: .newlines) {
+        var letters = 0
+        for line in text.prefix(64_000).components(separatedBy: .newlines) {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             if trimmed == "--" || trimmed == "-- " || trimmed.hasPrefix("-----Original Message") ||
                 (trimmed.hasPrefix("On ") && trimmed.hasSuffix("wrote:")) { break }
-            if !trimmed.hasPrefix(">") { lines.append(line) }
+            // Decorative rules and conversion artifacts must not exhaust the sample
+            // before the first actual sentence in a table-based email.
+            if !trimmed.hasPrefix(">") {
+                let prose = String(line.prefix(2_000)).replacingOccurrences(of: #"https?://\S+|\S+@\S+"#, with: "", options: .regularExpression)
+                let count = prose.unicodeScalars.filter { CharacterSet.letters.contains($0) }.count
+                if count >= 2 { lines.append(prose); letters += count }
+                if letters >= 8_000 { break }
+            }
         }
         let sample = lines.joined(separator: "\n")
             .replacingOccurrences(of: #"https?://\S+|\S+@\S+"#, with: "", options: .regularExpression)
@@ -29,6 +37,13 @@ enum MailLanguage {
         let recognizer = NLLanguageRecognizer(); recognizer.processString(sample)
         guard let result = recognizer.languageHypotheses(withMaximum: 1).first, result.value >= 0.65 else { return nil }
         return code(result.key.rawValue)
+    }
+    static func containsProse(_ text: String) -> Bool {
+        let core = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !["USD", "EUR", "GBP", "TRY", "TL"].contains(core),
+              core.unicodeScalars.filter({ CharacterSet.letters.contains($0) }).count >= 2 else { return false }
+        let stripped = core.replacingOccurrences(of: #"https?://\S+|\S+@\S+|\b(?:USD|EUR|GBP|TRY|TL)\b"#, with: "", options: .regularExpression)
+        return stripped.unicodeScalars.filter({ CharacterSet.letters.contains($0) }).count >= 2
     }
 }
 
@@ -79,6 +94,13 @@ struct MailTranslationDocument: Sendable {
     static let maxBytes = 64 * 1024
     let parts: [Part]
     let strings: [String]
+    let htmlDocument: MailHTMLTranslationDocument?
+    var isHTML: Bool { htmlDocument != nil }
+    var languageSample: String { htmlDocument?.sample ?? "" }
+    init(sanitizedHTML: String) throws {
+        let document = try MailHTMLTranslationDocument(sanitizedHTML)
+        parts = []; strings = document.strings; htmlDocument = document
+    }
     init(_ text: String) throws {
         guard !text.isEmpty, text.utf8.count <= Self.maxBytes else { throw Failure.tooLong }
         let ns = text as NSString, full = NSRange(location: 0, length: ns.length)
@@ -92,7 +114,7 @@ struct MailTranslationDocument: Sendable {
                 var end = remainder.index(remainder.startIndex, offsetBy: min(2_000, remainder.count))
                 if end != remainder.endIndex, let space = remainder[..<end].lastIndex(where: \.isWhitespace), remainder.distance(from: remainder.startIndex, to: space) > 1_000 { end = remainder.index(after: space) }
                 let slice = String(remainder[..<end]), core = slice.trimmingCharacters(in: .whitespacesAndNewlines)
-                if core.unicodeScalars.contains(where: { CharacterSet.letters.contains($0) }), let range = slice.range(of: core) {
+                if MailLanguage.containsProse(core), let range = slice.range(of: core) {
                     parts.append(.prose(strings.count, String(slice[..<range.lowerBound]), String(slice[range.upperBound...])))
                     strings.append(core)
                 } else { parts.append(.literal(slice)) }
@@ -106,11 +128,12 @@ struct MailTranslationDocument: Sendable {
         }
         prose(ns.substring(from: cursor))
         guard !strings.isEmpty, strings.count <= 128 else { throw Failure.tooLong }
-        self.parts = parts; self.strings = strings
+        self.parts = parts; self.strings = strings; htmlDocument = nil
     }
     func assemble(_ translated: [String]) throws -> String {
         guard translated.count == strings.count, translated.allSatisfy({ !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }),
               translated.reduce(0, { $0 + $1.utf8.count }) <= 256 * 1024 else { throw Failure.invalidResult }
+        if let htmlDocument { return try htmlDocument.assemble(translated) }
         return parts.map { part in
             switch part { case .literal(let value): value; case .prose(let index, let before, let after): before + translated[index] + after }
         }.joined()
@@ -132,15 +155,33 @@ struct MailTranslationDocument: Sendable {
     @Published private(set) var availability: Availability = .unsupported
     @Published private(set) var request: Request?
     @Published private(set) var translated: String?
+    @Published private(set) var translatedIsHTML = false
+    @Published private(set) var completedBlocks = 0
+    @Published private(set) var translationStarted = false
+    @Published private(set) var isPreparing = false
     @Published var showingTranslation = false
     @Published var dismissed = true
     @Published private(set) var error: String?
     private var text = "", generation = UUID()
+    private var document: MailTranslationDocument?
     private var autoAttempted = false
     var pair: String { (source ?? "") + ":" + target }
     var canTranslate: Bool { source != nil && MailLanguage.base(source!) != MailLanguage.base(target) && availability != .unsupported && phase != .checking && phase != .translating }
     func load(_ text: String, settings: MailTranslationSettings) {
-        clear(); self.text = text; source = MailLanguage.detect(text); target = settings.target
+        clear(); self.text = text; document = try? MailTranslationDocument(text)
+        configure(sample: text, settings: settings)
+    }
+    func load(_ text: String, sanitizedHTML: String, settings: MailTranslationSettings) async {
+        clear(); isPreparing = true; phase = .checking; self.text = text; let ticket = generation
+        let prepared = await Task.detached(priority: .userInitiated) { try? MailTranslationDocument(sanitizedHTML: sanitizedHTML) }.value
+        guard !Task.isCancelled, generation == ticket else { return }
+        document = prepared; isPreparing = false; phase = .ready
+        // HTML is authoritative: never fall back to translating the helper's
+        // Markdown conversion if the formatted document exceeds our bounds.
+        configure(sample: prepared?.languageSample ?? text, settings: settings)
+    }
+    private func configure(sample: String, settings: MailTranslationSettings) {
+        source = MailLanguage.detect(sample); target = settings.target
         if let source {
             let base = MailLanguage.base(source)
             dismissed = !settings.offersEnabled || settings.ignored.contains(base) || (settings.understands(source) && !settings.always.contains(base)) || base == MailLanguage.base(target)
@@ -162,8 +203,9 @@ struct MailTranslationDocument: Sendable {
     func begin() {
         guard canTranslate, let source else { return }
         do {
-            request = Request(source: source, target: target, document: try MailTranslationDocument(text))
-            error = nil; phase = .translating
+            guard let document else { throw MailTranslationDocument.Failure.tooLong }
+            request = Request(source: source, target: target, document: document)
+            completedBlocks = 0; translationStarted = false; error = nil; phase = .translating
         } catch { self.error = "This message is too long to translate here. The original is unchanged."; phase = .failed }
     }
     func beginAutomatically(settings: MailTranslationSettings, active: Bool) {
@@ -173,17 +215,23 @@ struct MailTranslationDocument: Sendable {
     }
     func complete(_ id: UUID, result: Result<String, Error>) {
         guard request?.id == id else { return }
+        let isHTML = request?.document.isHTML == true
         request = nil; phase = .ready
         switch result {
-        case .success(let text): translated = text; showingTranslation = true
+        case .success(let text): translated = text; translatedIsHTML = isHTML; showingTranslation = true
         case .failure(let error):
             if error is CancellationError { return }
             self.error = "Translation couldn’t finish. Try again; the original is unchanged."; phase = .failed
         }
     }
+    func progress(_ id: UUID, completed: Int) { if request?.id == id { completedBlocks = completed; translationStarted = true } }
+    func timeout(_ id: UUID) {
+        guard request?.id == id else { return }; cancel(); phase = .failed
+        error = "Translation is taking too long. Try again; the original is unchanged."
+    }
     func cancel() { request = nil; if phase == .translating { phase = .ready }; autoAttempted = true }
     func clear() {
-        cancel(); generation = UUID(); source = nil; text = ""; translated = nil; showingTranslation = false
-        error = nil; availability = .unsupported; phase = .ready; autoAttempted = false
+        cancel(); generation = UUID(); source = nil; text = ""; document = nil; translated = nil; translatedIsHTML = false; showingTranslation = false; completedBlocks = 0; translationStarted = false
+        error = nil; availability = .unsupported; phase = .ready; autoAttempted = false; isPreparing = false; dismissed = true
     }
 }

@@ -18,10 +18,21 @@ pairs are explained in the ribbon. Failed/cancelled translation leaves the origi
 readable and supports an explicit retry. Messages larger than 64 KiB cannot be
 translated in this version; no truncated result is silently substituted.
 
-The translated view preserves paragraphs, literal URLs and email addresses. Links
-require the same external-open confirmation as the original reader. It is a clean
-text reading view: complex newsletter layouts, inline images, attachments, OCR,
-subject translation and translating composed replies are not implemented.
+Formatted messages retain their existing headings, tables, lists, inline styling,
+CSS and links: only text nodes are translated in a parsed copy of the sanitized
+HTML. URLs, email addresses, numeric/currency-only nodes and all attributes stay
+unchanged. Original and translated readings share the same renderer and image
+consent. Links still require external-open confirmation. Plaintext messages use
+the native text view. Attachments, OCR, subject translation and translating
+composed replies are not implemented. Inline text boundaries may limit translation
+fluency; the original is always available for comparison.
+
+ProtonX explicitly selects Apple's faster traditional on-device models when the
+strategy API is available. These can require different language downloads from
+Apple Intelligence's high-fidelity models. Repeated text is translated once, and
+the ribbon reports completed blocks. A stalled execution returns to retry after
+30 seconds; model preparation/download approval is excluded from that deadline.
+Original/translation switching reuses the current in-memory result.
 
 ## Language preferences
 
@@ -46,11 +57,12 @@ excluding content. See [Security](../SECURITY.md#mail-translation).
 ## Implementation and validation
 
 `MailTranslation.swift` contains bounded local language detection, preferences,
-prose/literal segmentation and generation-scoped request state. The SwiftUI bridge
-in `MailTranslationView.swift` uses `LanguageAvailability` and `TranslationSession`,
-checks batch identities/language pairs and renders native text. Native Mail retains
-its original sanitized HTML and existing remote-image policy. No crypto, session,
-protocol or sending behavior changes.
+prose/literal segmentation and generation-scoped state. `MailHTMLTranslation.swift`
+uses exactly pinned SwiftSoup to parse sanitized HTML off the main actor, extract
+visible prose, deduplicate blocks and safely replace only text nodes. The SwiftUI
+bridge uses `LanguageAvailability` and streaming `TranslationSession` batches with
+matching model strategies. Native Mail retains its original sanitized HTML and
+existing remote-image policy. No crypto, session, protocol or sending behavior changes.
 
 The synthetic preview inbox includes **Fatura bilgilendirme** for trying detection,
 translation, the original toggle and language controls without an account. Tests

@@ -24,6 +24,17 @@ original licenses and notices must accompany any binary distribution.
 The build uses macOS system frameworks and Apple's system libcurl. See Apple's
 system third-party notices for those components; they are not bundled by ProtonX.
 
+## SwiftSoup (linked into the native app)
+
+The pure Swift HTML parser is used only on already-sanitized Mail HTML to preserve
+structure during local translation. Version 2.14.1, revision
+`9598b4f4e5a0a18f8d96e664f209e9022cddd30a`, is pinned in `Package.swift` and
+`Package.resolved`. Source: https://github.com/scinfu/SwiftSoup.
+Copyright (c) 2009-2025 Jonathan Hedley (jsoup); copyright (c) 2016-2025 Nabil
+Chatbi (Swift port). MIT license; the original notice is reproduced in
+`Resources/SwiftSoup-LICENSE` and copied into locally built app bundles. No
+SwiftSoup source modifications are made.
+
 ## Native Mail helper (redistributed in locally built app bundles)
 
 The Mail helper and Proton's Mail SDK are AGPL-3.0-only. See

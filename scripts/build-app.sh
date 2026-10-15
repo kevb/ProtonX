@@ -65,6 +65,7 @@ if $PROTONX_PREVIEW; then
   /usr/libexec/PlistBuddy -c 'Set :CFBundleDisplayName ProtonX Preview' "$PROTONX_BUNDLE/Contents/Info.plist"
 fi
 cp LICENSE LICENSE-MAIL-HELPER THIRD_PARTY_NOTICES.md upstream.lock.json Resources/MailProtocol.json Resources/DesktopProtocol.json Resources/CalendarProtocol.json "$PROTONX_BUNDLE/Contents/Resources/"
+cp Resources/SwiftSoup-LICENSE Package.resolved "$PROTONX_BUNDLE/Contents/Resources/"
 cp -R Resources/CalendarLicenses "$PROTONX_BUNDLE/Contents/Resources/"
 if [[ -f Resources/AppIcon.icns ]]; then cp Resources/AppIcon.icns "$PROTONX_BUNDLE/Contents/Resources/"; fi
 # A configured local certificate preserves Keychain designated requirements across
