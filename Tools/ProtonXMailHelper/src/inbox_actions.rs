@@ -37,6 +37,7 @@ pub fn folder_kind(description: &mail_uniffi::mail::datatypes::LabelDescription)
         LabelDescription::System(Some(SystemLabel::Inbox)) => "inbox",
         LabelDescription::System(Some(SystemLabel::Sent | SystemLabel::AllSent)) => "sent",
         LabelDescription::System(Some(SystemLabel::Drafts | SystemLabel::AllDrafts)) => "drafts",
+        LabelDescription::System(Some(SystemLabel::Starred)) => "starred",
         LabelDescription::System(Some(SystemLabel::Scheduled | SystemLabel::Snoozed | SystemLabel::Outbox)) => "pending",
         LabelDescription::System(Some(SystemLabel::Trash)) => "trash",
         LabelDescription::System(Some(SystemLabel::Spam)) => "spam",
@@ -195,6 +196,7 @@ mod tests {
         use mail_uniffi::mail::datatypes::{LabelDescription, SystemLabel};
         assert_eq!(folder_kind(&LabelDescription::System(Some(SystemLabel::Spam))), "spam");
         assert_eq!(folder_kind(&LabelDescription::System(Some(SystemLabel::AllSent))), "sent");
+        assert_eq!(folder_kind(&LabelDescription::System(Some(SystemLabel::Starred))), "starred");
         assert_eq!(folder_kind(&LabelDescription::Folder), "other");
         assert_eq!(folder_kind(&LabelDescription::System(None)), "other");
     }

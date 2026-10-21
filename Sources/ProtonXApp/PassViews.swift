@@ -3,9 +3,11 @@ import ProtonXCore
 
 struct PassWindow: View {
     var isActive = true
+    var newAlias: () -> Void = {}
     @EnvironmentObject var store: PassStore
     @Environment(\.openSettings) private var openSettings
     @State private var showingCreate = false
+    @State private var aliasRequested = false
     @State private var showingEdit = false
     @State private var confirmTrash = false
     @State private var confirmSignOut = false
@@ -26,7 +28,9 @@ struct PassWindow: View {
                     .padding(12).background(.orange.opacity(0.12)).accessibilityIdentifier("errorBanner")
             }
         }
-        .sheet(isPresented: $showingCreate) { ItemEditor(editing: false) }
+        .sheet(isPresented: $showingCreate, onDismiss: {
+            if aliasRequested { aliasRequested = false; newAlias() }
+        }) { ItemEditor(editing: false, requestAlias: { aliasRequested = true }) }
         .sheet(isPresented: $showingEdit) { ItemEditor(editing: true) }
         .confirmationDialog(store.showingTrash ? "Restore this item?" : "Move this item to Trash?", isPresented: $confirmTrash) {
             Button(store.showingTrash ? "Restore" : "Move to Trash", role: store.showingTrash ? nil : .destructive) { store.trashCurrent() }

@@ -1053,13 +1053,19 @@ impl Backend {
         let mut folders: Vec<Value> = systems
             .iter()
             .filter(|f| f.display)
-            .map(|f| json!({"id":f.id.as_u64(),"name":f.name,"count":f.count,"kind":inbox_actions::folder_kind(&f.description)}))
+            .map(|f| json!({"id":f.id.as_u64(),"name":f.name,"count":f.count,"kind":inbox_actions::folder_kind(&f.description),"isCustom":false}))
             .collect();
         folders.extend(
             custom
                 .iter()
-                .map(|f| json!({"id":f.id.as_u64(),"name":f.name,"count":f.total,"kind":"other"})),
+                .map(|f| json!({"id":f.id.as_u64(),"name":f.name,"count":f.total,"kind":"other","isCustom":true})),
         );
+        let labels = sdk_result!(
+            mail_uniffi::mail::sidebar::SidebarCustomLabelsResult,
+            block_on(sidebar.custom_labels())
+        ).map_err(|e| action_failure(e, "snapshot_failed"))?;
+        folders.extend(labels.iter().filter(|label| label.display).map(|label|
+            json!({"id":label.id.as_u64(),"name":label.name,"count":label.unread,"kind":"other","isLabel":true})));
         let mailbox = if let Some(id) = folder {
             if !folders.iter().any(|f| f["id"].as_u64() == Some(id)) {
                 return Err("invalid_selection");

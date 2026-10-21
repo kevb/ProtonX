@@ -12,6 +12,7 @@ import ProtonXCore
     @Published private(set) var mail: NativeMailStore?
     @Published private(set) var calendar: CalendarStore?
     @Published var passSearchRequested = false
+    @Published var showingAlias = false
     let previewOnly: Bool
     private let defaults: UserDefaults
     private let makePass: () -> PassStore
@@ -39,7 +40,8 @@ import ProtonXCore
         select(initial)
     }
     var canCreate: Bool {
-        switch selected {
+        guard !showingAlias else { return false }
+        return switch selected {
         case .pass: pass?.canCreate == true
         case .mail: mail.map { $0.phase == .open && !$0.busy && $0.draft == nil } ?? false
         case .contacts: false
@@ -48,7 +50,8 @@ import ProtonXCore
         }
     }
     var canRefresh: Bool {
-        switch selected {
+        guard !showingAlias else { return false }
+        return switch selected {
         case .pass: pass.map { $0.phase == .open && !$0.busy && !$0.isDemo } ?? false
         case .mail: mail.map { $0.phase == .open && !$0.busy && !$0.demo } ?? false
         case .contacts: mail.map { $0.phase == .open && !$0.contactsBusy } ?? false
@@ -56,8 +59,23 @@ import ProtonXCore
         case nil: false
         }
     }
+    func openAlias() {
+        guard selected == .mail ? mail?.phase == .open : selected == .pass && pass?.phase == .open else { return }
+        if pass == nil {
+            let store = makePass(); pass = store
+            store.objectWillChange.sink { [weak self] _ in self?.productChanged() }.store(in: &observations)
+        }
+        if pass?.phase == .locked { pass?.localAuthentication.arm() }
+        showingAlias = true
+    }
+    func closeAlias() {
+        showingAlias = false
+        pass?.cancelLocalUnlock()
+        if pass?.phase != .open, pass?.busy == true { pass?.cancelLogin() }
+    }
     func select(_ product: ProductRoute?) {
         if selected != product {
+            if showingAlias { closeAlias() }
             if product != .mail { returnToContacts = false }
             if selected == .calendar { waitingForAccount = nil }
             if selected == .calendar && calendar?.phase == .signingIn { calendar?.lock(); accountSourceIsValid = nil }
@@ -173,6 +191,7 @@ import ProtonXCore
         }
     }
     func lock(forInactivity: Bool = false) {
+        if showingAlias { closeAlias() }
         returnToContacts = false
         waitingForAccount = nil; returnToCalendarFrom = nil; accountSourceIsValid = nil
         passSearchRequested = false
@@ -219,12 +238,12 @@ struct SuiteWindow: View {
                 // Stable view identities retain split views, scroll positions and
                 // editor state. Hiding is navigation, not locking or logout.
                 if let pass = workspace.pass {
-                    PassWindow(isActive: workspace.selected == .pass).environmentObject(pass)
+                    PassWindow(isActive: workspace.selected == .pass, newAlias: { workspace.openAlias() }).environmentObject(pass)
                         .opacity(workspace.selected == .pass ? 1 : 0)
                         .allowsHitTesting(workspace.selected == .pass).accessibilityHidden(workspace.selected != .pass)
                 }
                 if let mail = workspace.mail {
-                    MailWindow(store: mail, isActive: workspace.selected == .mail)
+                    MailWindow(store: mail, isActive: workspace.selected == .mail, newAlias: { workspace.openAlias() })
                         .opacity(workspace.selected == .mail ? 1 : 0)
                         .allowsHitTesting(workspace.selected == .mail).accessibilityHidden(workspace.selected != .mail)
                 }
@@ -243,6 +262,13 @@ struct SuiteWindow: View {
         .frame(minWidth: 1000, minHeight: 700)
         .background(PassTheme.canvas)
         .navigationTitle(workspace.selected.map { "ProtonX " + $0.displayName } ?? "ProtonX")
+        .sheet(isPresented: $workspace.showingAlias, onDismiss: { workspace.closeAlias() }) {
+            if let pass = workspace.pass {
+                AliasEditor(store: pass, close: { workspace.closeAlias() }, viewInPass: { result, vault in
+                    workspace.closeAlias(); workspace.select(.pass); pass.selectAlias(result, vaultID: vault)
+                })
+            }
+        }
         .focusedSceneValue(\.protonXProduct, workspace.selected)
         .focusedSceneValue(\.protonXCanCreate, workspace.canCreate)
         .focusedSceneValue(\.protonXCanRefresh, workspace.canRefresh)
@@ -257,6 +283,10 @@ struct SuiteWindow: View {
                         Text("Conversations").tag(true); Text("Messages").tag(false)
                     }.pickerStyle(.menu).accessibilityIdentifier("mailConversationView")
                 }
+                if workspace.selected == .mail, workspace.mail?.phase == .open {
+                    Button { workspace.openAlias() } label: { Label("New email alias…", systemImage: "at.badge.plus") }
+                        .help("Create a hide-my-email alias in Pass").accessibilityIdentifier("suiteNewAlias")
+                }
                 if (workspace.selected == .pass && workspace.pass?.busy == true) ||
                    (workspace.selected == .mail && workspace.mail?.busy == true) ||
                    (workspace.selected == .calendar && workspace.calendar?.busy == true) {
@@ -266,10 +296,18 @@ struct SuiteWindow: View {
                     Button { workspace.refresh() } label: { Label("Refresh", systemImage: "arrow.clockwise") }
                         .disabled(!workspace.canRefresh)
                     if workspace.selected != .contacts {
+                    if workspace.selected == .pass {
+                        Menu {
+                            Button("Login or secure note…") { NotificationCenter.default.post(name: .protonXNewItem, object: nil) }
+                            Button("Email alias…", systemImage: "at.badge.plus") { workspace.openAlias() }
+                        } label: { Label("Create item", systemImage: "plus") }
+                        .disabled(!workspace.canCreate).accessibilityIdentifier("suiteCreate")
+                    } else {
                     Button {
                         NotificationCenter.default.post(name: workspace.selected == .calendar ? .protonXNewEvent : workspace.selected == .mail ? .protonXNewMessage : .protonXNewItem, object: nil)
                     } label: { Label(workspace.selected == .calendar ? "New event" : workspace.selected == .mail ? "New message" : "Create item", systemImage: "plus") }
                         .disabled(!workspace.canCreate).accessibilityIdentifier("suiteCreate")
+                    }
                     }
                 }
             }

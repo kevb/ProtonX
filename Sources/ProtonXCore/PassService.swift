@@ -99,6 +99,17 @@ public final class PassService: Sendable {
     public func capabilities() async throws -> PassCapabilities {
         try JSONDecoder().decode(PassCapabilities.self, from: await execute(HelperCommand(["native-capabilities"])))
     }
+    public func aliasOptions(vault: Vault) async throws -> PassAliasOptions {
+        guard vault.canCreate == true else { throw ProtonXError.invalidInput("Choose a writable Pass vault.") }
+        let result = try JSONDecoder().decode(PassAliasOptions.self, from: await execute(HelperCommand(["native-alias-options", "--share-id", vault.id])))
+        try result.validate(); return result
+    }
+    public func createAlias(_ draft: PassAliasDraft, vault: Vault) async throws -> CreatedPassAlias {
+        guard vault.canCreate == true else { throw ProtonXError.invalidInput("Choose a writable Pass vault.") }
+        let result = try JSONDecoder().decode(CreatedPassAlias.self, from: await execute(HelperCommand(["native-alias-create", "--share-id", vault.id], input: draft.encodedInput())))
+        guard !result.itemID.isEmpty, result.itemID.utf8.count <= 512, !result.itemID.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains), PassAliasOptions.validEmail(result.alias) else { throw ProtonXError.invalidResponse }
+        return result
+    }
     public func vaults() async throws -> [Vault] {
         struct List: Decodable { let vaults: [Vault] }
         return try JSONDecoder().decode(List.self, from: await execute(HelperCommand(["vault", "list", "--output", "json"]))).vaults

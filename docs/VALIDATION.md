@@ -1,6 +1,6 @@
 # Validation record
 
-Last updated: 2026-10-09. Local validation environment: Apple Silicon Mac,
+Last updated: 2026-10-21. Local validation environment: Apple Silicon Mac,
 macOS 26.6.2, Xcode 27 / Swift 6.4 and Rust 1.99.0. Automated test content is
 synthetic and uses isolated storage. Private account contents and credentials
 are excluded from public artifacts.
@@ -1099,3 +1099,37 @@ separate from these local checks.
   fluency and the originally reported private messages remain manual acceptance
   checks. Translation preserves the HTML structure; wording across separate
   inline text nodes may still need refinement.
+
+## Native alias creation and Mail sidebar, 2026-10-21
+
+- All 278 Swift tests in 23 suites passed. New contracts cover private-input
+  alias transport, bounded prefix/options validation, unchanged Mail drafts and
+  Pass selection, late-result rejection after lock, and acknowledged versus
+  unconfirmed writes. The initial-snapshot loading fixture now uses an explicit
+  release barrier instead of scheduler-dependent sleeps.
+- Pass's standard CLI and desktop-feature suites passed 115 and 131 tests.
+  The public SDK suite passed 235 tests with two upstream tests ignored, plus
+  24 documentation tests. After the additional alias integration fixtures were
+  added, all five focused alias SDK tests passed. These exercise the actual
+  encryption/decryption of title/note, exact selected signed suffix, forwarding
+  mailbox selection, quota, read-only permissions and removed-mailbox refusal.
+- All 32 native Mail helper tests passed with the updated sidebar adapter.
+  SDK system identities distinguish Starred, custom folders and labels; Swift
+  fixtures verify grouping without relying on names and retain every mailbox
+  exactly once. Desktop alias/reference, Mail privacy/protocol and Calendar
+  source contracts passed. The Pass patch applies cleanly to the pinned source
+  and reproduces the alias helper build inputs.
+- The native preview walkthrough verified Mail's sidebar and toolbar entry
+  points, Pass's creation menu and item-type handoff, alias preview and synthetic
+  creation, confirmation and View in Pass. A synthetic unsaved Mail reply remained
+  unchanged after opening/cancelling the sheet. More, Folders and Labels start
+  collapsed; expanding Folders revealed the synthetic Travel folder. The preview
+  was then closed. No account was accessed, real alias created or address copied
+  to the system clipboard during these checks.
+- Live account alias creation, plan-specific server responses, multiple real
+  mailboxes/domains and biometric unlocking inside the sheet remain manual
+  acceptance checks. Alias management and sending as an alias are outside scope.
+- Optimized Pass and Mail helper builds and the release Swift app build passed.
+  Installed to `/Applications/ProtonX.app` while it was closed. Strict nested
+  signature verification passed, and the installed executable and updated helpers
+  match the verified bundle. The previous installed version remains recoverable.

@@ -5,6 +5,7 @@ struct ItemEditor: View {
     @EnvironmentObject var store: PassStore
     @Environment(\.dismiss) private var dismiss
     let editing: Bool
+    var requestAlias: () -> Void = {}
     @State private var draft = NativeItemDraft()
     @State private var username = ""
     @State private var email = ""
@@ -68,7 +69,7 @@ struct ItemEditor: View {
                 VStack(alignment: .leading, spacing: 14) {
                     if !editing {
                         HStack(spacing: 16) {
-                            Picker("Type", selection: $draft.kind) { Text("Login").tag("login"); Text("Secure note").tag("note") }
+                            Picker("Type", selection: $draft.kind) { Text("Login").tag("login"); Text("Secure note").tag("note"); Text("Email alias").tag("alias") }
                             Spacer(minLength: 8)
                             Picker("Vault", selection: $vaultID) { ForEach(store.writableVaults) { Text($0.name).tag($0.id) } }
                         }.pickerStyle(.menu).font(.system(size: 13)).padding(.horizontal, 4)
@@ -93,7 +94,10 @@ struct ItemEditor: View {
         }.frame(width: 640, height: 760).tint(PassTheme.accent)
         .onAppear(perform: populate)
         .onDisappear { saveTask?.cancel(); clear() }
-        .onChange(of: draft.kind) { _, _ in totpSetup = ""; removeTOTP = false }
+        .onChange(of: draft.kind) { _, kind in
+            totpSetup = ""; removeTOTP = false
+            if kind == "alias" { requestAlias(); clear(); dismiss() }
+        }
     }
     private var loginFields: some View {
         VStack(spacing: 0) {

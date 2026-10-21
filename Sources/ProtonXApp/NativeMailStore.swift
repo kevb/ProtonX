@@ -354,7 +354,7 @@ final class NativeMailStore: ObservableObject {
               let folder = folders.first(where: { $0.id == selectedFolder }) else { return [] }
         let moves: [NativeMailAction]
         switch folder.kind ?? .other {
-        case .inbox, .other: moves = [.trash, .archive, .spam]
+        case .inbox, .starred, .other: moves = [.trash, .archive, .spam]
         case .sent, .drafts, .pending: moves = [.trash, .archive]
         case .archive: moves = [.trash, .inbox, .spam]
         case .spam: moves = [.trash, .inbox]
@@ -721,6 +721,7 @@ final class NativeMailStore: ObservableObject {
         demoBodies[13] = "Hi Sam,\n\nSaturday sounds good. Shall we meet at ten?\n\nAlex"
         demoBodies[14] = "One more thing — I’ll bring the book we talked about.\n\nSee you Saturday!\n\nAlex"
         if previewOnly {
+            folders += [NativeMailFolder(id: 6, name: "Starred", kind: .starred), NativeMailFolder(id: 7, name: "Travel", kind: .other, isCustom: true)]
             let example = NativeMailMessage(id: 15, subject: "Fatura bilgilendirme", sender: "fatura@example.invalid", senderName: "Örnek Enerji", recipient: "alex@example.com", date: 1791289000, unread: true, conversationID: 1500)
             messages.append(example); demoMessages.append(example); demoLocations[15] = 1
             folders[0] = NativeMailFolder(id: 1, name: "Inbox", count: 3, kind: .inbox)

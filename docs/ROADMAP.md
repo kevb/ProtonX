@@ -254,7 +254,7 @@ assets; public captures and fixtures use synthetic content.
 | Sending controls | Undo Send, scheduled send with edit/cancel, read-receipt request/response, password-protected external messages and expiry. Preserve existing queued/confirmed/failed/unknown status handling. |
 | Contacts | Native address-book browsing/search, groups, selected decrypted fields, new-mail actions and To/Cc/Bcc pickers are implemented. Real-account read/refresh acceptance, autocomplete, create/edit/delete, group administration and CSV/vCard import/export remain. See [Contacts](CONTACTS.md). |
 | Search | Account-wide SDK metadata search (subjects/participants) and result paging are implemented through Return/Search all mail. Real imported-message acceptance remains. Body indexing/search, attachment-name/content search and advanced recipient/date/attachment controls remain. Typing alone filters the loaded page. Search-result folder actions are disabled in the first pass. See [Mail search](MAIL_SEARCH.md). |
-| Organisation | Star/unstar, snooze, arbitrary folder moves, label application, folder/label creation/edit/deletion/colours/subfolders. Existing custom folders can be browsed. |
+| Organisation | Star/unstar, snooze, arbitrary folder moves, label application, folder/label creation/edit/deletion/colours/subfolders. Existing custom folders and displayed labels can be browsed in collapsed sidebar groups; system mailboxes use SDK identities. |
 | Bulk/conversation actions | Multi-selection, permanent deletion and empty Trash. Read/unread and Archive/Trash/Spam/Inbox actions work on one message or one conversation, with SDK move undo and keyboard confirmation for whole-conversation Trash. Permanent deletion requires an explicit helper/policy review. |
 | Spam and automation | Spam/phishing reporting, block/allow lists, simple filters/Sieve, automatic forwarding and out-of-office replies. |
 | Inbox views | Category enable/manage controls and Primary/Social/Promotions/etc. views; mailing-list/newsletter management and unsubscribe controls. Availability can depend on rollout. |
@@ -283,7 +283,7 @@ assets; public captures and fixtures use synthetic content.
 | Item history/recovery | View/compare previous revisions and restore an earlier version. Trash/restore already exists. |
 | Attachments | Upload/download/open/preview/remove; encrypted file handling, quota and temporary-file lifecycle. Current UI exposes counts only. |
 | Sharing | Invitations, member/role/access management, ownership transfer and secure item links with expiry/revocation. Shared-vault operation guards already exist. |
-| Aliases | Create/manage/disable, forwarding mailboxes, custom domains, alias contacts and associated SimpleLogin controls. Existing aliases can be displayed. |
+| Aliases | Management/disable, mailbox/domain administration, alias contacts and associated SimpleLogin controls remain. Native single-alias creation is available from Mail and Pass, with server-provided address/mailbox choices, an encrypted title/note, copy confirmation and a link to the saved Pass item. |
 | Monitor | Weak/reused/breached passwords, missing 2FA, dark-web alerts and per-item monitoring exclusions. |
 | Import/export | Native import, plain/encrypted exports and migration workflows with explicit disclosure controls. |
 | Desktop integrations | Auto-Type and SSH-agent UI; quick access currently opens the ordinary Pass workspace. System/native-app credential provider remains optional, not installed. |

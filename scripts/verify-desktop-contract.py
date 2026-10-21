@@ -20,3 +20,12 @@ assert contract['deviceForkPath'] in (root/'upstream/pass-cli/pass/src/auth/web_
 header = client+'@'+package['version']
 assert f'api_header: "{header}"' in (root/'upstream/pass-cli/pass-cli/src/protonx.rs').read_text()
 print('Desktop API identity verified against pinned Proton source: '+header)
+
+# Mail's official Pass bridge uses the same encrypted single-alias operation.
+alias_reference = read('packages/pass/lib/items/item.requests.ts').split('export const createAlias =', 1)[1].split('export type ItemRevisionWithAlias', 1)[0]
+assert 'pass/v1/share/${shareId}/alias/custom' in alias_reference
+assert all(field in alias_reference for field in ['Item:', 'Prefix:', 'SignedSuffix:', 'MailboxIDs:'])
+alias_options = read('packages/pass/lib/alias/alias.requests.ts')
+assert 'pass/v1/share/${shareId}/alias/options' in alias_options
+assert 'mailbox.Email' in alias_options and 'data.SignedSuffix' in alias_options
+print('Alias options and encrypted create contract verified against pinned Proton source')

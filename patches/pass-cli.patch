@@ -274,7 +274,7 @@ index 2fed7a9..5673a84 100644
  const XOR_KEY_LENGTH: usize = 32;
  
 diff --git a/pass-cli/src/main.rs b/pass-cli/src/main.rs
-index 5530278..c40d990 100644
+index 5530278..0031a8f 100644
 --- a/pass-cli/src/main.rs
 +++ b/pass-cli/src/main.rs
 @@ -40,6 +40,11 @@ mod env_config;
@@ -289,7 +289,7 @@ index 5530278..c40d990 100644
  mod storage;
  mod telemetry;
  mod utils;
-@@ -167,6 +172,47 @@ enum Commands {
+@@ -167,6 +172,53 @@ enum Commands {
          #[command(subcommand)]
          command: commands::share::ShareCommands,
      },
@@ -319,6 +319,12 @@ index 5530278..c40d990 100644
 +        share_id: String,
 +    },
 +    #[cfg(feature = "protonx-desktop")]
++    #[command(name = "native-alias-options", hide = true)]
++    NativeAliasOptions { #[arg(long)] share_id: String },
++    #[cfg(feature = "protonx-desktop")]
++    #[command(name = "native-alias-create", hide = true)]
++    NativeAliasCreate { #[arg(long)] share_id: String },
++    #[cfg(feature = "protonx-desktop")]
 +    #[command(name = "native-edit", hide = true)]
 +    NativeEdit {
 +        #[arg(long)]
@@ -337,7 +343,7 @@ index 5530278..c40d990 100644
      #[command(about = "User operations")]
      User {
          #[command(subcommand)]
-@@ -229,13 +275,41 @@ impl Commands {
+@@ -229,13 +281,41 @@ impl Commands {
  #[tokio::main]
  async fn main() -> Result<()> {
      if let Err(e) = run().await {
@@ -379,7 +385,7 @@ index 5530278..c40d990 100644
          return Err(e);
      }
  
-@@ -245,6 +319,12 @@ async fn main() -> Result<()> {
+@@ -245,6 +325,12 @@ async fn main() -> Result<()> {
  async fn run() -> Result<()> {
      logs::setup_logs();
      let cli = Cli::parse();
@@ -392,7 +398,7 @@ index 5530278..c40d990 100644
  
      if cli.command.is_force_logout() {
          return commands::logout::force_logout().await;
-@@ -260,10 +340,12 @@ async fn run() -> Result<()> {
+@@ -260,10 +346,12 @@ async fn run() -> Result<()> {
  
      // Check for updates in the background (non-blocking, weekly check)
      // This runs for all commands except update itself to avoid recursion
@@ -409,7 +415,7 @@ index 5530278..c40d990 100644
          let _ = commands::update::check_for_updates_background(&base_dir).await;
      }
  
-@@ -275,6 +357,35 @@ async fn run() -> Result<()> {
+@@ -275,6 +363,35 @@ async fn run() -> Result<()> {
      let (client, store) = client::get_client(base_dir.clone(), client_features.clone())
          .await
          .context("Error getting client")?;
@@ -433,7 +439,7 @@ index 5530278..c40d990 100644
 +                println!("{}", serde_json::to_string(&value)?);
 +                return Ok(());
 +            }
-+            Commands::Login { .. } | Commands::NativeCreate { .. } | Commands::NativeEdit { .. } |
++            Commands::Login { .. } | Commands::NativeCreate { .. } | Commands::NativeAliasCreate { .. } | Commands::NativeEdit { .. } |
 +            Commands::Item { command: ItemCommands::Create { .. } | ItemCommands::Update { .. } |
 +                ItemCommands::Trash { .. } | ItemCommands::Untrash { .. } } => {
 +                // An uncertain write must never leave a reusable pre-write cache.
@@ -445,7 +451,7 @@ index 5530278..c40d990 100644
      match &cli.command {
          Commands::Login {
              username,
-@@ -375,6 +486,29 @@ async fn run() -> Result<()> {
+@@ -375,6 +492,33 @@ async fn run() -> Result<()> {
          .await;
  
      match cli.command {
@@ -459,6 +465,10 @@ index 5530278..c40d990 100644
 +        }
 +        #[cfg(feature = "protonx-desktop")]
 +        Commands::NativeCreate { share_id } => native_ui::create(client, share_id).await,
++        #[cfg(feature = "protonx-desktop")]
++        Commands::NativeAliasOptions { share_id } => native_ui::alias_options(client, share_id).await,
++        #[cfg(feature = "protonx-desktop")]
++        Commands::NativeAliasCreate { share_id } => native_ui::alias_create(client, share_id).await,
 +        #[cfg(feature = "protonx-desktop")]
 +        Commands::NativeEdit { share_id, item_id } => {
 +            native_ui::edit(client, share_id, item_id).await
@@ -475,7 +485,7 @@ index 5530278..c40d990 100644
          Commands::Logout { .. } => commands::logout::run(client).await,
          Commands::Info { output } => commands::info::run(client, base_dir, output, store).await,
          Commands::Inject {
-@@ -407,3 +541,177 @@ async fn run() -> Result<()> {
+@@ -407,3 +551,181 @@ async fn run() -> Result<()> {
          _ => Ok(()),
      }
  }
@@ -520,6 +530,8 @@ index 5530278..c40d990 100644
 +            | Self::NativeCacheSnapshot
 +            | Self::NativeCacheDetail { .. }
 +            | Self::NativeCreate { .. }
++            | Self::NativeAliasOptions { .. }
++            | Self::NativeAliasCreate { .. }
 +            | Self::NativeEdit { .. }
 +            | Self::NativeTotp { .. } => true,
 +            _ => false,
@@ -613,6 +625,8 @@ index 5530278..c40d990 100644
 +    fn original_cli_does_not_expose_native_commands() {
 +        assert!(Cli::try_parse_from(["pass-cli", "native-snapshot"]).is_err());
 +        assert!(Cli::try_parse_from(["pass-cli", "native-calendar-handoff"]).is_err());
++        assert!(Cli::try_parse_from(["pass-cli", "native-alias-options", "--share-id", "synthetic"]).is_err());
++        assert!(Cli::try_parse_from(["pass-cli", "native-alias-create", "--share-id", "synthetic"]).is_err());
 +        assert!(
 +            Cli::try_parse_from(["pass-cli", "native-create", "--share-id", "synthetic"]).is_err()
 +        );
@@ -1277,10 +1291,10 @@ index 0000000..e13147f
 +}
 diff --git a/pass-cli/src/native_ui.rs b/pass-cli/src/native_ui.rs
 new file mode 100644
-index 0000000..d7cae6f
+index 0000000..8437aff
 --- /dev/null
 +++ b/pass-cli/src/native_ui.rs
-@@ -0,0 +1,553 @@
+@@ -0,0 +1,569 @@
 +// Copyright (c) 2026 ProtonX contributors. GPL-3.0-or-later.
 +// Native presentation/transport only: all cryptography and writes use Proton's SDK.
 +use crate::helpers::{CliPassClient, PassClientExt};
@@ -1565,6 +1579,22 @@ index 0000000..d7cae6f
 +            "TOTP setup limit reached"
 +        );
 +    }
++    Ok(())
++}
++
++pub async fn alias_options(client: CliPassClient, share_id: String) -> Result<()> {
++    ensure!(!crate::protonx::policy().requires_cli_eligibility, "Native transport required");
++    println!("{}", client.native_alias_options(&ShareId::new(share_id)).await?);
++    Ok(())
++}
++pub async fn alias_create(client: CliPassClient, share_id: String) -> Result<()> {
++    ensure!(!crate::protonx::policy().requires_cli_eligibility, "Native transport required");
++    let mut input = zeroize::Zeroizing::new(String::new());
++    std::io::stdin().take(32769).read_to_string(&mut input)?;
++    ensure!(input.len() <= 32768, "Alias input exceeds bounds");
++    let draft: pass::NativeAliasDraft = serde_json::from_str(&input)?;
++    let result = client.create_native_alias(&ShareId::new(share_id), draft).await?;
++    println!("{}", serde_json::json!({"item_id":result.item_id,"alias":result.alias}));
 +    Ok(())
 +}
 +
@@ -2223,6 +2253,380 @@ index 389475a..2510026 100644
 +        assert!(decrypt_payload(&key, "c2hvcnQ=").is_err());
 +    }
 +}
+diff --git a/pass/src/item/alias/mod.rs b/pass/src/item/alias/mod.rs
+index 867cd26..d012ef3 100644
+--- a/pass/src/item/alias/mod.rs
++++ b/pass/src/item/alias/mod.rs
+@@ -19,3 +19,5 @@
+ 
+ pub mod create;
+ mod options;
++#[cfg(feature = "protonx-native")]
++pub mod native;
+diff --git a/pass/src/item/alias/native.rs b/pass/src/item/alias/native.rs
+new file mode 100644
+index 0000000..765d0d0
+--- /dev/null
++++ b/pass/src/item/alias/native.rs
+@@ -0,0 +1,345 @@
++// Copyright (c) 2026 ProtonX contributors. GPL-3.0-or-later.
++// Desktop adapter for Proton's existing alias endpoint and encrypted item path.
++use super::create::CreatedAliasItem;
++use crate::domain::{AliasItem, ItemContent, ShareId};
++use crate::item::create::common::{CreateItemRequest, CreateItemResponse};
++use crate::permission::PermissionAction;
++use crate::{PassClient, PassClientContext};
++use anyhow::{Result, ensure};
++use muon::POST;
++use serde::{Deserialize, Serialize};
++
++#[derive(Deserialize, Serialize)]
++#[serde(deny_unknown_fields)]
++pub struct NativeAliasDraft {
++    pub title: String,
++    pub note: String,
++    pub prefix: String,
++    pub suffix: String,
++    pub signed_suffix: String,
++    pub mailbox_id: i64,
++}
++impl NativeAliasDraft {
++    pub fn validate(&self) -> Result<()> {
++        ensure!(
++            !self.title.trim().is_empty()
++                && self.title.len() <= 256
++                && !self.title.chars().any(char::is_control),
++            "Invalid alias title"
++        );
++        ensure!(
++            self.note.len() <= 16384 && self.mailbox_id > 0,
++            "Invalid alias details"
++        );
++        proton_pass_common::alias_prefix::validate_alias_prefix(&self.prefix)
++            .map_err(|_| anyhow::anyhow!("Invalid alias prefix"))?;
++        ensure!(
++            !self.signed_suffix.is_empty()
++                && self.signed_suffix.len() <= 8192
++                && !self.signed_suffix.chars().any(char::is_control),
++            "Invalid alias suffix capability"
++        );
++        let email = format!("{}{}", self.prefix, self.suffix);
++        ensure!(
++            valid_email(&email)
++                && self.suffix.len() <= 280
++                && (self.suffix.starts_with('.') || self.suffix.starts_with('@')),
++            "Invalid alias suffix"
++        );
++        Ok(())
++    }
++}
++pub fn valid_email(value: &str) -> bool {
++    value.len() <= 320
++        && !value.chars().any(|c| c.is_whitespace() || c.is_control())
++        && value.split('@').count() == 2
++        && value.split('@').all(|s| !s.is_empty())
++}
++#[derive(Serialize, Deserialize)]
++struct AliasRequest {
++    #[serde(rename = "Prefix")]
++    prefix: String,
++    #[serde(rename = "SignedSuffix")]
++    signed_suffix: String,
++    #[serde(rename = "MailboxIDs")]
++    mailbox_ids: Vec<i64>,
++    #[serde(rename = "Item")]
++    item: CreateItemRequest,
++}
++impl<C: PassClientContext> PassClient<C> {
++    pub async fn native_alias_options(&self, share: &ShareId) -> Result<serde_json::Value> {
++        self.not_personal_access_token_guard()?;
++        self.action_guard(PermissionAction::CreateAlias {
++            share_id: share.clone(),
++        })
++        .await?;
++        let options = self.get_alias_options(share).await?;
++        ensure!(
++            options.suffixes.len() <= 100 && options.mailboxes.len() <= 100,
++            "Alias options exceed bounds"
++        );
++        let suffixes: Vec<_> = options
++            .suffixes
++            .into_iter()
++            .filter(|s| {
++                valid_email(&format!("alias{}", s.suffix))
++                    && (s.suffix.starts_with('.') || s.suffix.starts_with('@'))
++                    && s.suffix.len() <= 280
++                    && !s.signed_suffix.is_empty()
++                    && s.signed_suffix.len() <= 8192
++            })
++            .map(|s| serde_json::json!({"suffix":s.suffix,"signed_suffix":s.signed_suffix}))
++            .collect();
++        let mailboxes: Vec<_> = options
++            .mailboxes
++            .into_iter()
++            .filter(|m| m.id > 0 && valid_email(&m.email))
++            .map(|m| serde_json::json!({"id":m.id,"email":m.email}))
++            .collect();
++        ensure!(
++            !suffixes.is_empty() && !mailboxes.is_empty(),
++            "No alias options available"
++        );
++        Ok(serde_json::json!({"suffixes":suffixes,"mailboxes":mailboxes}))
++    }
++    pub async fn create_native_alias(
++        &self,
++        share: &ShareId,
++        draft: NativeAliasDraft,
++    ) -> Result<CreatedAliasItem> {
++        draft.validate()?;
++        self.not_personal_access_token_guard()?;
++        // Recheck current vault permissions, organization policy and alias quota.
++        self.action_guard(PermissionAction::CreateAlias {
++            share_id: share.clone(),
++        })
++        .await?;
++        let options = self.get_alias_options(share).await?;
++        ensure!(
++            options.mailboxes.iter().any(|m| m.id == draft.mailbox_id),
++            "Alias mailbox is unavailable"
++        );
++        let item = self
++            .create_item_request(
++                share,
++                &draft.title,
++                &draft.note,
++                ItemContent::Alias(AliasItem),
++                None,
++            )
++            .await?;
++        // SignedSuffix is the exact server capability shown in the preview. The
++        // server validates it; fetching a new random suffix must not replace it.
++        let request = AliasRequest {
++            prefix: draft.prefix,
++            signed_suffix: draft.signed_suffix,
++            mailbox_ids: vec![draft.mailbox_id],
++            item,
++        };
++        let response = self
++            .send(POST!("/pass/v1/share/{share}/alias/custom").body_json(request)?)
++            .await?;
++        let response: CreateItemResponse = assert_response!(response);
++        self.clear_items_cache(share).await;
++        let email = response
++            .item
++            .alias_email
++            .ok_or_else(|| anyhow::anyhow!("Missing created alias"))?;
++        ensure!(valid_email(&email), "Invalid created alias");
++        Ok(CreatedAliasItem {
++            alias: email,
++            item_id: crate::domain::ItemId::new(response.item.item_id),
++        })
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    fn draft() -> NativeAliasDraft {
++        NativeAliasDraft {
++            title: "Synthetic shop".into(),
++            note: "Synthetic private note".into(),
++            prefix: "shop".into(),
++            suffix: ".demo@example.invalid".into(),
++            signed_suffix: "original-signed-capability".into(),
++            mailbox_id: 42,
++        }
++    }
++    fn alias_options(api: &crate::test_tools::ProtonAPI) {
++        use crate::test_tools::*;
++        api.handler_with_method(Method::GET,"/pass/v1/share/synthetic/alias/options", |_| success(serde_json::json!({"Options":{"CanCreateAlias":true,"Suffixes":[{"Suffix":".fresh@example.invalid","SignedSuffix":"fresh-capability"}],"Mailboxes":[{"ID":42,"Email":"alex@example.invalid"}]}})));
++    }
++    #[muon_test::test]
++    async fn native_alias_encrypts_title_note_and_uses_exact_selected_capability(
++        server: muon_test::Server,
++    ) {
++        use crate::domain::{
++            ItemData,
++            crypto::{EncryptionTag, decrypt},
++        };
++        use crate::test_tools::*;
++        let (raw, api) = server.client::<()>();
++        let client = make_test_pass_client_with_setup(raw, &api, crate::PlanType::Plus).await;
++        setup_vault_share(&api, "synthetic");
++        setup_share_keys(&api, "synthetic");
++        alias_options(&api);
++        let options = client
++            .native_alias_options(&ShareId::new("synthetic".into()))
++            .await
++            .unwrap();
++        assert_eq!(options["mailboxes"][0]["email"], "alex@example.invalid");
++        // The mock consumes handlers once; creation performs fresh reads.
++        setup_user_access(&api, crate::PlanType::Plus);
++        setup_vault_share(&api, "synthetic");
++        alias_options(&api);
++        let written = api.handler_with_method(Method::POST,"/pass/v1/share/synthetic/alias/custom", |_| success(serde_json::json!({"Item":{"ItemID":"created","Revision":1,"ContentFormatVersion":1,"KeyRotation":1,"Content":"","State":1,"Flags":0,"AliasEmail":"shop.demo@example.invalid","CreateTime":0,"ModifyTime":0}})));
++        let recorder = api.new_recorder();
++        let result = client
++            .create_native_alias(&ShareId::new("synthetic".into()), draft())
++            .await
++            .unwrap();
++        assert_hit!(written);
++        assert_eq!(result.alias, "shop.demo@example.invalid");
++        let request: AliasRequest = last_request!(recorder);
++        assert_eq!(request.prefix, "shop");
++        assert_eq!(request.mailbox_ids, vec![42]);
++        assert_eq!(request.signed_suffix, "original-signed-capability");
++        let key = decrypt(
++            &crate::utils::b64_decode(&request.item.item_key).unwrap(),
++            &TEST_SHARE_KEY,
++            EncryptionTag::ItemKey,
++        )
++        .unwrap();
++        let bytes = decrypt(
++            &crate::utils::b64_decode(&request.item.content).unwrap(),
++            &key,
++            EncryptionTag::ItemContent,
++        )
++        .unwrap();
++        let item = ItemData::deserialize(&bytes).unwrap();
++        assert_eq!(item.title, "Synthetic shop");
++        assert_eq!(item.note, "Synthetic private note");
++        assert!(matches!(item.content, ItemContent::Alias(_)));
++    }
++    #[muon_test::test]
++    async fn native_alias_refuses_mailbox_removed_since_preview(server: muon_test::Server) {
++        use crate::test_tools::*;
++        let (raw, api) = server.client::<()>();
++        let client = make_test_pass_client_with_setup(raw, &api, crate::PlanType::Plus).await;
++        setup_vault_share(&api, "synthetic");
++        alias_options(&api);
++        let written = api.handler_with_method(
++            Method::POST,
++            "/pass/v1/share/synthetic/alias/custom",
++            |_| success_code(),
++        );
++        let mut draft = draft();
++        draft.mailbox_id = 99;
++        assert!(
++            client
++                .create_native_alias(&ShareId::new("synthetic".into()), draft)
++                .await
++                .is_err()
++        );
++        assert_not_hit!(written);
++    }
++    #[muon_test::test]
++    async fn native_alias_preserves_plan_quota_before_options_and_write(server: muon_test::Server) {
++        use crate::test_tools::*;
++        let (raw, api) = server.client::<()>();
++        let client = make_test_pass_client(raw, &api).await;
++        setup_user_access_with_limits(&api, None, Some(0), None, crate::PlanType::Free);
++        setup_vault_share(&api, "synthetic");
++        api.handler_with_method(Method::GET, "/pass/v1/share/synthetic/item", |_| {
++            success(serde_json::json!({"Items":{"RevisionsData":[],"LastToken":null}}))
++        });
++        let options = api.handler_with_method(
++            Method::GET,
++            "/pass/v1/share/synthetic/alias/options",
++            |_| success_code(),
++        );
++        let written = api.handler_with_method(
++            Method::POST,
++            "/pass/v1/share/synthetic/alias/custom",
++            |_| success_code(),
++        );
++        let error = client
++            .create_native_alias(&ShareId::new("synthetic".into()), draft())
++            .await
++            .unwrap_err();
++        assert!(format!("{error:#}").contains("Cannot create a new alias (0/0)"));
++        assert_not_hit!(options);
++        assert_not_hit!(written);
++    }
++    #[test]
++    fn native_alias_input_is_bounded_and_uses_upstream_prefix_rules() {
++        let mut draft = NativeAliasDraft {
++            title: "Synthetic shop".into(),
++            note: "Demo".into(),
++            prefix: "shop".into(),
++            suffix: ".demo@example.invalid".into(),
++            signed_suffix: "synthetic-capability".into(),
++            mailbox_id: 1,
++        };
++        assert!(draft.validate().is_ok());
++        for prefix in ["", ".shop", "shop.", "two..dots", "BAD", "with space"] {
++            draft.prefix = prefix.into();
++            assert!(draft.validate().is_err());
++        }
++        draft.prefix = "shop".into();
++        draft.mailbox_id = 0;
++        assert!(draft.validate().is_err());
++        draft.mailbox_id = 1;
++        draft.note = "a".repeat(16385);
++        assert!(draft.validate().is_err());
++    }
++    #[muon_test::test]
++    async fn native_alias_refuses_readonly_share_before_options_or_write(
++        server: muon_test::Server,
++    ) {
++        use crate::domain::{PermissionFlag, TargetType};
++        use crate::test_tools::*;
++        let (raw, api) = server.client::<()>();
++        let client = make_test_pass_client_with_setup(raw, &api, crate::PlanType::Plus).await;
++        let share = crate::share::list::ShareResponse {
++            share_id: "readonly".into(),
++            address_id: TEST_ADDRESS_ID.into(),
++            vault_id: TEST_VAULT_ID.into(),
++            target_type: TargetType::Vault.value(),
++            target_id: TEST_VAULT_ID.into(),
++            owner: false,
++            permission: PermissionFlag::Read.value(),
++            share_role_id: "3".into(),
++            content: None,
++            content_key_rotation: None,
++            content_format_version: None,
++            expiration_time: None,
++            create_time: 0,
++            group_id: None,
++        };
++        api.handler_with_method(Method::GET, "/pass/v1/share/readonly", move |_| {
++            success(share.clone())
++        });
++        let options =
++            api.handler_with_method(Method::GET, "/pass/v1/share/readonly/alias/options", |_| {
++                success_code()
++            });
++        let write =
++            api.handler_with_method(Method::POST, "/pass/v1/share/readonly/alias/custom", |_| {
++                success_code()
++            });
++        let draft = NativeAliasDraft {
++            title: "Synthetic".into(),
++            note: "".into(),
++            prefix: "shop".into(),
++            suffix: ".demo@example.invalid".into(),
++            signed_suffix: "synthetic".into(),
++            mailbox_id: 1,
++        };
++        let id = ShareId::new("readonly".into());
++        assert!(client.create_native_alias(&id, draft).await.is_err());
++        assert_not_hit!(options);
++        assert_not_hit!(write);
++    }
++}
+diff --git a/pass/src/item/alias/options.rs b/pass/src/item/alias/options.rs
+index 0df6dd1..f8e7222 100644
+--- a/pass/src/item/alias/options.rs
++++ b/pass/src/item/alias/options.rs
+@@ -26,6 +26,8 @@ use muon::GET;
+ pub(crate) struct AliasMailbox {
+     #[serde(rename = "ID")]
+     pub id: i64,
++    #[serde(rename = "Email", default)]
++    pub email: String,
+ }
+ 
+ #[derive(serde::Deserialize)]
 diff --git a/pass/src/item/create/login.rs b/pass/src/item/create/login.rs
 index ea36cc9..f272454 100644
 --- a/pass/src/item/create/login.rs
@@ -2577,10 +2981,19 @@ index 9f348dd..78cf312 100644
          let mut pagination = SincePagination::default();
          loop {
 diff --git a/pass/src/item/mod.rs b/pass/src/item/mod.rs
-index 34f94c4..bcd2159 100644
+index 34f94c4..2900fc3 100644
 --- a/pass/src/item/mod.rs
 +++ b/pass/src/item/mod.rs
-@@ -29,8 +29,15 @@ mod members;
+@@ -18,6 +18,8 @@
+  */
+ 
+ mod alias;
++#[cfg(feature = "protonx-native")]
++pub use alias::native::NativeAliasDraft;
+ pub(crate) mod create;
+ mod delete;
+ mod download_attachment;
+@@ -29,8 +31,15 @@ mod members;
  mod r#move;
  mod move_to_folder;
  mod open;
@@ -2983,10 +3396,10 @@ index 5d3c0db..469d4f1 100644
 +    }
 +}
 diff --git a/pass/src/lib.rs b/pass/src/lib.rs
-index 5a55781..2738aa9 100644
+index 5a55781..89f77ca 100644
 --- a/pass/src/lib.rs
 +++ b/pass/src/lib.rs
-@@ -84,6 +84,10 @@ pub use domain::{ClientFeatures, LocalKeyProvider};
+@@ -84,6 +84,12 @@ pub use domain::{ClientFeatures, LocalKeyProvider};
  pub use error::{AnyhowErrorExt, SessionInvalidatedError};
  pub use first_time_setup::FirstTimeSetupKey;
  pub use folder::create::CreateFolderPayload;
@@ -2994,6 +3407,8 @@ index 5a55781..2738aa9 100644
 +pub use item::NativeRevisionConflict;
 +#[cfg(feature = "protonx-native")]
 +pub use item::NativeOfflineItem;
++#[cfg(feature = "protonx-native")]
++pub use item::NativeAliasDraft;
  pub use item::create::{credit_card, custom, identity, login, note, ssh_key, wifi};
  pub use item::find::FindItemQuery;
  pub use organization::{

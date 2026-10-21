@@ -4,6 +4,10 @@ import ProtonXCore
 struct MailWindow: View {
     @ObservedObject private var store: NativeMailStore
     var isActive: Bool
+    var newAlias: () -> Void
+    @State private var moreExpanded = false
+    @State private var foldersExpanded = false
+    @State private var labelsExpanded = false
     @State private var username = ""
     @State private var password = ""
     @State private var code = ""
@@ -12,7 +16,7 @@ struct MailWindow: View {
     @State private var readerExpanded = false
     @State private var pendingTrash: NativeMailStore.ListActionIntent?
     @FocusState private var focus: String?
-    init(store: NativeMailStore, isActive: Bool = true) { self.store = store; self.isActive = isActive }
+    init(store: NativeMailStore, isActive: Bool = true, newAlias: @escaping () -> Void = {}) { self.store = store; self.isActive = isActive; self.newAlias = newAlias }
     var body: some View {
         Group {
             if store.phase == .open {
@@ -168,24 +172,48 @@ struct MailWindow: View {
         .onChange(of: store.conversationView) { _, _ in store.reconcileSelection(); store.select() }
 
     }
+    private var sidebarSections: MailSidebarSections { MailSidebarSections(store.folders) }
+    private func revealSidebarSelection(_ selected: UInt64?) {
+        if sidebarSections.folders.contains(where: { $0.id == selected }) { foldersExpanded = true }
+        if sidebarSections.more.contains(where: { $0.id == selected }) { moreExpanded = true }
+        if sidebarSections.labels.contains(where: { $0.id == selected }) { labelsExpanded = true }
+    }
+    private func sidebarRow(_ folder: NativeMailFolder) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: folder.isLabel == true ? "tag" : folder.isCustom == true ? "folder" : MailTheme.symbol(for: folder.name)).font(.system(size: 17)).frame(width: 22)
+            Text(folder.name).font(.system(size: 14, weight: store.selectedFolder == folder.id ? .semibold : .regular)).lineLimit(1)
+            Spacer(minLength: 4)
+            if folder.count > 0 {
+                Text(folder.count.formatted()).font(.system(size: 11, weight: .semibold))
+                    .padding(.horizontal, 7).padding(.vertical, 4)
+                    .background(MailTheme.accent.opacity(0.15), in: RoundedRectangle(cornerRadius: 6))
+            }
+        }.padding(.vertical, 8).tag(folder.id)
+    }
     private var mailboxLayout: some View {
         NavigationSplitView {
             List(selection: $store.selectedFolder) {
-                ForEach(store.folders) { folder in
-                    HStack(spacing: 12) {
-                        Image(systemName: MailTheme.symbol(for: folder.name)).font(.system(size: 17)).frame(width: 22)
-                        Text(folder.name).font(.system(size: 14, weight: store.selectedFolder == folder.id ? .semibold : .regular))
-                        Spacer()
-                        if folder.count > 0 {
-                            Text(folder.count.formatted()).font(.system(size: 11, weight: .semibold))
-                                .padding(.horizontal, 7).padding(.vertical, 4)
-                                .background(MailTheme.accent.opacity(0.15), in: RoundedRectangle(cornerRadius: 6))
-                        }
-                    }.padding(.vertical, 8).tag(folder.id)
+                ForEach(sidebarSections.primary) { folder in sidebarRow(folder) }
+                if !sidebarSections.more.isEmpty {
+                    DisclosureGroup(isExpanded: $moreExpanded) {
+                        ForEach(sidebarSections.more) { folder in sidebarRow(folder) }
+                    } label: { Text("More").foregroundStyle(.secondary).padding(.vertical, 7) }
+                    .accessibilityIdentifier("mailMore")
                 }
+                DisclosureGroup(isExpanded: $foldersExpanded) {
+                    if sidebarSections.folders.isEmpty { Text("No folders yet").font(.caption).foregroundStyle(.secondary).padding(.vertical, 8) }
+                    ForEach(sidebarSections.folders) { folder in sidebarRow(folder) }
+                } label: { Text("Folders").foregroundStyle(.secondary).padding(.vertical, 7) }
+                .padding(.top, 16).accessibilityIdentifier("mailFolders")
+                DisclosureGroup(isExpanded: $labelsExpanded) {
+                    if sidebarSections.labels.isEmpty { Text("No labels yet").font(.caption).foregroundStyle(.secondary).padding(.vertical, 8) }
+                    ForEach(sidebarSections.labels) { label in sidebarRow(label) }
+                } label: { Text("Labels").foregroundStyle(.secondary).padding(.vertical, 7) }
+                .accessibilityIdentifier("mailLabels")
             }.disabled(store.busy).listStyle(.sidebar).scrollContentBackground(.hidden).background(MailTheme.sidebar)
                 .navigationSplitViewColumnWidth(min: 190, ideal: 225, max: 290)
-                .onChange(of: store.selectedFolder) { _, _ in store.changeFolder() }
+                .onChange(of: store.selectedFolder) { _, selected in revealSidebarSelection(selected); store.changeFolder() }
+                .onAppear { revealSidebarSelection(store.selectedFolder) }
                 .safeAreaInset(edge: .top, spacing: 0) {
                     VStack(alignment: .leading, spacing: 20) {
                         HStack(spacing: 10) {
@@ -194,6 +222,9 @@ struct MailWindow: View {
                         }
                         Button { store.compose() } label: { Text("New message").frame(maxWidth: .infinity) }
                             .buttonStyle(MailActionStyle(primary: true)).disabled(store.busy || store.draft != nil)
+                        Button(action: newAlias) { Label("New alias…", systemImage: "at.badge.plus").frame(maxWidth: .infinity, alignment: .leading) }
+                            .buttonStyle(.plain).font(.system(size: 13, weight: .medium)).foregroundStyle(MailTheme.accent)
+                            .padding(.horizontal, 10).accessibilityIdentifier("mailNewAlias")
                     }.padding(.horizontal, 16).padding(.top, 18).padding(.bottom, 16).background(MailTheme.sidebar)
                 }
                 .safeAreaInset(edge: .bottom) {

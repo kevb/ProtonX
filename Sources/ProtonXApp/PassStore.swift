@@ -61,6 +61,46 @@ final class PassStore: ObservableObject {
     }
     var writableVaults: [Vault] { vaults.filter { $0.canCreate == true } }
     var canCreate: Bool { !isUsingSavedVault && !mustRefreshBeforeWriting && phase == .open && !busy && !showingTrash && !writableVaults.isEmpty }
+    var canCreateAlias: Bool { !isUsingSavedVault && !mustRefreshBeforeWriting && phase == .open && !busy && !writableVaults.isEmpty }
+    func aliasOptions(vaultID: String) async throws -> PassAliasOptions {
+        guard canCreateAlias, let vault = writableVaults.first(where: { $0.id == vaultID }) else { throw ProtonXError.invalidInput("Unlock Pass and refresh online before creating an alias.") }
+        let captured = epoch.value
+        busy = true; defer { if epoch.accepts(captured) { busy = false } }
+        do {
+            let result = isDemo ? PassAliasOptions(suffixes: [.init(suffix: ".demo@example.invalid", signedSuffix: "synthetic-only")], mailboxes: [.init(id: 1, email: "alex@example.invalid")]) : try await service.aliasOptions(vault: vault)
+            try check(captured); return result
+        } catch { _ = handleSessionFailure(error, captured: captured); throw error }
+    }
+    func createAlias(_ draft: PassAliasDraft, vaultID: String) async throws -> CreatedPassAlias {
+        guard canCreateAlias, let vault = writableVaults.first(where: { $0.id == vaultID }) else { throw ProtonXError.invalidInput("Unlock Pass and refresh online before creating an alias.") }
+        _ = try draft.encodedInput()
+        let captured = epoch.value
+        busy = true; error = nil; defer { if epoch.accepts(captured) { busy = false } }
+        let result: CreatedPassAlias
+        if isDemo {
+            result = CreatedPassAlias(itemID: UUID().uuidString, alias: draft.email)
+            let item = PassItem(itemID: result.itemID, shareID: vault.id, title: draft.title, kind: "alias")
+            items.append(item); demoDetails[item.id] = ItemDetail(title: draft.title, note: draft.note, fields: [SecretField(label: "Alias", value: result.alias, concealed: false)])
+        } else {
+            do { result = try await service.createAlias(draft, vault: vault) }
+            catch {
+                if !handleSessionFailure(error, captured: captured), epoch.accepts(captured) { mustRefreshBeforeWriting = true }
+                throw error
+            }
+            try check(captured)
+            do { try await loadSnapshot() }
+            catch {
+                try check(captured)
+                if handleSessionFailure(error, captured: captured, acknowledgement: "Alias created.") { throw CancellationError() }
+                mustRefreshBeforeWriting = true; self.error = "Alias created. Refresh Pass before making further changes."
+            }
+        }
+        try check(captured); return result
+    }
+    func selectAlias(_ result: CreatedPassAlias, vaultID: String) {
+        guard phase == .open, items.contains(where: { $0.itemID == result.itemID && $0.shareID == vaultID }) else { return }
+        query = ""; kind = "alias"; showingTrash = false; selectedVault = vaultID; selectedItem = vaultID + ":" + result.itemID
+    }
     var canEdit: Bool { !isUsingSavedVault && phase == .open && !busy && !mustRefreshBeforeWriting && !showingTrash && currentItem.map { ["login", "note"].contains($0.kind) } == true && currentVault?.canUpdate == true && (isDemo || detail?.revision != nil) }
     var currentVault: Vault? { guard let item = currentItem else { return nil }; return vaults.first { $0.id == item.shareID } }
     var canTrash: Bool { !isUsingSavedVault && phase == .open && !busy && !mustRefreshBeforeWriting && currentVault?.canTrash == true }

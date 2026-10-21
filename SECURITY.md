@@ -298,6 +298,34 @@ atomically and retains previous bundles. It does not change Keychain ACLs, sessi
 keys or account profiles; stable local signing does not guarantee prompt-free
 Keychain access or notarization.
 
+## Hide-my-email alias creation
+
+Mail and Pass present one native alias sheet, backed exclusively by the Pass
+session. Opening it never transfers Mail credentials or changes the active
+product, Mail draft or Pass selection. A locked Pass account requires its own
+normal local authentication; no Mail-session fallback creates aliases. The
+forwarding mailbox is explicitly displayed from Pass's server-provided options.
+
+The desktop-only helper exposes bounded alias options and one alias creation.
+Titles, notes, prefixes, mailbox IDs and server-signed suffixes travel over private
+stdin/stdout, never command arguments, environment, preferences or logs. The
+preview uses the exact signed suffix supplied by Proton; a fresh options read
+must not silently substitute a different random address. Proton's SDK rechecks
+vault permissions, organization restrictions and alias quota, verifies the selected
+mailbox is still offered, encrypts the alias item's title/note and submits the
+existing single-alias endpoint. Proton validates the signed suffix and server
+limits. No SimpleLogin token store or direct Swift API client is added.
+
+Creation invalidates the saved-vault generation before network access. An
+unconfirmed result blocks writes until an authoritative refresh and is never
+automatically repeated. An acknowledged creation with a failed refresh stays a
+successful creation and is not offered again. Lock/dismissal cancels work; session
+epochs and cancellation checks reject late results before display or clipboard
+copy. Only a confirmed address is copied, using the existing 30-second owned
+clipboard lease. Preview/demo creation stays in memory and never writes to the
+system clipboard or contacts a service. Alias management, disabling, mailbox/domain
+administration and sending as an alias are outside this operation.
+
 ## Suite workspace navigation
 
 One native window hosts lazy Pass, Mail and Calendar workspaces. A product switch keeps

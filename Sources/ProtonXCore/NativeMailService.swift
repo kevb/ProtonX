@@ -4,13 +4,15 @@ import Darwin
 public enum NativeMailPhase: String, Codable, Sendable {
     case welcome, locked, connected, totp, mailboxPassword = "mailbox_password", securityKey = "security_key"
 }
-public enum NativeMailFolderKind: String, Codable, Sendable { case inbox, sent, drafts, pending, archive, spam, trash, other }
+public enum NativeMailFolderKind: String, Codable, Sendable { case inbox, sent, drafts, starred, pending, archive, spam, trash, other }
 public struct NativeMailFolder: Codable, Identifiable, Equatable, Sendable {
     public let id: UInt64
     public let name: String
     public let count: UInt64
     public let kind: NativeMailFolderKind?
-    public init(id: UInt64, name: String, count: UInt64 = 0, kind: NativeMailFolderKind? = nil) { self.id = id; self.name = name; self.count = count; self.kind = kind }
+    public let isCustom: Bool?
+    public let isLabel: Bool?
+    public init(id: UInt64, name: String, count: UInt64 = 0, kind: NativeMailFolderKind? = nil, isCustom: Bool? = nil, isLabel: Bool? = nil) { self.id = id; self.name = name; self.count = count; self.kind = kind; self.isCustom = isCustom; self.isLabel = isLabel }
 }
 public struct NativeMailMessage: Codable, Identifiable, Equatable, Sendable {
     public let id: UInt64
