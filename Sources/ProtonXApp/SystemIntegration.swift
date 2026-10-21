@@ -25,7 +25,10 @@ final class SystemIntegration: NSObject {
     var openCalendar: (() -> Void)? = { ProductWindows.shared.open(.calendar) }
     var openSettings: (() -> Void)?
     var lockSuite: (() -> Void)?
-    var lockSuiteForInactivity: (() -> Void)?
+    var lockSuiteAutomatically: (() -> Void)?
+    var suspendAuthentication: ((Bool) -> Void)?
+    enum SystemLockReason: CaseIterable { case sleep, displaySleep, sessionInactive, screenLocked }
+    private var systemLocks: Set<SystemLockReason> = []
     private var statusItem: NSStatusItem?
     private var monitors: [Any] = []
     private var localMonitor: Any?
@@ -42,14 +45,24 @@ final class SystemIntegration: NSObject {
         localMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .leftMouseDown, .rightMouseDown, .scrollWheel, .leftMouseDragged]) { [weak self] event in
             MainActor.assumeIsolated { self?.lastActivity = ProcessInfo.processInfo.systemUptime }; return event
         }
-        for name in [NSWorkspace.willSleepNotification, NSWorkspace.screensDidSleepNotification, NSWorkspace.sessionDidResignActiveNotification] {
+        let workspaceEvents: [(Notification.Name, SystemLockReason, Bool)] = [
+            (NSWorkspace.willSleepNotification, .sleep, true),
+            (NSWorkspace.didWakeNotification, .sleep, false),
+            (NSWorkspace.screensDidSleepNotification, .displaySleep, true),
+            (NSWorkspace.screensDidWakeNotification, .displaySleep, false),
+            (NSWorkspace.sessionDidResignActiveNotification, .sessionInactive, true),
+            (NSWorkspace.sessionDidBecomeActiveNotification, .sessionInactive, false)
+        ]
+        for (name, reason, locked) in workspaceEvents {
             monitors.append(NSWorkspace.shared.notificationCenter.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.lockSuite?() }
+                MainActor.assumeIsolated { self?.updateSystemLock(reason, locked: locked) }
             })
         }
-        monitors.append(DistributedNotificationCenter.default().addObserver(forName: Notification.Name("com.apple.screenIsLocked"), object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.lockSuite?() }
-        })
+        for (name, locked) in [("com.apple.screenIsLocked", true), ("com.apple.screenIsUnlocked", false)] {
+            monitors.append(DistributedNotificationCenter.default().addObserver(forName: Notification.Name(name), object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.updateSystemLock(.screenLocked, locked: locked) }
+            })
+        }
         timer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
@@ -58,9 +71,22 @@ final class SystemIntegration: NSObject {
             }
         }
     }
+    func updateSystemLock(_ reason: SystemLockReason, locked: Bool) {
+        if locked {
+            guard systemLocks.insert(reason).inserted else { return }
+            // Block evaluation before clearing stores/arming their next attempt.
+            suspendAuthentication?(true)
+            (lockSuiteAutomatically ?? lockSuite)?()
+        } else {
+            guard systemLocks.remove(reason) != nil, systemLocks.isEmpty else { return }
+            // Wake, screen unlock and session activation can arrive independently.
+            // Resume only after every observed lock reason has cleared.
+            suspendAuthentication?(false)
+        }
+    }
     func checkInactivity(at uptime: TimeInterval, timeout: TimeInterval) {
         guard uptime - lastActivity >= timeout else { return }
-        (lockSuiteForInactivity ?? lockSuite)?()
+        (lockSuiteAutomatically ?? lockSuite)?()
         lastActivity = uptime
     }
     func updateMenuBar() {

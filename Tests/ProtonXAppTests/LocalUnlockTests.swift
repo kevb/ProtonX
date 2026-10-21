@@ -151,3 +151,30 @@ private actor AuthenticationReplyGate {
         #expect(bitmap.pixelsWide > 0); #expect(bitmap.pixelsHigh > 0)
     }
 }
+
+@Test @MainActor func systemSleepBlocksEvaluationWithoutConsumingThePreparedAttempt() async throws {
+    var evaluations = 0
+    let authentication = LocalUnlockAuthentication(evaluate: { evaluations += 1; return true }, supportsTouchID: true)
+    authentication.cancel(); authentication.systemSuspended = true; authentication.arm()
+    let prepared = authentication.context
+    #expect(!authentication.consumeAutomaticAttempt(visible: true, foreground: true, attached: true, busy: false))
+    #expect(!(try await authentication.authenticate(.touchID, reason: "Synthetic sleep")))
+    #expect(!(try await authentication.authenticate(.system, reason: "Synthetic sleep")))
+    #expect(evaluations == 0 && authentication.automaticAttemptAllowed)
+    authentication.systemSuspended = false
+    #expect(authentication.context === prepared)
+    #expect(!authentication.consumeAutomaticAttempt(visible: true, foreground: false, attached: true, busy: false))
+    #expect(authentication.consumeAutomaticAttempt(visible: true, foreground: true, attached: true, busy: false))
+    #expect(try await authentication.authenticate(.touchID, reason: "Synthetic return"))
+    #expect(evaluations == 1)
+}
+
+@Test @MainActor func explicitCancelDuringSleepRemainsCancelledAfterWake() {
+    let authentication = LocalUnlockAuthentication(evaluate: { true }, supportsTouchID: true)
+    authentication.systemSuspended = true; authentication.arm(); authentication.cancel()
+    authentication.systemSuspended = false
+    authentication.updateForeground(active: false, visible: true, cancel: { authentication.cancel() })
+    authentication.updateForeground(active: true, visible: true, cancel: { authentication.cancel() })
+    #expect(authentication.state == .cancelled && !authentication.automaticAttemptAllowed)
+    #expect(!authentication.consumeAutomaticAttempt(visible: true, foreground: true, attached: true, busy: false))
+}

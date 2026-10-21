@@ -84,7 +84,7 @@ import ProtonXCore
         let suite = SuiteWorkspace(previewOnly:true, initialProduct:.mail,
                                    makePass:{ let pass = PassStore(previewOnly:true); pass.enterDemo(); return pass })
         suite.mail!.compose(); suite.mail!.editorState!.text = "SYNTHETIC unsaved"
-        suite.select(.pass); suite.lock(forInactivity:true)
+        suite.select(.pass); suite.lock(forAutomaticLock:true)
         #expect(suite.mail?.draft == nil && suite.mail?.editorState == nil)
         #expect(suite.pass?.detail == nil && suite.pass?.items.isEmpty == true)
         #expect(suite.mail?.localAuthentication.automaticAttemptAllowed == false)
@@ -94,7 +94,7 @@ import ProtonXCore
         // No configure(): no event monitors, timers, menu item or account operations.
         let integration = SystemIntegration()
         var automaticLocks = 0, manualLocks = 0
-        integration.lockSuiteForInactivity = { automaticLocks += 1 }
+        integration.lockSuiteAutomatically = { automaticLocks += 1 }
         integration.lockSuite = { manualLocks += 1 }
         let now = ProcessInfo.processInfo.systemUptime
         integration.checkInactivity(at:now,timeout:300)
@@ -104,9 +104,40 @@ import ProtonXCore
         #expect(automaticLocks == 1 && manualLocks == 0)
         integration.checkInactivity(at:now+602,timeout:300)
         #expect(automaticLocks == 2 && manualLocks == 0)
-        integration.lockSuiteForInactivity = nil
+        integration.lockSuiteAutomatically = nil
         integration.checkInactivity(at:now+903,timeout:300)
         #expect(manualLocks == 1)
+    }
+    @Test func overlappingSystemLocksSuspendBeforeLockingAndWaitForEveryResume() {
+        let integration = SystemIntegration()
+        var events: [String] = []
+        integration.suspendAuthentication = { events.append($0 ? "suspend" : "resume") }
+        integration.lockSuiteAutomatically = { events.append("automatic") }
+        integration.lockSuite = { events.append("manual") }
+        for reason in SystemIntegration.SystemLockReason.allCases {
+            integration.updateSystemLock(reason, locked: true)
+            integration.updateSystemLock(reason, locked: true)
+        }
+        #expect(events == Array(repeating: ["suspend", "automatic"], count: 4).flatMap { $0 })
+        for reason in [SystemIntegration.SystemLockReason.sleep, .displaySleep, .sessionInactive] {
+            integration.updateSystemLock(reason, locked: false)
+        }
+        #expect(events.last == "automatic")
+        integration.updateSystemLock(.screenLocked, locked: false)
+        integration.updateSystemLock(.screenLocked, locked: false)
+        #expect(events.last == "resume" && events.filter { $0 == "resume" }.count == 1)
+    }
+    @Test func lazyProductsInheritSystemSuspensionAndManualLockSurvivesResume() {
+        let suite = SuiteWorkspace(defaults: isolatedDefaults(), previewOnly: true)
+        suite.suspendAuthentication(true)
+        for product in [ProductRoute.pass, .mail, .calendar] { suite.select(product) }
+        #expect(suite.pass?.localAuthentication.systemSuspended == true)
+        #expect(suite.mail?.localAuthentication.systemSuspended == true)
+        #expect(suite.calendar?.localAuthentication.systemSuspended == true)
+        suite.lock(); suite.suspendAuthentication(false)
+        #expect(suite.pass?.localAuthentication.automaticAttemptAllowed == false)
+        #expect(suite.mail?.localAuthentication.automaticAttemptAllowed == false)
+        #expect(suite.calendar?.localAuthentication.automaticAttemptAllowed == false)
     }
     @Test func quickAccessRequestSurvivesLazyOpeningAndCancelsOnSwitchOrLock() {
         let suite = SuiteWorkspace(defaults: isolatedDefaults(), previewOnly: true)

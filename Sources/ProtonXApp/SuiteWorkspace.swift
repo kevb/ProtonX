@@ -19,6 +19,7 @@ import ProtonXCore
     private let makeMail: () -> NativeMailStore
     private let makeCalendar: () -> CalendarStore
     private let makeNotificationsAvailable: Bool
+    private var systemAuthenticationSuspended = false
     private var waitingForAccount: ProductRoute?
     private var returnToContacts = false
     private var returnToCalendarFrom: ProductRoute?
@@ -62,7 +63,7 @@ import ProtonXCore
     func openAlias() {
         guard selected == .mail ? mail?.phase == .open : selected == .pass && pass?.phase == .open else { return }
         if pass == nil {
-            let store = makePass(); pass = store
+            let store = makePass(); store.localAuthentication.systemSuspended = systemAuthenticationSuspended; pass = store
             store.objectWillChange.sink { [weak self] _ in self?.productChanged() }.store(in: &observations)
         }
         if pass?.phase == .locked { pass?.localAuthentication.arm() }
@@ -87,16 +88,16 @@ import ProtonXCore
         }
         if product != .pass { passSearchRequested = false }
         if product == .pass && pass == nil {
-            let store = makePass(); pass = store
+            let store = makePass(); store.localAuthentication.systemSuspended = systemAuthenticationSuspended; pass = store
             store.objectWillChange.sink { [weak self] _ in self?.productChanged() }.store(in: &observations)
         }
         if (product == .mail || product == .contacts) && mail == nil {
-            let store = makeMail(); mail = store
+            let store = makeMail(); store.localAuthentication.systemSuspended = systemAuthenticationSuspended; mail = store
             if !previewOnly, makeNotificationsAvailable { store.configureNotifications(NativeNotifications.shared) }
             store.objectWillChange.sink { [weak self] _ in self?.productChanged() }.store(in: &observations)
         }
         if product == .calendar && calendar == nil {
-            let store = makeCalendar(); calendar = store
+            let store = makeCalendar(); store.localAuthentication.systemSuspended = systemAuthenticationSuspended; calendar = store
             store.objectWillChange.sink { [weak self] _ in self?.productChanged() }.store(in: &observations)
         }
         selected = product
@@ -131,7 +132,7 @@ import ProtonXCore
     private func prepareAccountSources() {
         // Saved-state hints may construct a locked view, never read credentials or restore.
         if mail == nil && defaults.bool(forKey:"nativeMailConnected") {
-            let store = makeMail(); mail = store
+            let store = makeMail(); store.localAuthentication.systemSuspended = systemAuthenticationSuspended; mail = store
             if makeNotificationsAvailable { store.configureNotifications(NativeNotifications.shared) }
             store.objectWillChange.sink { [weak self] _ in self?.productChanged() }.store(in:&observations)
         }
@@ -190,28 +191,34 @@ import ProtonXCore
             }
         }
     }
-    func lock(forInactivity: Bool = false) {
+    func suspendAuthentication(_ suspended: Bool) {
+        systemAuthenticationSuspended = suspended
+        pass?.localAuthentication.systemSuspended = suspended
+        mail?.localAuthentication.systemSuspended = suspended
+        calendar?.localAuthentication.systemSuspended = suspended
+    }
+    func lock(forAutomaticLock: Bool = false) {
         if showingAlias { closeAlias() }
         returnToContacts = false
         waitingForAccount = nil; returnToCalendarFrom = nil; accountSourceIsValid = nil
         passSearchRequested = false
-        // Repeated idle ticks must leave already-locked products alone: otherwise
-        // they would disarm a pending return-to-window attempt or undo user Cancel.
-        if let pass, !forInactivity || pass.phase == .open || pass.busy {
-            let rearm = forInactivity && !pass.previewOnly && !pass.isDemo &&
-                (pass.phase == .open || pass.localAuthentication.state == .authenticating)
+        // Repeated automatic locks must leave already-locked products alone: otherwise
+        // overlapping sleep/lock events could disarm the pending attempt or undo Cancel.
+        if let pass, !forAutomaticLock || pass.phase == .open || pass.busy {
+            let rearm = forAutomaticLock && !pass.previewOnly && !pass.isDemo &&
+                (pass.phase == .open || (pass.localAuthentication.state == .authenticating && pass.localAuthentication.mode == .touchID))
             pass.lock()
             if rearm, pass.phase == .locked { pass.localAuthentication.arm() }
         }
-        if let mail, !forInactivity || (mail.phase != .locked && mail.phase != .welcome) || mail.busy {
-            let rearm = forInactivity && !mail.previewOnly && !mail.demo &&
-                (mail.phase == .open || mail.localAuthentication.state == .authenticating)
+        if let mail, !forAutomaticLock || (mail.phase != .locked && mail.phase != .welcome) || mail.busy {
+            let rearm = forAutomaticLock && !mail.previewOnly && !mail.demo &&
+                (mail.phase == .open || (mail.localAuthentication.state == .authenticating && mail.localAuthentication.mode == .touchID))
             mail.lock()
             if rearm, mail.phase == .locked { mail.localAuthentication.arm() }
         }
-        if let calendar, !forInactivity || (calendar.phase != .locked && calendar.phase != .welcome) || calendar.busy {
-            let rearm = forInactivity && !calendar.previewOnly &&
-                (calendar.phase == .connected || calendar.localAuthentication.state == .authenticating)
+        if let calendar, !forAutomaticLock || (calendar.phase != .locked && calendar.phase != .welcome) || calendar.busy {
+            let rearm = forAutomaticLock && !calendar.previewOnly &&
+                (calendar.phase == .connected || (calendar.localAuthentication.state == .authenticating && calendar.localAuthentication.mode == .touchID))
             calendar.lock()
             if rearm, calendar.phase == .locked { calendar.localAuthentication.arm() }
         }
@@ -326,7 +333,8 @@ struct SuiteWindow: View {
                 if let target { workspace.mail?.openNotification(folder: target.folder, item: target.item) }
             }
             SystemIntegration.shared.lockSuite = { workspace.lock() }
-            SystemIntegration.shared.lockSuiteForInactivity = { workspace.lock(forInactivity: true) }
+            SystemIntegration.shared.suspendAuthentication = { workspace.suspendAuthentication($0) }
+            SystemIntegration.shared.lockSuiteAutomatically = { workspace.lock(forAutomaticLock: true) }
             SystemIntegration.shared.openSettings = { openSettings(); NSApp.activate(ignoringOtherApps: true) }
             SystemIntegration.shared.configure()
         }

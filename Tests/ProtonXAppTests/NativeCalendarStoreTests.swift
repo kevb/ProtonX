@@ -66,19 +66,26 @@ private actor CalendarRunnerFixture: NativeCalendarRunning {
         s.signIn(username:"synthetic@example.com",password:"synthetic");s.unlock();s.submitChallenge("123456")
         #expect(await runner.calls.isEmpty && s.phase == .preview)
     }
-    @Test func idleLockArmsCalendarReturnButRepeatedIdleAndManualLockCannotRetry() async throws {
+    @Test(arguments: [false, true]) func idleLockArmsCalendarReturnButRepeatedIdleAndManualLockCannotRetry(_ systemLock: Bool) async throws {
         let runner = CalendarRunnerFixture(), s = store(runner)
         s.signIn(username:"synthetic@example.com",password:"synthetic"); try await wait { !s.busy }
         #expect(s.phase == .connected)
         let workspace = SuiteWorkspace(previewOnly:true,initialProduct:.calendar,makeCalendar:{ s })
+        let integration = SystemIntegration()
+        integration.suspendAuthentication = { workspace.suspendAuthentication($0) }
+        integration.lockSuiteAutomatically = { workspace.lock(forAutomaticLock: true) }
+        let automaticLock = {
+            if systemLock { integration.updateSystemLock(.screenLocked, locked: true); integration.updateSystemLock(.screenLocked, locked: false) }
+            else { workspace.lock(forAutomaticLock: true) }
+        }
         let calls = await runner.calls
-        workspace.lock(forInactivity:true)
+        automaticLock()
         #expect(s.phase == .locked && s.events.isEmpty && s.calendars.isEmpty && s.editor == nil)
         #expect(s.localAuthentication.state == .ready && s.localAuthentication.automaticAttemptAllowed)
         let armed = s.localAuthentication.context
-        workspace.lock(forInactivity:true)
+        automaticLock()
         #expect(s.localAuthentication.context === armed && s.localAuthentication.automaticAttemptAllowed)
-        workspace.lock(); workspace.lock(forInactivity:true)
+        workspace.lock(); automaticLock()
         #expect(s.localAuthentication.state == .cancelled && !s.localAuthentication.automaticAttemptAllowed)
         #expect(await runner.calls == calls)
     }

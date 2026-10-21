@@ -175,21 +175,28 @@ private func syntheticSession() throws -> URL {
     restarted.lock()
 }
 
-@Test @MainActor func passIdleLockArmsReturnWithoutOpeningHelperOrUndoingCancel() async throws {
+@Test(arguments: [false, true]) @MainActor func passIdleLockArmsReturnWithoutOpeningHelperOrUndoingCancel(_ systemLock: Bool) async throws {
     let root = try syntheticSession(); defer { try? FileManager.default.removeItem(at: root) }
     let runner = RecoveryRunner([
         .init(method: "native-cache-snapshot", response: "null"), .init(method: "native-snapshot", response: recoverySnapshot())])
     let store = PassStore(service: PassService(runner: runner), sessionDirectory: root, previewOnly: false, localUnlock: { true })
     let workspace = SuiteWorkspace(previewOnly: true, initialProduct: .pass, makePass: { store })
+    let integration = SystemIntegration()
+    integration.suspendAuthentication = { workspace.suspendAuthentication($0) }
+    integration.lockSuiteAutomatically = { workspace.lock(forAutomaticLock: true) }
+    let automaticLock = {
+        if systemLock { integration.updateSystemLock(.screenLocked, locked: true); integration.updateSystemLock(.screenLocked, locked: false) }
+        else { workspace.lock(forAutomaticLock: true) }
+    }
     store.unlock(); await waitForPass { !store.busy }
     #expect(store.phase == .open)
-    workspace.lock(forInactivity: true)
+    automaticLock()
     #expect(store.phase == .locked && store.items.isEmpty && store.detail == nil)
     #expect(store.localAuthentication.state == .ready && store.localAuthentication.automaticAttemptAllowed)
     let armed = store.localAuthentication.context
-    workspace.lock(forInactivity: true)
+    automaticLock()
     #expect(store.localAuthentication.context === armed && store.localAuthentication.automaticAttemptAllowed)
-    store.localAuthentication.cancel(); workspace.lock(forInactivity: true)
+    store.localAuthentication.cancel(); automaticLock()
     #expect(!store.localAuthentication.automaticAttemptAllowed)
     #expect(runner.calls == ["native-cache-snapshot", "native-snapshot"])
     workspace.lock()

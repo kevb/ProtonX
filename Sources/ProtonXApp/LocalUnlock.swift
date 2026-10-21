@@ -11,6 +11,7 @@ import ProtonXCore
     enum State { case ready, authenticating, authenticated, cancelled, failed }
     @Published private(set) var context = LAContext()
     @Published private(set) var state: State = .ready
+    @Published var systemSuspended = false
     private(set) var mode: Mode = .touchID
     private(set) var automaticAttemptAllowed = true
     private var foreground = false
@@ -45,12 +46,12 @@ import ProtonXCore
     }
     func disarmInterruptedRetry() { retryOnForegroundReturn = false }
     func consumeAutomaticAttempt(visible: Bool, foreground: Bool, attached: Bool, busy: Bool) -> Bool {
-        guard automaticAttemptAllowed, supportsTouchID, visible, foreground, attached, !busy, state == .ready else { return false }
+        guard !systemSuspended, automaticAttemptAllowed, supportsTouchID, visible, foreground, attached, !busy, state == .ready else { return false }
         automaticAttemptAllowed = false
         return true
     }
     func authenticate(_ mode: Mode, reason: String) async throws -> Bool {
-        guard state != .authenticating else { return false }
+        guard !systemSuspended, state != .authenticating else { return false }
         automaticAttemptAllowed = false; retryOnForegroundReturn = false; self.mode = mode
         // Password fallback must use a context that isn't paired with an embedded view.
         let current = mode == .touchID ? context : LAContext()
@@ -166,6 +167,7 @@ struct LocalUnlockCard: View {
                     if authentication.state == .authenticating { cancel() }
                 }
             }
+            .onChange(of: authentication.systemSuspended) { _, _ in attemptAutomatically() }
             .onChange(of: busy) { _, _ in attemptAutomatically() }
             .onDisappear {
                 authentication.disarmInterruptedRetry()

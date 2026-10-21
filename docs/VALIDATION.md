@@ -5,6 +5,25 @@ macOS 26.6.2, Xcode 27 / Swift 6.4 and Rust 1.99.0. Automated test content is
 synthetic and uses isolated storage. Private account contents and credentials
 are excluded from public artifacts.
 
+## Touch ID after sleep and screen/session lock — 2026-10-21
+
+- All 283 Swift tests in 23 suites passed. Synthetic product fixtures cover Pass,
+  Mail and Calendar through both inactivity and system-triggered lock paths:
+  visible contents clear, a fresh biometric attempt is prepared, repeated locks
+  preserve it, and explicit cancellation/manual lock stays disarmed.
+- Additional contracts cover overlapping sleep/display/session/screen locks,
+  suspension before product cleanup, resumption only after every observed lock
+  reason clears, lazy product creation while suspended, and foreground/attachment
+  gates. Suspended authentication cannot consume a prepared attempt or invoke
+  the injected evaluator. Password fallback is not automatically retried, and a
+  late successful authentication cannot reopen Mail or start its helper.
+- Pinned desktop, Mail privacy/notification and Calendar protocol contracts
+  passed. The signed release app was built using the existing unchanged helpers;
+  strict nested code-signature verification passed.
+- Real sleep/wake notification delivery and physical Touch ID acceptance remain
+  interactive checks on the installed app; automated tests inject events and
+  authentication results and never access a real account or Keychain item.
+
 ## Calendar editor validation feedback — 2026-10-09
 
 - All 44 selected Swift Calendar contracts passed. A regression reproduces a

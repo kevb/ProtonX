@@ -65,12 +65,17 @@ include passwords, tokens, real message bodies or vault exports in public issues
   attempt requires a visible locked product, its attached native view and an active
   key window. No biometric data is available to ProtonX. Password fallback uses a
   separate context and the standard `deviceOwnerAuthentication` dialog. User
-  cancellation or explicit lock disarms automatic retries. Inactivity locks clear
-  product contents and cancel operations as usual, then prepare a fresh Touch ID
+  cancellation or explicit lock disarms automatic retries. Automatic locks (inactivity,
+  sleep and screen/session lock) clear product contents and cancel operations as
+  usual, then prepare a fresh Touch ID
   context for a previously open product. Evaluation still waits for its selected,
-  attached foreground view. Repeated inactivity ticks leave locked products alone,
-  preserving both that pending attempt and explicit user cancellation. Sleep,
-  screen/session lock, window close and Quit retain their disarmed lock behavior.
+  attached foreground view. Repeated automatic lock notifications leave locked
+  products alone,
+  preserving both that pending attempt and explicit user cancellation. Sleep, display
+  sleep, screen lock and inactive-session notifications block evaluation until all
+  observed conditions have cleared; evaluation still requires the selected active
+  key window. Password fallback is not automatically retried after interruption.
+  Manual lock, window close and Quit retain their disarmed lock behavior.
   A Touch ID attempt
   interrupted by loss of window/app focus is cancelled, including its restore epoch,
   then rearmed with a fresh context on foreground return. A system-cancelled biometric

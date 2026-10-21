@@ -101,32 +101,66 @@ private let mailSnapshot = NativeMailResult(folders: [NativeMailFolder(id: 1, na
     #expect(store.phase == .locked); #expect(runner.calls.isEmpty); #expect(store.error == nil)
 }
 
-@Test @MainActor func mailIdleLockPreparesFingerprintReturnAndPreservesCancellationAcrossIdleTicks() async {
+@Test(arguments: [false, true]) @MainActor func mailIdleLockPreparesFingerprintReturnAndPreservesCancellationAcrossIdleTicks(_ systemLock: Bool) async {
     let runner = SyntheticMailRunner([
         .init(method: "restore", result: .init(phase: .connected)), .init(method: "snapshot", result: mailSnapshot),
         .init(method: "restore", result: .init(phase: .connected)), .init(method: "snapshot", result: mailSnapshot)
     ])
     let store = mailStore(runner, saved: true)
     let workspace = SuiteWorkspace(previewOnly: true, initialProduct: .mail, makeMail: { store })
+    let integration = SystemIntegration()
+    integration.suspendAuthentication = { workspace.suspendAuthentication($0) }
+    integration.lockSuiteAutomatically = { workspace.lock(forAutomaticLock: true) }
+    let automaticLock = {
+        if systemLock { integration.updateSystemLock(.screenLocked, locked: true); integration.updateSystemLock(.screenLocked, locked: false) }
+        else { workspace.lock(forAutomaticLock: true) }
+    }
     store.unlock(); await waitForMail { !store.busy }
     #expect(store.phase == .open && store.localAuthentication.state == .authenticated)
     let previous = store.localAuthentication.context
-    workspace.lock(forInactivity: true)
+    automaticLock()
     #expect(store.phase == .locked && store.messages.isEmpty && store.body == nil)
     #expect(store.localAuthentication.context !== previous)
     #expect(store.localAuthentication.state == .ready && store.localAuthentication.automaticAttemptAllowed)
     let armed = store.localAuthentication.context
-    workspace.lock(forInactivity: true)
+    automaticLock()
     #expect(store.localAuthentication.context === armed && store.localAuthentication.automaticAttemptAllowed)
     #expect(runner.calls == ["restore", "snapshot"])
     store.localAuthentication.cancel()
-    workspace.lock(forInactivity: true)
+    automaticLock()
     #expect(store.localAuthentication.state == .cancelled && !store.localAuthentication.automaticAttemptAllowed)
     store.unlock(); await waitForMail { !store.busy }
     #expect(store.phase == .open)
-    workspace.lock(); workspace.lock(forInactivity: true)
+    workspace.lock(); automaticLock()
     #expect(store.phase == .locked && !store.localAuthentication.automaticAttemptAllowed)
     #expect(runner.calls == ["restore", "snapshot", "restore", "snapshot"])
+}
+
+@Test(arguments: [LocalUnlockAuthentication.Mode.touchID, .system]) @MainActor
+func mailSystemLockRejectsLateAuthenticationAndOnlyPreparesBiometricRetry(_ mode: LocalUnlockAuthentication.Mode) async {
+    let gate = MailReplyGate(), runner = SyntheticMailRunner([])
+    let store = mailStore(runner, saved: true, unlock: { await gate.wait(); return true })
+    let workspace = SuiteWorkspace(previewOnly: true, initialProduct: .mail, makeMail: { store })
+    let integration = SystemIntegration()
+    integration.suspendAuthentication = { workspace.suspendAuthentication($0) }
+    integration.lockSuiteAutomatically = { workspace.lock(forAutomaticLock: true) }
+    store.unlock(mode: mode)
+    await waitForMail { store.localAuthentication.state == .authenticating }
+    integration.updateSystemLock(.displaySleep, locked: true)
+    integration.updateSystemLock(.screenLocked, locked: true)
+    #expect(store.phase == .locked && store.localAuthentication.systemSuspended)
+    let prepared = store.localAuthentication.context
+    #expect(store.localAuthentication.automaticAttemptAllowed == (mode == .touchID))
+    integration.updateSystemLock(.displaySleep, locked: false)
+    #expect(store.localAuthentication.systemSuspended)
+    integration.updateSystemLock(.screenLocked, locked: false)
+    #expect(!store.localAuthentication.systemSuspended)
+    await gate.release()
+    // Drain the cancelled operation, including its stale success callback.
+    for _ in 0..<30 { await Task.yield() }
+    #expect(store.phase == .locked && store.messages.isEmpty && runner.calls.isEmpty)
+    #expect(store.localAuthentication.context === prepared)
+    #expect(store.localAuthentication.automaticAttemptAllowed == (mode == .touchID))
 }
 
 @Test @MainActor func mailInitialLoadAndFailureAreNotPresentedAsEmptyFolders() async {
