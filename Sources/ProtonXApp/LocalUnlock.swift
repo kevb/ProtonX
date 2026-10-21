@@ -112,12 +112,12 @@ struct LocalUnlockCard: View {
                 RoundedRectangle(cornerRadius: 30).fill(PassTheme.accent.opacity(0.09))
                 RoundedRectangle(cornerRadius: 30).strokeBorder(PassTheme.accent.opacity(0.16), lineWidth: 1)
                 if authentication.supportsTouchID {
-                    EmbeddedAuthenticationView(context: authentication.context) { context, active in
-                        guard context === authentication.context else { return }
+                    EmbeddedAuthenticationView(context: authentication.context, enabled: isActive) { context, active in
+                        guard isActive, context === authentication.context else { return }
                         attachedContext = context; foreground = active
                         authentication.updateForeground(active: active, visible: isActive, cancel: cancel)
                         attemptAutomatically()
-                    }.id(ObjectIdentifier(authentication.context)).frame(width: 64, height: 64)
+                    }.frame(width: 64, height: 64)
                     if authentication.state != .authenticating {
                         Image(systemName: authentication.state == .authenticated ? "checkmark.shield" : "touchid")
                             .font(.system(size: 48, weight: .light)).foregroundStyle(PassTheme.accent).accessibilityHidden(true)
@@ -163,6 +163,7 @@ struct LocalUnlockCard: View {
             .onChange(of: isActive) { _, active in
                 if active { attemptAutomatically() }
                 else {
+                    attachedContext = nil; foreground = false
                     authentication.disarmInterruptedRetry()
                     if authentication.state == .authenticating { cancel() }
                 }
@@ -188,38 +189,87 @@ struct LocalUnlockCard: View {
 
 private struct EmbeddedAuthenticationView: NSViewRepresentable {
     let context: LAContext
+    let enabled: Bool
     let activity: (LAContext, Bool) -> Void
     func makeNSView(context coordinator: Context) -> AuthenticationHost {
-        let host = AuthenticationHost(authenticationContext: context)
-        host.activity = { active in activity(context, active) }
+        let host = AuthenticationHost(frame: .zero)
+        host.configure(context: context, enabled: enabled, activity: activity)
         return host
     }
     func updateNSView(_ host: AuthenticationHost, context coordinator: Context) {
-        host.activity = { active in activity(context, active) }
+        host.configure(context: context, enabled: enabled, activity: activity)
     }
-    static func dismantleNSView(_ host: AuthenticationHost, coordinator: ()) { host.stop(); host.activity = nil }
+    static func dismantleNSView(_ host: AuthenticationHost, coordinator: ()) { host.stop() }
 }
 
-@MainActor private final class AuthenticationHost: NSView {
-    var activity: ((Bool) -> Void)?
+/// Keep product SwiftUI trees alive, but attach only the selected product's native
+/// authentication view. AppKit's embedded authentication machinery permits only
+/// one occlusion detector per window, including during SwiftUI replacement.
+@MainActor final class AuthenticationHost: NSView {
+    private static let owners = NSMapTable<NSWindow, AuthenticationHost>.weakToWeakObjects()
+    private var activity: ((LAContext, Bool) -> Void)?
+    private var authenticationContext: LAContext?
+    private var authenticationView: LAAuthenticationView?
+    private var enabled = false
+    private weak var ownedWindow: NSWindow?
+    private var constraintsForAuthentication: [NSLayoutConstraint] = []
     private var observations: [NSObjectProtocol] = []
-    init(authenticationContext: LAContext) {
-        super.init(frame: .zero)
-        let view = LAAuthenticationView(context: authenticationContext, controlSize: .large)
-        view.translatesAutoresizingMaskIntoConstraints = false; addSubview(view)
-        NSLayoutConstraint.activate([view.centerXAnchor.constraint(equalTo: centerXAnchor), view.centerYAnchor.constraint(equalTo: centerYAnchor)])
+
+    func configure(context: LAContext, enabled: Bool, activity: @escaping (LAContext, Bool) -> Void) {
+        self.activity = activity
+        if authenticationContext !== context { detachAuthenticationView() }
+        authenticationContext = context
+        self.enabled = enabled
+        attachIfNeeded()
     }
-    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        if newWindow !== window { detachAuthenticationView() }
+        super.viewWillMove(toWindow: newWindow)
+    }
     override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow(); stop()
+        super.viewDidMoveToWindow(); stopObserving()
         guard window != nil else { return }
         for name in [NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification, NSApplication.didBecomeActiveNotification, NSApplication.didResignActiveNotification] {
             observations.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
                 Task { @MainActor [weak self] in self?.report() }
             })
         }
+        attachIfNeeded()
+    }
+    private func attachIfNeeded() {
+        guard enabled, let window, let authenticationContext else { detachAuthenticationView(); return }
+        guard authenticationView == nil else { return }
+        // SwiftUI can attach the new product before updating/dismantling the old
+        // one. Detach its native control synchronously, before adding this one.
+        if let previous = Self.owners.object(forKey: window), previous !== self {
+            previous.detachAuthenticationView()
+        }
+        Self.owners.setObject(self, forKey: window); ownedWindow = window
+        let view = LAAuthenticationView(context: authenticationContext, controlSize: .large)
+        authenticationView = view
+        view.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(view)
+        constraintsForAuthentication = [view.centerXAnchor.constraint(equalTo: centerXAnchor), view.centerYAnchor.constraint(equalTo: centerYAnchor)]
+        NSLayoutConstraint.activate(constraintsForAuthentication)
         Task { @MainActor [weak self] in self?.report() }
     }
-    private func report() { activity?(window?.isKeyWindow == true && NSApp.isActive && window?.isMiniaturized == false) }
-    func stop() { observations.forEach(NotificationCenter.default.removeObserver); observations = [] }
+    private func detachAuthenticationView() {
+        NSLayoutConstraint.deactivate(constraintsForAuthentication); constraintsForAuthentication = []
+        authenticationView?.removeFromSuperview(); authenticationView = nil
+        if let ownedWindow, Self.owners.object(forKey: ownedWindow) === self {
+            Self.owners.removeObject(forKey: ownedWindow)
+        }
+        ownedWindow = nil
+    }
+    private func report() {
+        guard enabled, let window, let authenticationContext,
+              authenticationView?.context === authenticationContext,
+              Self.owners.object(forKey: window) === self else { return }
+        activity?(authenticationContext, window.isKeyWindow && NSApp.isActive && !window.isMiniaturized)
+    }
+    private func stopObserving() { observations.forEach(NotificationCenter.default.removeObserver); observations = [] }
+    func stop() {
+        activity = nil; enabled = false
+        stopObserving(); detachAuthenticationView(); authenticationContext = nil
+    }
 }

@@ -63,7 +63,12 @@ include passwords, tokens, real message bodies or vault exports in public issues
 - Local unlock embeds Apple’s `LAAuthenticationView` with a per-product
   `LAContext.deviceOwnerAuthenticationWithBiometrics` for Touch ID. One automatic
   attempt requires a visible locked product, its attached native view and an active
-  key window. No biometric data is available to ProtonX. Password fallback uses a
+  key window. Hidden products retain only an empty native host. Each window has
+  at most one attached `LAAuthenticationView`; changing products or contexts
+  synchronously detaches the previous control before attaching its replacement.
+  Native view ownership is weak and separate from per-product authentication and
+  restore epochs. Queued focus callbacks use only the currently attached context.
+  No biometric data is available to ProtonX. Password fallback uses a
   separate context and the standard `deviceOwnerAuthentication` dialog. User
   cancellation or explicit lock disarms automatic retries. Automatic locks (inactivity,
   sleep and screen/session lock) clear product contents and cancel operations as

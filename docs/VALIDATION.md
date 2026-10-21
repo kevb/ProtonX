@@ -5,6 +5,28 @@ macOS 26.6.2, Xcode 27 / Swift 6.4 and Rust 1.99.0. Automated test content is
 synthetic and uses isolated storage. Private account contents and credentials
 are excluded from public artifacts.
 
+## Embedded Touch ID control ownership — 2026-10-21
+
+- A local macOS crash report stopped in `LAAuthenticationView` with the AppKit
+  assertion `There may only be 1 NSOcclusionDetectionView per window`. Retained
+  hidden product cards previously kept native authentication controls attached;
+  context identity changes could also replace a SwiftUI native host.
+- All 289 Swift tests in 24 suites passed. Six new synthetic regressions exercise
+  actual AppKit/SwiftUI attachment without evaluating authentication: hidden
+  products have no native control; 120 incoming-before-outgoing product switches
+  retain exactly one control; 30 switches through retained SwiftUI cards attach
+  only the selected context; context replacement detaches the old native view;
+  ownership stays per window across moves; and queued callbacks ignore detached
+  products and stale contexts. Existing cancellation, epoch and wake/lock tests
+  also passed.
+- Desktop, Mail privacy/notification and Calendar protocol contracts passed.
+  The signed release app built using existing helper code, and strict nested
+  signature verification passed. No crash report, private account content or
+  credentials were added to public artifacts.
+- Physical Touch ID and the original interactive crash sequence remain manual
+  acceptance checks. These tests enforce native view ownership without opening
+  real sessions or evaluating a biometric policy.
+
 ## Touch ID after sleep and screen/session lock — 2026-10-21
 
 - All 283 Swift tests in 23 suites passed. Synthetic product fixtures cover Pass,
