@@ -1,20 +1,18 @@
 #!/usr/bin/env python3
 """Install verified local builds and launchers. Never modify account/profile data.
 
-macOS atomic directory swaps preserve a previous bundle for rollback. Running
-installed binaries are refused. Build-directory copies may remain running, but
+macOS atomic directory swaps replace the installed bundle without retaining
+rollback builds. Running installed binaries are refused. Build-directory copies may remain running, but
 launchers ask the user to quit those before opening the installed app.
 """
 import argparse
 import ctypes
-import datetime
 import os
 import pathlib
 import plistlib
 import shutil
 import subprocess
 import tempfile
-import uuid
 
 IDENTITIES = {"ProtonX.app": "org.kevb.ProtonX", "ProtonX Mail.app": "org.kevb.ProtonX.MailLauncher", "ProtonX Pass.app": "org.kevb.ProtonX.PassLauncher"}
 
@@ -50,6 +48,13 @@ def publish(staged, destination):
         raise OSError(ctypes.get_errno(), "Could not publish the verified app bundle.")
     return flags == 2
 
+def unregister(bundle):
+    result = subprocess.run(["/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister", "-u", str(bundle)], capture_output=True, text=True)
+    # Launch Services returns application-not-found for never-registered bundles.
+    # That is already the desired state; other failures must remain visible.
+    if result.returncode and "-10814" not in result.stdout + result.stderr:
+        raise RuntimeError("Could not unregister a superseded app copy.")
+
 def install(sources, directory):
     directory.mkdir(parents=True, exist_ok=True)
     if directory.is_symlink(): raise RuntimeError("The installation directory must not be a symlink.")
@@ -60,35 +65,30 @@ def install(sources, directory):
         if destination.exists(): verify(destination, IDENTITIES[name])
         if destination.is_symlink() or running(destination):
             raise RuntimeError("Quit the installed ProtonX app/launchers before updating. Files have been retained.")
-    previous = directory / ".ProtonX Previous Builds"
-    if previous.is_symlink() or (previous.exists() and not previous.is_dir()):
-        raise RuntimeError("The previous-builds location is invalid; nothing was changed.")
-    previous.mkdir(mode=0o700, exist_ok=True)
     stage = pathlib.Path(tempfile.mkdtemp(prefix=".ProtonX-stage-", dir=directory))
-    complete = False
     try:
         for name, source in sources.items():
             target = stage / name
             shutil.copytree(source, target)
             verify(target, IDENTITIES[name])
-        stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid.uuid4().hex[:8]
-        backup = previous / stamp
-        backup.mkdir(mode=0o700)
         for name in sources:
             destination, staged = directory / name, stage / name
             if running(destination): raise RuntimeError("ProtonX opened during installation. Close it and retry.")
             replaced = publish(staged, destination)
             if replaced:
-                # The swapped previous build stays recoverable, outside Spotlight.
-                shutil.move(str(staged), str(backup / name))
+                # It is now the superseded bundle. Unregister it before removal
+                # so notification clicks cannot relaunch a retained old copy.
+                unregister(staged)
+                shutil.rmtree(staged)
             verify(destination, IDENTITIES[name])
+            if sources[name].resolve() != destination.resolve():
+                unregister(sources[name])
             subprocess.run(["/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister", "-f", str(destination)], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        complete = True
     finally:
-        if complete:
-            shutil.rmtree(stage)
-        # On interruption/failure keep staged and swapped previous bundles for
-        # explicit recovery. Never erase the old build in exception cleanup.
+        # Fix forward: discard staged or superseded app binaries on errors too.
+        # Published destinations and the source build stay intact. An untouched
+        # destination is never deleted when a later bundle fails to publish.
+        shutil.rmtree(stage)
     return [directory / name for name in sources]
 
 if __name__ == "__main__":

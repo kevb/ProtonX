@@ -141,13 +141,24 @@ final class SystemIntegration: NSObject {
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    private var duplicateInstance = false
     func applicationWillFinishLaunching(_ notification: Notification) {
-        MainActor.assumeIsolated { NativeNotifications.shared.install() }
+        MainActor.assumeIsolated {
+            if let existing = ProductionInstance.existingPrimary() {
+                duplicateInstance = true
+                existing.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
+                NSApp.terminate(nil)
+                return
+            }
+            NativeNotifications.shared.install()
+        }
     }
     func applicationDidFinishLaunching(_ notification: Notification) {
+        guard !duplicateInstance else { NSApp.terminate(nil); return }
         ProductWindows.shared.didFinishLaunching()
     }
     func application(_ application: NSApplication, open urls: [URL]) {
+        guard !duplicateInstance else { return }
         ProductWindows.shared.open(urls: urls)
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }

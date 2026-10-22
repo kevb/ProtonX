@@ -84,7 +84,7 @@ See [local signing](docs/LOCAL_SIGNING.md).
 Preview cannot sign in, restore a real session or register another menu-bar item
 or global shortcut. Quit the installed app before updating or opening another
 account-capable build. The installer verifies signatures, refuses running
-binaries and retains previous builds.
+binaries, atomically replaces the app and discards superseded bundles.
 
 **ProtonX Mail** and **ProtonX Pass** are native Spotlight launchers. Each selects
 and focuses its product workspace in the shared ProtonX window, including when

@@ -37,7 +37,7 @@ lock or send. Screen/inactivity lock and Quit also clear hidden workspace conten
 Build the normal helper and app, then install with the two native launchers:
 
 ```sh
-scripts/build-app.sh --stage-update="ProtonX Daily Use Update" --install
+scripts/build-app.sh --install
 ```
 
 When helpers already match the current source, `--skip-helper` avoids rebuilding
@@ -57,12 +57,18 @@ Applications copies are the discoverable launchers.
 
 The installer verifies all source and destination identities/signatures before
 publishing, refuses a running installed app/helper, and uses macOS same-volume
-atomic directory swaps. Previous bundles remain under the hidden
-`.ProtonX Previous Builds` directory. Interrupted staging is also retained for
-recovery. Those folders contain app binaries only; account profiles and Keychain
-entries are never changed. Older saved bundles may be removed after accepting the
-new build. Local signing is preserved; Developer ID/notarization and reliable
+atomic directory swaps. Superseded bundles are unregistered and removed immediately;
+staged files are cleaned on failure too. No rollback builds are retained. An
+interrupted multi-bundle update can leave some destinations updated and others
+unchanged; rerun the installer to finish. The verified source build remains available.
+Source-build registrations are removed before the installed app is registered,
+so notifications target the installed copy. Account profiles and Keychain entries
+are never changed. Local signing is preserved; Developer ID/notarization and reliable
 Keychain prompt continuity are still separate release gates.
+
+A production copy also checks for an earlier running production process at startup.
+If one exists, it activates that instance and exits before installing notification
+handlers. Synthetic previews have a separate identity and remain independent.
 
 ## Synthetic validation and remaining acceptance
 
@@ -70,7 +76,7 @@ Keychain prompt continuity are still separate release gates.
   SDK undo token, lock/late-result races, closed/bounded IPC and product URL parsing.
 - Genuine upstream mock-server tests: message read/unread, moves and local/remote
   undo; normal attachment I/O compatibility; existing composer/reader tests.
-- Installer tests: atomic swap, rollback, first install and failure retention with
+- Installer tests: atomic swap, first install, no retained rollback builds, and failure cleanup with
   disposable synthetic directory contents. Native launchers compile and signatures
   are verified; account-capable installed navigation remains a separate acceptance check.
 - Synthetic preview: product switching, front-window keyboard commands and

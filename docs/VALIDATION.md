@@ -5,6 +5,29 @@ macOS 26.6.2, Xcode 27 / Swift 6.4 and Rust 1.99.0. Automated test content is
 synthetic and uses isolated storage. Private account contents and credentials
 are excluded from public artifacts.
 
+## Fix-forward installation and duplicate-copy prevention — 2026-10-22
+
+- All 292 Swift tests in 25 suites and eight synthetic installer tests passed.
+  Startup policy tests cover an older running copy with a wrapped PID, same-time
+  launch ordering and missing launch dates. The startup check is a UX guard;
+  helper profile locks remain the storage boundary.
+- Installer contracts cover atomic replacement and first installation, running-app
+  refusal, immediate disposal of superseded bundles, cleanup after partial publish,
+  registration/copy failures, and expected Launch Services application-not-found
+  responses. Verified source builds and untouched destinations survive failures;
+  no rollback directory or staged old bundle is retained.
+- The signed release app built using unchanged helpers; strict nested signature
+  verification passed. Desktop, Mail privacy/notification and Calendar source-pin
+  contracts passed.
+- Local cleanup validated signatures/identities and checked for running executables
+  before removing 69 unused app bundles across 25 rollback generations and ten
+  staged updates (approximately 3 GiB of allocated bundle content). The current
+  installed app, current build and synthetic preview were retained. Account data,
+  Keychain contents, user documents and compiler caches were not changed.
+- Targeted unregistration and Launch Services garbage collection left only the
+  installed `/Applications/ProtonX.app` production registration. Real notification
+  clicks and duplicate startup focus remain interactive acceptance checks.
+
 ## Embedded Touch ID control ownership — 2026-10-21
 
 - A local macOS crash report stopped in `LAAuthenticationView` with the AppKit

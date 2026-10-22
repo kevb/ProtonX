@@ -353,6 +353,16 @@ Public product links still accept only the four closed routes defined above and
 select the product before activating the same suite window. No account data is
 accepted in routes, and no global account/session cache is introduced.
 
+## Production application copies
+
+Only the earliest observed running production copy continues startup. A later
+copy activates it and exits before installing notification handlers; preview
+identities are excluded. This startup check is a UX guard, not an authorization
+boundary or replacement for helper profile locks. Installation verifies source
+bundles before atomic replacement, unregisters discarded/source copies, and
+removes superseded app binaries rather than retaining rollback builds. It does
+not delete account profiles, Keychain items or user documents.
+
 ## Desktop notifications
 
 Mail notification monitoring is opt-in and runs only in the unlocked Mail session.
