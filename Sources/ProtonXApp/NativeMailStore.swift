@@ -75,10 +75,11 @@ final class NativeMailStore: ObservableObject {
     @Published var error: String?
     @Published private(set) var draft: NativeMailDraft? {
         didSet {
-            guard let draft else { editorState = nil; attachmentNeedsRefresh = false; draftAttachmentPolling?.cancel(); return }
+            guard let draft else { editorState = nil; composerDetached = false; attachmentNeedsRefresh = false; draftAttachmentPolling?.cancel(); return }
             if editorState?.token != draft.token { attachmentNeedsRefresh = false; editorState = MailEditorState(draft: draft) }
         }
     }
+    @Published var composerDetached = false
     @Published private(set) var editorState: MailEditorState?
     @Published private(set) var composeStatus: String?
     @Published private(set) var notice: String?
@@ -696,7 +697,7 @@ final class NativeMailStore: ObservableObject {
         searchQuery = nil; searchHasMore = false; searchReturnFolder = nil
         folders = []; messages = []; body = nil; sanitizedHTML = nil; selectedItem = nil; selectedFolder = nil; query = ""; email = ""; error = nil
         clearThread()
-        draft = nil; composeStatus = nil; notice = nil; messageActions = []; mustRefreshBeforeActions = false; clearActionUndo()
+        draft = nil; composerDetached = false; composeStatus = nil; notice = nil; messageActions = []; mustRefreshBeforeActions = false; clearActionUndo()
         loading = false; lastSynced = nil; busy = false; demoBodies = [:]; demoHTML = [:]; demoMessages = []; loadedFolder = nil
         cacheFirstActive = false; showingSavedContent = false; cacheRefreshFailed = false
         phase = hasSession ? .locked : .welcome

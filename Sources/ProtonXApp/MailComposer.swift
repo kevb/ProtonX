@@ -6,13 +6,16 @@ struct MailComposer: View {
     @ObservedObject var store: NativeMailStore
     let initial: NativeMailDraft
     @ObservedObject var editor: MailEditorState
+    var isDetached: Bool = false
+    @Environment(\.openWindow) private var openWindow
+    @Environment(\.dismissWindow) private var dismissWindow
     @State private var contactPickerField: String?
     @State private var confirmDiscard = false
     @State private var confirmSend = false
     @State private var confirmClosePending = false
     @FocusState private var focus: String?
-    init(store: NativeMailStore, draft: NativeMailDraft, editor: MailEditorState) {
-        self.store = store; initial = draft; self.editor = editor
+    init(store: NativeMailStore, draft: NativeMailDraft, editor: MailEditorState, isDetached: Bool = false) {
+        self.store = store; initial = draft; self.editor = editor; self.isDetached = isDetached
     }
     private var current: NativeMailDraft { store.draft ?? initial }
     private var content: NativeMailComposeContent { editor.content }
@@ -25,6 +28,21 @@ struct MailComposer: View {
                 Text(editor.subject.isEmpty ? "New message" : editor.subject).font(.headline).lineLimit(1)
                 Spacer()
                 if store.busy { ProgressView().controlSize(.small) }
+                Button {
+                    if isDetached {
+                        store.composerDetached = false
+                        dismissWindow(id: "mail-composer")
+                    } else {
+                        store.composerDetached = true
+                        openWindow(id: "mail-composer")
+                    }
+                } label: {
+                    Image(systemName: isDetached ? "arrow.down.right.and.arrow.up.left" : "uiwindow.split.2x1")
+                }
+                .buttonStyle(.plain)
+                .help(isDetached ? "Dock composer back into Mail" : "Pop out composer into a separate window")
+                .accessibilityLabel(isDetached ? "Dock composer" : "Pop out composer")
+                .accessibilityIdentifier("mailComposerDetach")
                 if current.state == .editing {
                     Button("Save & Close") { store.saveDraft(content, close: true) }.disabled(!editable)
                 } else {
@@ -41,14 +59,15 @@ struct MailComposer: View {
                         if editor.sender.lowercased().hasSuffix("@gmail.com") { Text("Connected Gmail").font(.caption).foregroundStyle(.secondary) }
                     }.padding(.vertical, 12).disabled(!editable)
                     Divider()
-                    HStack {
-                        recipientField("To", text: $editor.to, focus: "to").disabled(!editable)
-                        Button(editor.expandedRecipients ? "Hide Cc/Bcc" : "Cc/Bcc") { editor.expandedRecipients.toggle() }.buttonStyle(.plain).foregroundStyle(MailTheme.accent)
+                    HStack(alignment: .top) {
+                        recipientField("To", text: $editor.to, otherFields: [editor.cc, editor.bcc], focus: "to")
+                        Button(editor.expandedRecipients ? "Hide Cc/Bcc" : "Cc/Bcc") { editor.expandedRecipients.toggle() }
+                            .buttonStyle(.plain).foregroundStyle(MailTheme.accent).padding(.top, 15)
                     }
                     Divider()
                     if editor.expandedRecipients {
-                        recipientField("Cc", text: $editor.cc, focus: "cc"); Divider()
-                        recipientField("Bcc", text: $editor.bcc, focus: "bcc"); Divider()
+                        recipientField("Cc", text: $editor.cc, otherFields: [editor.to, editor.bcc], focus: "cc"); Divider()
+                        recipientField("Bcc", text: $editor.bcc, otherFields: [editor.to, editor.cc], focus: "bcc"); Divider()
                     }
                     HStack {
                         Text("Subject").foregroundStyle(.secondary).frame(width: 60, alignment: .leading)
@@ -88,8 +107,13 @@ struct MailComposer: View {
                 Button { confirmSend = true } label: { Label("Send", systemImage: "paperplane.fill") }
                     .buttonStyle(MailActionStyle(primary: true)).disabled(!editable || !valid).keyboardShortcut(.return, modifiers: [.command])
             }.padding(20).background(MailTheme.collection)
-        }.frame(minWidth: 580, maxWidth: 850, minHeight: 600, maxHeight: .infinity)
-        .onAppear { focus = editor.to.isEmpty ? "to" : "body" }
+        }.frame(minWidth: 580, maxWidth: isDetached ? .infinity : 850, minHeight: 600, maxHeight: .infinity)
+        .onAppear {
+            focus = editor.to.isEmpty ? "to" : "body"
+            if !store.contactsLoaded && !store.contactsBusy && store.phase == .open {
+                store.loadContacts(refreshDetails: false)
+            }
+        }
         .onChange(of: content) { _, _ in store.markDraftEdited() }
         .confirmationDialog("Close this composer?", isPresented: $confirmClosePending) {
             Button("Close & Check Sent") { store.closePendingDraft() }
@@ -103,15 +127,17 @@ struct MailComposer: View {
             Text("To: \(editor.to)\(editor.cc.isEmpty ? "" : "\nCc: " + editor.cc)\(editor.bcc.isEmpty ? "" : "\nBcc: " + editor.bcc)\(editor.subject.isEmpty ? "\nThis message has no subject." : "")")
         }
     }
-    private func recipientField(_ title: String, text: Binding<String>, focus key: String) -> some View {
-        HStack {
-            Text(title).foregroundStyle(.secondary).frame(width: 60, alignment: .leading)
-            TextField("Email addresses, separated by commas", text: text).textFieldStyle(.plain).focused($focus, equals: key)
-            Button { contactPickerField = key } label: { Image(systemName: "person.crop.circle.badge.plus") }
-                .buttonStyle(.plain).help("Add \(title) recipients from Contacts").accessibilityLabel("Add \(title) recipients from Contacts")
-                .popover(isPresented: Binding(get: { contactPickerField == key }, set: { if !$0 { contactPickerField = nil } })) {
-                    ContactRecipientPicker(store: store) { addresses in store.addContactRecipients(addresses, field: key, token: initial.token) }
-                }
-        }.padding(.vertical, 15).disabled(!editable)
+    private func recipientField(_ title: String, text: Binding<String>, otherFields: [String], focus key: String) -> some View {
+        MailRecipientField(
+            title: title,
+            fieldKey: key,
+            store: store,
+            draftToken: initial.token,
+            text: text,
+            otherFields: otherFields,
+            editable: editable,
+            focus: $focus,
+            pickerField: $contactPickerField
+        )
     }
 }

@@ -3,6 +3,7 @@ import ProtonXCore
 
 struct MailWindow: View {
     @ObservedObject private var store: NativeMailStore
+    @Environment(\.openWindow) private var openWindow
     var isActive: Bool
     var newAlias: () -> Void
     @State private var moreExpanded = false
@@ -20,13 +21,29 @@ struct MailWindow: View {
     var body: some View {
         Group {
             if store.phase == .open {
+                let inlineCompose = store.draft != nil && !store.composerDetached
                 ZStack {
-                    workspace.opacity(store.draft == nil ? 1 : 0).allowsHitTesting(store.draft == nil)
-                        .disabled(store.draft != nil).accessibilityElement(children: store.draft == nil ? .contain : .ignore)
-                        .accessibilityHidden(store.draft != nil)
-                    if let draft = store.draft, let editor = store.editorState {
+                    workspace.opacity(inlineCompose ? 0 : 1).allowsHitTesting(!inlineCompose)
+                        .disabled(inlineCompose).accessibilityElement(children: inlineCompose ? .ignore : .contain)
+                        .accessibilityHidden(inlineCompose)
+                    if let draft = store.draft, let editor = store.editorState, !store.composerDetached {
                         MailComposer(store: store, draft: draft, editor: editor)
                             .id(draft.token).frame(maxWidth: .infinity, maxHeight: .infinity).background(MailTheme.canvas)
+                    }
+                }
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    if let editor = store.editorState, store.draft != nil && store.composerDetached {
+                        HStack(spacing: 12) {
+                            Image(systemName: "square.and.pencil").foregroundStyle(MailTheme.accent)
+                            Text("Editing draft: \(editor.subject.isEmpty ? "New message" : editor.subject)")
+                                .font(.callout).lineLimit(1)
+                            Spacer()
+                            Button("Show Composer") { openWindow(id: "mail-composer") }
+                            Button("Dock") { store.composerDetached = false }.buttonStyle(.plain).foregroundStyle(MailTheme.accent)
+                        }
+                        .padding(.horizontal, 16).padding(.vertical, 10)
+                        .background(MailTheme.accent.opacity(0.1))
+                        .accessibilityIdentifier("mailDetachedDraftBanner")
                     }
                 }
             }

@@ -44,7 +44,35 @@ struct ProtonXApp: App {
                 Link("Report an Issue", destination: URL(string: "https://github.com/kevb/ProtonX/issues")!)
             }
         }
+        Window("Compose", id: "mail-composer") {
+            DetachedMailComposerWindow(workspace: workspace).tint(MailTheme.accent)
+        }.defaultSize(width: 720, height: 680)
         Settings { SettingsView() }
+    }
+}
+
+private struct DetachedMailComposerWindow: View {
+    @ObservedObject var workspace: SuiteWorkspace
+    @Environment(\.dismissWindow) private var dismissWindow
+    var body: some View {
+        Group {
+            if let mail = workspace.mail, mail.phase == .open, let draft = mail.draft, let editor = mail.editorState {
+                MailComposer(store: mail, draft: draft, editor: editor, isDetached: true)
+                    .id(draft.token)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(MailTheme.canvas)
+            } else {
+                ContentUnavailableView("No active draft", systemImage: "square.and.pencil", description: Text("Start composing in ProtonX Mail to use this window."))
+                    .frame(minWidth: 480, minHeight: 360)
+                    .onAppear { dismissWindow(id: "mail-composer") }
+            }
+        }
+        .onChange(of: workspace.mail?.draft == nil || workspace.mail?.phase != .open) { _, shouldDismiss in
+            if shouldDismiss { dismissWindow(id: "mail-composer") }
+        }
+        .onDisappear {
+            workspace.mail?.composerDetached = false
+        }
     }
 }
 
