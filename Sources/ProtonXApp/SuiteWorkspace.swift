@@ -98,6 +98,7 @@ import ProtonXCore
         }
         if product == .calendar && calendar == nil {
             let store = makeCalendar(); store.localAuthentication.systemSuspended = systemAuthenticationSuspended; calendar = store
+            if !previewOnly, makeNotificationsAvailable { store.configureNotifications(NativeNotifications.shared) }
             store.objectWillChange.sink { [weak self] _ in self?.productChanged() }.store(in: &observations)
         }
         selected = product
@@ -331,6 +332,10 @@ struct SuiteWindow: View {
             NativeNotifications.shared.openMail = { target in
                 ProductWindows.shared.open(.mail)
                 if let target { workspace.mail?.openNotification(folder: target.folder, item: target.item) }
+            }
+            NativeNotifications.shared.openCalendar = { eventID in
+                ProductWindows.shared.open(.calendar)
+                workspace.calendar?.openReminder(eventID: eventID)
             }
             SystemIntegration.shared.lockSuite = { workspace.lock() }
             SystemIntegration.shared.suspendAuthentication = { workspace.suspendAuthentication($0) }

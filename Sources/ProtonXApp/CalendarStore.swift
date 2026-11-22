@@ -89,6 +89,8 @@ import ProtonXCore
     private var needsRangeReload = false
     private var loadedRange: CalendarQueryRange?
     private var debounce: Task<Void,Never>?
+    private var notifications: NativeNotifications?
+    private var reminderTask: Task<Void,Never>?
     private let now: () -> Date
     private let makeSource: (() throws -> any CalendarDataSource)?
     init(previewOnly: Bool = false, now: @escaping () -> Date = Date.init, makeSource: (() throws -> any CalendarDataSource)? = nil,
@@ -114,8 +116,35 @@ import ProtonXCore
         }
     }
     func isAllDay(_ event: CalendarEventRecord) -> Bool { if case .allDay = event.time { return true }; return false }
+    func configureNotifications(_ controller: NativeNotifications) {
+        guard !previewOnly else { return }
+        notifications = controller
+        controller.calendarConfigurationChanged = { [weak self] in self?.scheduleReminders() }
+        if phase == .connected {
+            controller.beginCalendar()
+            scheduleReminders()
+        }
+    }
+    func scheduleReminders() {
+        reminderTask?.cancel(); reminderTask = nil
+        guard !previewOnly, phase == .connected, let notifications else { return }
+        let visible = events.filter { visibleCalendarIDs.contains($0.calendarID) }
+        let currentNow = now()
+        reminderTask = Task { [weak self, notifications] in
+            guard let self, self.phase == .connected else { return }
+            await notifications.syncCalendarReminders(visible, now: currentNow)
+        }
+    }
+    func openReminder(eventID: String?) {
+        guard phase == .connected, editor == nil, let eventID,
+              let event = events.first(where: { $0.id == eventID }) else { return }
+        visibleCalendarIDs.insert(event.calendarID)
+        selectedEventID = event.id
+        if let start = math.bounds(event)?.0 { date = start }
+    }
     func toggleCalendar(_ id: String) {
         if visibleCalendarIDs.contains(id) { visibleCalendarIDs.remove(id) } else { visibleCalendarIDs.insert(id) }
+        scheduleReminders()
     }
     func enterPreview() {
         guard !busy else { return }
@@ -137,6 +166,7 @@ import ProtonXCore
                 if initial { visibleCalendarIDs = Set(calendars.map(\.id)) }
                 else { visibleCalendarIDs.formIntersection(Set(calendars.map(\.id))); visibleCalendarIDs.formUnion(Set(calendars.map(\.id)).subtracting(previousIDs)) }
                 if !events.contains(where: { $0.id == selectedEventID }) { selectedEventID = nil }
+                scheduleReminders()
             }
         }
     }
@@ -175,6 +205,7 @@ import ProtonXCore
                 events.removeAll { $0.id == saved.id || $0.id == editor.id }; events.append(saved); self.editor = nil
                 selectedEventID = saved.id; visibleCalendarIDs.insert(saved.calendarID); date = math.bounds(saved)!.0
                 notice = phase == .preview ? "Event saved in preview" : "Event saved to Proton"
+                scheduleReminders()
             }
         }
     }
@@ -214,6 +245,7 @@ import ProtonXCore
     }
     func lock() {
         epoch.invalidate(); operation?.cancel(); operation = nil; source = nil; debounce?.cancel(); debounce = nil
+        reminderTask?.cancel(); reminderTask = nil; notifications?.clearCalendar()
         runner.cancelAll(); localAuthentication.cancel(); loadedRange = nil; needsRangeReload = false
         editor = nil; selectedEventID = nil; events = []; calendars = []; visibleCalendarIDs = []
         writeBlocked = false; query = ""; error = nil; notice = nil; busy = false; phase = hasSession ? .locked : .welcome
@@ -258,6 +290,7 @@ import ProtonXCore
             return { [self] in
                 hasSession = true; defaults.set(true,forKey:"nativeCalendarConnected")
                 source = NativeCalendarDataSource(runner:runner); phase = .connected
+                notifications?.beginCalendar()
                 visibleCalendarIDs = []; needsRangeReload = true
             }
         }
@@ -287,6 +320,7 @@ import ProtonXCore
                 case "connected":
                     hasSession = true; defaults.set(true,forKey:"nativeCalendarConnected")
                     source = NativeCalendarDataSource(runner:runner); phase = .connected
+                    notifications?.beginCalendar()
                     visibleCalendarIDs = []; needsRangeReload = true
                 default: error = "Calendar returned an unexpected sign-in state."
                 }
@@ -301,7 +335,7 @@ import ProtonXCore
             guard allowed, epoch.accepts(ticket), !Task.isCancelled else { throw CancellationError() }
             let result = try await runner.request(NativeCalendarCommand("restore"))
             guard result.phase == "connected" else { throw ProtonXError.invalidResponse }
-            return { [self] in source = NativeCalendarDataSource(runner:runner); phase = .connected; needsRangeReload = true }
+            return { [self] in source = NativeCalendarDataSource(runner:runner); phase = .connected; notifications?.beginCalendar(); needsRangeReload = true }
         }
     }
     func cancelLocalUnlock() { if phase == .locked && busy { lock() } }
