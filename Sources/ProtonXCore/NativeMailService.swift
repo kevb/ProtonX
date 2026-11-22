@@ -22,23 +22,24 @@ public struct NativeMailMessage: Codable, Identifiable, Equatable, Sendable {
     public let recipient: String
     public let date: UInt64
     public let unread: Bool
+    public let starred: Bool?
     public let attachments: Int
     public let isDraft: Bool?
     public let canReply: Bool?
     public let isScheduled: Bool?
     public let conversationID: UInt64?
-    public init(id: UInt64, subject: String, sender: String, senderName: String = "", recipient: String = "", date: UInt64 = 0, unread: Bool = false, attachments: Int = 0, isDraft: Bool = false, canReply: Bool = true, isScheduled: Bool = false, conversationID: UInt64? = nil) {
+    public init(id: UInt64, subject: String, sender: String, senderName: String = "", recipient: String = "", date: UInt64 = 0, unread: Bool = false, starred: Bool? = false, attachments: Int = 0, isDraft: Bool? = false, canReply: Bool? = true, isScheduled: Bool? = false, conversationID: UInt64? = nil) {
         self.id = id; self.subject = subject; self.sender = sender; self.senderName = senderName
-        self.recipient = recipient; self.date = date; self.unread = unread; self.attachments = attachments; self.isDraft = isDraft; self.canReply = canReply; self.isScheduled = isScheduled; self.conversationID = conversationID
+        self.recipient = recipient; self.date = date; self.unread = unread; self.starred = starred; self.attachments = attachments; self.isDraft = isDraft; self.canReply = canReply; self.isScheduled = isScheduled; self.conversationID = conversationID
     }
 }
 public enum NativeMailAction: String, Codable, CaseIterable, Sendable {
-    case read, unread, archive, trash, inbox, spam
+    case read, unread, star, unstar, archive, trash, inbox, spam
     public var title: String {
-        switch self { case .read: "Mark as Read"; case .unread: "Mark as Unread"; case .archive: "Archive"; case .trash: "Move to Trash"; case .inbox: "Move to Inbox"; case .spam: "Move to Spam" }
+        switch self { case .read: "Mark as Read"; case .unread: "Mark as Unread"; case .star: "Star"; case .unstar: "Remove Star"; case .archive: "Archive"; case .trash: "Move to Trash"; case .inbox: "Move to Inbox"; case .spam: "Move to Spam" }
     }
     public var symbol: String {
-        switch self { case .read: "envelope.open"; case .unread: "envelope.badge"; case .archive: "archivebox"; case .trash: "trash"; case .inbox: "tray.and.arrow.down"; case .spam: "flame" }
+        switch self { case .read: "envelope.open"; case .unread: "envelope.badge"; case .star: "star"; case .unstar: "star.fill"; case .archive: "archivebox"; case .trash: "trash"; case .inbox: "tray.and.arrow.down"; case .spam: "flame" }
     }
 }
 public struct NativeMailNotification: Codable, Equatable, Sendable {

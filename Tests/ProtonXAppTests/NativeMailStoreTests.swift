@@ -584,9 +584,9 @@ private let threadResult = NativeMailResult(thread: NativeMailThread(anchor: 11,
         let snapshot = NativeMailResult(folders: [.init(id: 1, name: "A custom or translated name", kind: kind)], folder: 1, messages: [threadAnchor], loading: false)
         let runner = SyntheticMailRunner([.init(method: "restore",result: .init(phase: .connected)), .init(method: "snapshot",result: snapshot)])
         let store = mailStore(runner,saved: true); store.unlock(); await waitForMail { !store.busy }
-        #expect(store.listActions(for: 11) == moves + [.unread])
+        #expect(store.listActions(for: 11) == moves + [.unread, .star])
         #expect(store.listActions(for: 99).isEmpty)
-        for action in NativeMailAction.allCases { #expect((store.listActionIntent(for: 11, action: action) != nil) == (moves + [.unread]).contains(action)) }
+        for action in NativeMailAction.allCases { #expect((store.listActionIntent(for: 11, action: action) != nil) == (moves + [.unread, .star]).contains(action)) }
         let stale = try #require(store.listActionIntent(for: 11, action: .unread))
         store.lock(); store.actFromList(stale)
         #expect(!runner.calls.contains("conversation_action"))
@@ -596,7 +596,7 @@ private let threadResult = NativeMailResult(thread: NativeMailThread(anchor: 11,
 @Test @MainActor func allContextActionsDispatchOneConversationThroughClosedSDKCommand() async throws {
     for action in NativeMailAction.allCases {
         let source: NativeMailFolderKind = action == .inbox ? .spam : .inbox
-        let message = NativeMailMessage(id: 11, subject: "Synthetic linked Gmail conversation", sender: "sam@example.com", recipient: "alex.demo@gmail.com", unread: action == .read, conversationID: 70)
+        let message = NativeMailMessage(id: 11, subject: "Synthetic linked Gmail conversation", sender: "sam@example.com", recipient: "alex.demo@gmail.com", unread: action == .read, starred: action == .unstar, conversationID: 70)
         let snapshot = NativeMailResult(folders: [.init(id: 1, name: "Synthetic", kind: source)],folder: 1,messages: [message],loading: false)
         let runner = SyntheticMailRunner([
             .init(method: "restore",result: .init(phase: .connected)), .init(method: "snapshot",result: snapshot),

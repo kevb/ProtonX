@@ -853,7 +853,7 @@ impl Backend {
         if self.composer.is_some() {
             return Err("invalid_state");
         }
-        if !matches!(mode, "new" | "open" | "reply" | "reply_all") {
+        if !matches!(mode, "new" | "open" | "reply" | "reply_all" | "forward") {
             return Err("invalid_input");
         }
         let user = self.user.clone().ok_or("invalid_state")?;
@@ -862,6 +862,10 @@ impl Backend {
             let original = self.selected_message(folder.ok_or("invalid_selection")?, item)?;
             if mode == "open" {
                 if !original.is_draft || original.is_scheduled {
+                    return Err("draft_unsupported");
+                }
+            } else if mode == "forward" {
+                if original.is_draft {
                     return Err("draft_unsupported");
                 }
             } else if !original.can_reply {
@@ -880,6 +884,7 @@ impl Backend {
                 "new" => DraftCreateMode::Empty,
                 "reply" => DraftCreateMode::Reply(Id::from(item.unwrap())),
                 "reply_all" => DraftCreateMode::ReplyAll(Id::from(item.unwrap())),
+                "forward" => DraftCreateMode::Forward(Id::from(item.unwrap())),
                 _ => return Err("invalid_input"),
             };
             sdk_result!(

@@ -272,13 +272,13 @@ environment variables, repository files or a chat message.
 Reader actions target one selected, previously disclosed local message ID. The helper
 accepts conversation requests only from an anchor in the current folder snapshot,
 derives the conversation ID itself and preserves the SDK's Trash visibility rules.
-A disclosed child from that selected conversation can be read, replied to or
+A disclosed child from that selected conversation can be read, replied to, forwarded or
 changed only while its matching anchor remains in the current folder snapshot.
 Changing folder or signing out clears this scope; a failed conversation switch
 cannot retain the previous scope. The UI decrypts one body at a time and clears
 its remote-image consent on message changes. The helper
 rechecks Proton's action capabilities and local destination IDs before queueing
-read/unread or a move to Archive, Trash, Spam or Inbox. List context actions target
+read/unread, star/unstar or a move to Archive, Trash, Spam or Inbox. List context actions target
 one disclosed conversation through the SDK's conversation operations; Messages
 view targets one message. Menu choices follow the SDK's stable folder kind and
 the official client's folder policy, but the helper independently checks current
