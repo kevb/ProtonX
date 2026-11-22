@@ -53,7 +53,30 @@ public struct NativeMailNotification: Codable, Equatable, Sendable {
               !subject.unicodeScalars.contains(where: { $0.properties.generalCategory == .control }) else { throw ProtonXError.invalidResponse }
     }
 }
+public struct NativeMailInlineImage: Codable, Equatable, Sendable {
+    public static let maxBytes = 4 * 1024 * 1024
+    public static let allowedMIMETypes: Set<String> = ["image/png", "image/jpeg", "image/gif", "image/webp", "image/avif", "image/heic"]
+    public let mime: String
+    public let data: String
+    public init(mime: String, data: String) { self.mime = mime; self.data = data }
+    public static func validCID(_ value: String) -> Bool {
+        guard !value.isEmpty, value.utf8.count <= 256 else { return false }
+        let forbidden: Set<UInt8> = [0x3c, 0x3e, 0x22, 0x27, 0x5c, 0x3f, 0x23, 0x2f] // < > " ' \ ? # /
+        guard value.utf8.allSatisfy({ $0 >= 0x21 && $0 <= 0x7e && !forbidden.contains($0) }) else { return false }
+        guard let url = URL(string: "cid:" + value), url.scheme?.lowercased() == "cid" else { return false }
+        return true
+    }
+    public func decoded() throws -> (Data, String) {
+        let normalizedMIME = mime.lowercased()
+        guard Self.allowedMIMETypes.contains(normalizedMIME), data.utf8.count <= ((Self.maxBytes + 2) / 3) * 4,
+              let bytes = Data(base64Encoded: data), !bytes.isEmpty, bytes.count <= Self.maxBytes else {
+            throw ProtonXError.invalidResponse
+        }
+        return (bytes, normalizedMIME)
+    }
+}
 public struct NativeMailResult: Codable, Sendable {
+    public var inlineImage: NativeMailInlineImage?
     public var searchQuery: String?
     public var hasMore: Bool?
     public var contacts: [ContactEntry]?
@@ -85,7 +108,8 @@ public struct NativeMailResult: Codable, Sendable {
     public var conversationID: UInt64?
     public var notifications: [NativeMailNotification]?
     public var unreadCount: UInt64?
-    public init(phase: NativeMailPhase? = nil, folders: [NativeMailFolder]? = nil, folder: UInt64? = nil, messages: [NativeMailMessage]? = nil, loading: Bool? = nil, email: String? = nil, id: UInt64? = nil, body: String? = nil, sanitizedHTML: String? = nil, attachments: Int? = nil, draft: NativeMailDraft? = nil, token: UInt64? = nil, sendState: NativeMailSendState? = nil, closed: Bool? = nil, cacheFirst: Bool? = nil, fresh: Bool? = nil, refreshFailed: Bool? = nil, actions: [NativeMailAction]? = nil, queued: Bool? = nil, undoToken: UInt64? = nil, thread: NativeMailThread? = nil, conversationID: UInt64? = nil, notifications: [NativeMailNotification]? = nil, unreadCount: UInt64? = nil, attachmentList: [NativeMailAttachment]? = nil, transfer: NativeMailTransfer? = nil, handoff: AccountHandoff? = nil, contacts: [ContactEntry]? = nil, contactDetail: ContactDetail? = nil, searchQuery: String? = nil, hasMore: Bool? = nil) {
+    public init(phase: NativeMailPhase? = nil, folders: [NativeMailFolder]? = nil, folder: UInt64? = nil, messages: [NativeMailMessage]? = nil, loading: Bool? = nil, email: String? = nil, id: UInt64? = nil, body: String? = nil, sanitizedHTML: String? = nil, attachments: Int? = nil, draft: NativeMailDraft? = nil, token: UInt64? = nil, sendState: NativeMailSendState? = nil, closed: Bool? = nil, cacheFirst: Bool? = nil, fresh: Bool? = nil, refreshFailed: Bool? = nil, actions: [NativeMailAction]? = nil, queued: Bool? = nil, undoToken: UInt64? = nil, thread: NativeMailThread? = nil, conversationID: UInt64? = nil, notifications: [NativeMailNotification]? = nil, unreadCount: UInt64? = nil, attachmentList: [NativeMailAttachment]? = nil, transfer: NativeMailTransfer? = nil, handoff: AccountHandoff? = nil, contacts: [ContactEntry]? = nil, contactDetail: ContactDetail? = nil, searchQuery: String? = nil, hasMore: Bool? = nil, inlineImage: NativeMailInlineImage? = nil) {
+        self.inlineImage = inlineImage
         self.searchQuery = searchQuery; self.hasMore = hasMore
         self.contacts = contacts; self.contactDetail = contactDetail
         self.handoff = handoff; self.phase = phase; self.folders = folders; self.folder = folder; self.messages = messages
@@ -182,7 +206,9 @@ public struct NativeMailCommand: Encodable, Sendable {
     public var name: String?
     public var size: Int?
     public var conversation: UInt64?
-    public init(_ method: String, username: String? = nil, password: String? = nil, code: String? = nil, folder: UInt64? = nil, item: UInt64? = nil, more: Bool? = nil, mode: String? = nil, token: UInt64? = nil, content: NativeMailComposeContent? = nil, action: NativeMailAction? = nil, conversation: UInt64? = nil, attachment: UInt64? = nil, transfer: UInt64? = nil, offset: Int? = nil, data: String? = nil, name: String? = nil, size: Int? = nil, keywords: String? = nil) {
+    public var cid: String?
+    public init(_ method: String, username: String? = nil, password: String? = nil, code: String? = nil, folder: UInt64? = nil, item: UInt64? = nil, more: Bool? = nil, mode: String? = nil, token: UInt64? = nil, content: NativeMailComposeContent? = nil, action: NativeMailAction? = nil, conversation: UInt64? = nil, attachment: UInt64? = nil, transfer: UInt64? = nil, offset: Int? = nil, data: String? = nil, name: String? = nil, size: Int? = nil, keywords: String? = nil, cid: String? = nil) {
+        self.cid = cid
         self.keywords = keywords
         self.method = method; self.username = username; self.password = password; self.code = code
         self.folder = folder; self.item = item; self.more = more
@@ -319,6 +345,7 @@ public final class NativeMailProcess: NativeMailRunning, @unchecked Sendable {
         }
         if let attachments = result.attachmentList { try MailAttachmentPolicy.validateList(attachments) }
         if let transfer = result.transfer { try transfer.validate() }
+        if let inlineImage = result.inlineImage { _ = try inlineImage.decoded() }
         if let draft = result.draft {
             if let attachments = draft.attachmentList { try MailAttachmentPolicy.validateList(attachments) }
             guard draft.token > 0, draft.senders.count <= 256, Set(draft.senders).count == draft.senders.count,

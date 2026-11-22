@@ -433,7 +433,12 @@ struct MailWindow: View {
             }.padding(22).frame(maxWidth: .infinity, alignment: .leading)
             Divider()
             if let body = store.body {
-                MailMessageContent(text: body, sanitizedHTML: store.sanitizedHTML, isActive: isActive && store.draft == nil).id(message.id)
+                MailMessageContent(
+                    text: body,
+                    sanitizedHTML: store.sanitizedHTML,
+                    isActive: isActive && store.draft == nil,
+                    loadInlineImage: inlineImageLoader(for: message.id)
+                ).id(message.id)
             }
             else if store.error != nil { Button("Retry loading message") { store.select(preferred: message.id) }.padding(28).frame(maxWidth: .infinity) }
             else { ProgressView("Decrypting message…").padding(28).frame(maxWidth: .infinity) }
@@ -471,6 +476,13 @@ struct MailWindow: View {
         }.buttonStyle(.plain).disabled(store.threadLoading)
             .accessibilityLabel("Open message from " + (message.senderName.isEmpty ? message.sender : message.senderName))
             .accessibilityIdentifier("mailThreadMessage.\(message.id)")
+    }
+    private func inlineImageLoader(for item: UInt64) -> MailRemoteImages.InlineLoader? {
+        guard store.phase == .open, !store.demo else { return nil }
+        let store = self.store
+        return { @MainActor @Sendable cid in
+            try await store.loadInlineImage(item: item, cid: cid)
+        }
     }
     private func signIn() { let supplied = password; password = ""; store.signIn(username: username, password: supplied) }
     private func submitChallenge() { let supplied = code; code = ""; store.submitChallenge(supplied) }

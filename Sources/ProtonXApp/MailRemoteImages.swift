@@ -1,34 +1,69 @@
 import Foundation
 import WebKit
+import ProtonXCore
 
 /// Per-message, memory-only image transport. WebKit cannot make arbitrary HTTP
-/// requests; it receives bounded image bytes through this dedicated scheme.
+/// requests; it receives bounded remote or decrypted inline CID image bytes
+/// through this dedicated scheme.
 @MainActor final class MailRemoteImages: NSObject, WKURLSchemeHandler {
     static let scheme = "protonx-image"
-    private let session: URLSession
+    typealias InlineLoader = @MainActor @Sendable (String) async throws -> (Data, String)
+    private let session: URLSession?
+    private let allowsRemote: Bool
+    private let inlineLoader: InlineLoader?
     private let budget = Budget()
     private var requests = 0
     private var tasks: [ObjectIdentifier: Task<Void, Never>] = [:]
     private var active = true
-    init(configuration: URLSessionConfiguration = .ephemeral) {
-        configuration.urlCache = nil
-        configuration.httpCookieStorage = nil
-        configuration.urlCredentialStorage = nil
-        configuration.httpShouldSetCookies = false
-        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
-        configuration.timeoutIntervalForRequest = 15
-        configuration.timeoutIntervalForResource = 20
-        configuration.httpMaximumConnectionsPerHost = 4
-        session = URLSession(configuration: configuration, delegate: RedirectPolicy(), delegateQueue: nil)
+    init(configuration: URLSessionConfiguration = .ephemeral, allowsRemote: Bool = true, inlineLoader: InlineLoader? = nil) {
+        self.allowsRemote = allowsRemote
+        self.inlineLoader = inlineLoader
+        if allowsRemote {
+            configuration.urlCache = nil
+            configuration.httpCookieStorage = nil
+            configuration.urlCredentialStorage = nil
+            configuration.httpShouldSetCookies = false
+            configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+            configuration.timeoutIntervalForRequest = 15
+            configuration.timeoutIntervalForResource = 20
+            configuration.httpMaximumConnectionsPerHost = 4
+            session = URLSession(configuration: configuration, delegate: RedirectPolicy(), delegateQueue: nil)
+        } else {
+            session = nil
+        }
         super.init()
     }
     func webView(_ webView: WKWebView, start urlSchemeTask: any WKURLSchemeTask) {
         let key = ObjectIdentifier(urlSchemeTask)
         guard active, requests < 64, let requestURL = urlSchemeTask.request.url,
               let components = URLComponents(url: requestURL, resolvingAgainstBaseURL: false),
-              components.host == "asset", components.path.isEmpty,
-              components.queryItems?.count == 1,
-              let item = components.queryItems?.first, item.name == "url",
+              components.path.isEmpty, components.queryItems?.count == 1,
+              let item = components.queryItems?.first else {
+            urlSchemeTask.didFailWithError(Self.failure); return
+        }
+        if components.host == "inline", item.name == "cid",
+           let cid = item.value, NativeMailInlineImage.validCID(cid),
+           let inlineLoader {
+            requests += 1
+            tasks[key] = Task { [weak self, budget] in
+                do {
+                    let (data, mime) = try await inlineLoader(cid)
+                    let normalized = mime.lowercased()
+                    guard !data.isEmpty, data.count <= NativeMailInlineImage.maxBytes,
+                          NativeMailInlineImage.allowedMIMETypes.contains(normalized) else { throw Self.failure }
+                    try await budget.consume(data.count)
+                    guard let self, self.active, !Task.isCancelled, self.tasks.removeValue(forKey: key) != nil else { return }
+                    urlSchemeTask.didReceive(URLResponse(url: requestURL, mimeType: normalized, expectedContentLength: data.count, textEncodingName: nil))
+                    urlSchemeTask.didReceive(data)
+                    urlSchemeTask.didFinish()
+                } catch {
+                    guard let self, self.active, !Task.isCancelled, self.tasks.removeValue(forKey: key) != nil else { return }
+                    urlSchemeTask.didFailWithError(Self.failure)
+                }
+            }
+            return
+        }
+        guard allowsRemote, let session, components.host == "asset", item.name == "url",
               let value = item.value, value.utf8.count <= 8192,
               let url = URL(string: value), Self.allowed(url) else {
             urlSchemeTask.didFailWithError(Self.failure); return
@@ -37,23 +72,23 @@ import WebKit
         tasks[key] = Task { [weak self, session, budget] in
             do {
                 let (data, mime) = try await Self.download(url, session: session, budget: budget)
-                guard let self, self.active, !Task.isCancelled, self.tasks.removeValue(forKey:key) != nil else { return }
-                urlSchemeTask.didReceive(URLResponse(url:requestURL, mimeType:mime, expectedContentLength:data.count, textEncodingName:nil))
+                guard let self, self.active, !Task.isCancelled, self.tasks.removeValue(forKey: key) != nil else { return }
+                urlSchemeTask.didReceive(URLResponse(url: requestURL, mimeType: mime, expectedContentLength: data.count, textEncodingName: nil))
                 urlSchemeTask.didReceive(data)
                 urlSchemeTask.didFinish()
             } catch {
-                guard let self, self.active, !Task.isCancelled, self.tasks.removeValue(forKey:key) != nil else { return }
+                guard let self, self.active, !Task.isCancelled, self.tasks.removeValue(forKey: key) != nil else { return }
                 urlSchemeTask.didFailWithError(Self.failure)
             }
         }
     }
     func webView(_ webView: WKWebView, stop urlSchemeTask: any WKURLSchemeTask) {
-        tasks.removeValue(forKey:ObjectIdentifier(urlSchemeTask))?.cancel()
+        tasks.removeValue(forKey: ObjectIdentifier(urlSchemeTask))?.cancel()
     }
     func invalidate() {
         active = false
         for task in tasks.values { task.cancel() }
-        tasks.removeAll(); session.invalidateAndCancel()
+        tasks.removeAll(); session?.invalidateAndCancel()
     }
     private nonisolated static var failure: NSError { NSError(domain:"ProtonX.Mail.Images", code:1) }
     nonisolated static func allowed(_ url: URL) -> Bool {

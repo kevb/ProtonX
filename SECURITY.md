@@ -276,7 +276,10 @@ A disclosed child from that selected conversation can be read, replied to or
 changed only while its matching anchor remains in the current folder snapshot.
 Changing folder or signing out clears this scope; a failed conversation switch
 cannot retain the previous scope. The UI decrypts one body at a time and clears
-its remote-image consent on message changes. The helper
+its remote-image consent on message changes. Embedded `cid:` inline images are
+decrypted on demand in memory for the currently selected message through the
+`protonx-image://inline` scheme handler (raster MIME allowlist only, no SVG,
+4 MB per-image / 16 MB total budget) without enabling external network access. The helper
 rechecks Proton's action capabilities and local destination IDs before queueing
 read/unread or a move to Archive, Trash, Spam or Inbox. List context actions target
 one disclosed conversation through the SDK's conversation operations; Messages

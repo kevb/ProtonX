@@ -345,6 +345,19 @@ final class NativeMailStore: ObservableObject {
         guard expandedThreadItem == item, result.id == item, let next = result.body else { throw ProtonXError.invalidResponse }
         body = next; sanitizedHTML = result.sanitizedHTML; messageActions = result.actions ?? []; attachmentList = result.attachmentList ?? []; try MailAttachmentPolicy.validateList(attachmentList)
     }
+    func loadInlineImage(item: UInt64, cid: String) async throws -> (Data, String) {
+        guard phase == .open, !demo, let folder = selectedFolder, let anchor = selectedItem,
+              expandedThreadItem == item, NativeMailInlineImage.validCID(cid) else {
+            throw CancellationError()
+        }
+        let captured = epoch.value, generation = selectionEpoch.value
+        let result = try await runner.request(NativeMailCommand("inline_image", folder: folder, item: item, cid: cid))
+        try checkSelection(captured: captured, generation: generation, anchor: anchor, folder: folder)
+        guard expandedThreadItem == item, result.id == item, let image = result.inlineImage else {
+            throw ProtonXError.invalidResponse
+        }
+        return try image.decoded()
+    }
     var canUndoAction: Bool { undoToken != nil && (undoExpiry ?? .distantPast) > Date() && !busy && !mustRefreshBeforeActions && draft == nil }
     // Menu presentation follows Proton WebClients' useLabelActions by SDK folder kind.
     // This is a UI hint; every write rechecks SDK capabilities and destinations.

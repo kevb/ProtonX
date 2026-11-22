@@ -5,9 +5,17 @@ import WebKit
 /// network/script boundary; it never receives an account session or file base URL.
 enum MailReaderPolicy {
     static let blockRules = #"[{"trigger":{"url-filter":".*"},"action":{"type":"block"}}]"#
-    static let imageRules = #"[{"trigger":{"url-filter":".*"},"action":{"type":"block"}},{"trigger":{"url-filter":"^protonx-image://asset","resource-type":["image"]},"action":{"type":"ignore-previous-rules"}},{"trigger":{"url-filter":".*"},"action":{"type":"block-cookies"}}]"#
+    static let inlineImageRules = #"[{"trigger":{"url-filter":".*"},"action":{"type":"block"}},{"trigger":{"url-filter":"^protonx-image://inline","resource-type":["image"]},"action":{"type":"ignore-previous-rules"}},{"trigger":{"url-filter":".*"},"action":{"type":"block-cookies"}}]"#
+    static let imageRules = #"[{"trigger":{"url-filter":".*"},"action":{"type":"block"}},{"trigger":{"url-filter":"^protonx-image://(asset|inline)","resource-type":["image"]},"action":{"type":"ignore-previous-rules"}},{"trigger":{"url-filter":".*"},"action":{"type":"block-cookies"}}]"#
     static let maxHeight: CGFloat = 50_000
     // Trusted native code in the isolated client world; message JavaScript stays disabled.
+    static let activateInlineImages = """
+    for (const image of document.querySelectorAll('img[data-protonx-cid]')) {
+        const cid = image.getAttribute('data-protonx-cid');
+        if (!cid || cid.length > 256 || /[\\s<>"'\\\\?#\\/]/.test(cid)) continue;
+        image.src = 'protonx-image://inline?cid=' + encodeURIComponent(cid);
+    }
+    """
     static let activateImages = """
     for (const image of document.querySelectorAll('img[data-protonx-remote-src]')) {
         try {
@@ -23,16 +31,25 @@ enum MailReaderPolicy {
     new ResizeObserver(report).observe(document.body);
     report();
     """
-    static func document(_ sanitizedHTML: String, allowsRemoteImages: Bool = false) -> String {
-        """
+    static func document(_ sanitizedHTML: String, allowsRemoteImages: Bool = false, allowsInlineImages: Bool = false) -> String {
+        let imgSrc = (allowsRemoteImages || allowsInlineImages) ? "protonx-image:" : "'none'"
+        let imgCSS: String
+        if allowsRemoteImages {
+            imgCSS = "img { max-width:100%; height:auto; }"
+        } else if allowsInlineImages {
+            imgCSS = "img[data-protonx-cid] { max-width:100%; height:auto; } img:not([data-protonx-cid]) { display:none !important; }"
+        } else {
+            imgCSS = "img { display:none !important; }"
+        }
+        return """
         <!doctype html><html><head><meta charset="utf-8">
-        <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; img-src \(allowsRemoteImages ? "protonx-image:" : "'none'"); font-src 'none'; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+        <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; img-src \(imgSrc); font-src 'none'; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
         <meta name="referrer" content="no-referrer"><meta name="color-scheme" content="light"><meta name="viewport" content="width=device-width, initial-scale=1">
         <style>
         html { background:white; color:#17141c; color-scheme:only light; }
         body { margin:0; padding:28px; font:15px/1.55 -apple-system, sans-serif; overflow-wrap:anywhere; }
         iframe, object, embed, form, input, button, video, audio { display:none !important; }
-        \(allowsRemoteImages ? "img { max-width:100%; }" : "img { display:none !important; }")
+        \(imgCSS)
         * { animation:none !important; transition:none !important; }
         a { color:#6844d9; } pre { white-space:pre-wrap; overflow-wrap:anywhere; }
         blockquote { margin-left:12px; padding-left:16px; border-left:3px solid #ded9e9; }
@@ -53,11 +70,13 @@ struct MailMessageContent: View {
     let sanitizedHTML: String?
     var allowsTranslation = true
     var isActive = true
+    var loadInlineImage: MailRemoteImages.InlineLoader? = nil
     @State private var plainText = false
     @State private var allowsRemoteImages = false
     @State private var height: CGFloat = 240
     @State private var failed = false
     @State private var link: URL?
+    private var hasInlineImages: Bool { sanitizedHTML?.contains("data-protonx-cid=") == true && loadInlineImage != nil }
     var body: some View {
         Group {
             if #available(macOS 15.0, *), allowsTranslation {
@@ -90,8 +109,8 @@ struct MailMessageContent: View {
                 }.font(.caption).padding(12)
             }
             if let html = translatedHTML ?? sanitizedHTML, (translatedHTML != nil || !plainText), !failed {
-                MailHTMLView(html: html, height: $height, failed: $failed, openLink: { link = $0 }, allowsRemoteImages: allowsRemoteImages)
-                    .id(allowsRemoteImages)
+                MailHTMLView(html: html, height: $height, failed: $failed, openLink: { link = $0 }, allowsRemoteImages: allowsRemoteImages, allowsInlineImages: hasInlineImages, loadInlineImage: loadInlineImage)
+                    .id("\(allowsRemoteImages)-\(hasInlineImages)")
                     .frame(height: height).background(MailTheme.paper)
                     .environment(\.colorScheme, .light)
             } else { MailMessagePaper(text: text) }
@@ -150,14 +169,17 @@ struct MailHTMLView: NSViewRepresentable {
     @Binding var failed: Bool
     let openLink: (URL) -> Void
     var allowsRemoteImages = false
+    var allowsInlineImages = false
+    var loadInlineImage: MailRemoteImages.InlineLoader? = nil
     func makeCoordinator() -> Coordinator { Coordinator(self) }
     func makeNSView(context: Context) -> MailPaperWebView {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .nonPersistent()
         configuration.defaultWebpagePreferences.allowsContentJavaScript = false
         configuration.preferences.javaScriptCanOpenWindowsAutomatically = false
-        let imageLoader = allowsRemoteImages ? MailRemoteImages() : nil
-        if let imageLoader { configuration.setURLSchemeHandler(imageLoader, forURLScheme:MailRemoteImages.scheme) }
+        let needsScheme = allowsRemoteImages || (allowsInlineImages && loadInlineImage != nil)
+        let imageLoader = needsScheme ? MailRemoteImages(allowsRemote: allowsRemoteImages, inlineLoader: allowsInlineImages ? loadInlineImage : nil) : nil
+        if let imageLoader { configuration.setURLSchemeHandler(imageLoader, forURLScheme: MailRemoteImages.scheme) }
         let view = MailPaperWebView(frame: .zero, configuration: configuration)
         view.imageLoader = imageLoader
         view.navigationDelegate = context.coordinator
@@ -204,8 +226,18 @@ struct MailHTMLView: NSViewRepresentable {
             paper = view
             let controller = view.configuration.userContentController
             controller.add(LayoutHandler(self), contentWorld: .defaultClient, name: "protonXMailLayout")
-            let identifier = parent.allowsRemoteImages ? "ProtonX-Mail-Images-v1" : "ProtonX-Mail-Block-All-v1"
-            let rules = parent.allowsRemoteImages ? MailReaderPolicy.imageRules : MailReaderPolicy.blockRules
+            let identifier: String
+            let rules: String
+            if parent.allowsRemoteImages {
+                identifier = "ProtonX-Mail-Images-v2"
+                rules = MailReaderPolicy.imageRules
+            } else if parent.allowsInlineImages {
+                identifier = "ProtonX-Mail-Inline-Images-v1"
+                rules = MailReaderPolicy.inlineImageRules
+            } else {
+                identifier = "ProtonX-Mail-Block-All-v1"
+                rules = MailReaderPolicy.blockRules
+            }
             WKContentRuleListStore.default().compileContentRuleList(forIdentifier: identifier, encodedContentRuleList: rules) { [weak self, weak view] rules, _ in
                 guard let self, self.active, let view else { return }
                 guard let rules else { self.parent.failed = true; return }
@@ -217,7 +249,7 @@ struct MailHTMLView: NSViewRepresentable {
             guard active, ready, loaded != parent.html else { return }
             loaded = parent.html
             allowsDocumentLoad = true
-            navigation = view.loadHTMLString(MailReaderPolicy.document(parent.html, allowsRemoteImages: parent.allowsRemoteImages), baseURL: nil)
+            navigation = view.loadHTMLString(MailReaderPolicy.document(parent.html, allowsRemoteImages: parent.allowsRemoteImages, allowsInlineImages: parent.allowsInlineImages), baseURL: nil)
         }
         func measure(_ view: WKWebView) {
             guard active, ready, !view.isLoading else { return }
@@ -238,7 +270,9 @@ struct MailHTMLView: NSViewRepresentable {
             guard navigation === self.navigation else { return }
             // Native evaluation runs in the isolated world even when automatic
             // content/user-script execution is disabled by the page preferences.
-            let script = MailReaderPolicy.observeLayout + "\n" + (parent.allowsRemoteImages ? MailReaderPolicy.activateImages : "") + "\nundefined;"
+            let inlineScript = parent.allowsInlineImages ? MailReaderPolicy.activateInlineImages : ""
+            let remoteScript = parent.allowsRemoteImages ? MailReaderPolicy.activateImages : ""
+            let script = [MailReaderPolicy.observeLayout, inlineScript, remoteScript, "undefined;"].joined(separator: "\n")
             webView.evaluateJavaScript(script, in:nil, in:.defaultClient) { [weak self] _ in
                 guard let self, self.active else { return }
                 self.measure(webView)

@@ -115,6 +115,11 @@ enum Command {
         folder: u64,
         item: u64,
     },
+    InlineImage {
+        folder: u64,
+        item: u64,
+        cid: String,
+    },
     Thread {
         folder: u64,
         item: u64,
@@ -747,6 +752,38 @@ impl Backend {
                 Ok(
                     json!({"id":item,"body":body,"sanitizedHTML":sanitized_html,"attachments":message.attachments().len(),"attachmentList":attachments::message_list(&message.attachments())?,"actions":actions}),
                 )
+            }
+            Command::InlineImage { folder, item, cid } => {
+                if !reader::valid_cid(&cid) {
+                    return Err("invalid_input");
+                }
+                self.selected_message(folder, item)?;
+                let mailbox = self.mailbox.as_ref().ok_or("invalid_state")?;
+                let message = sdk_result!(
+                    mail_uniffi::mail::messages::GetMessageBodyResult,
+                    block_on(get_message_body(mailbox, Id::from(item)))
+                )
+                .map_err(|e| action_failure(e, "message_failed"))?;
+                if message.failed_to_decrypt() {
+                    return Err("decryption_failed");
+                }
+                let cid_url = format!("cid:{cid}");
+                let loaded = sdk_result!(
+                    mail_uniffi::errors::AttachmentDataResult,
+                    block_on(message.load_image(cid_url, mail_uniffi::mail::ImagePolicy::Safe))
+                )
+                .map_err(|_| "message_failed")?;
+                if loaded.data.is_empty() || loaded.data.len() > reader::MAX_INLINE_IMAGE_BYTES {
+                    return Err("message_too_large");
+                }
+                let mime = reader::allowed_inline_mime(&loaded.mime).ok_or("message_failed")?;
+                Ok(json!({
+                    "id": item,
+                    "inlineImage": {
+                        "mime": mime,
+                        "data": reader::encode_base64(&loaded.data)
+                    }
+                }))
             }
             Command::MessageAction { folder, item, action } => self.message_action(folder, item, action),
             Command::ConversationAction { folder, item, conversation, action } => self.conversation_action(folder, item, conversation, action),
