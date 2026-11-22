@@ -5,6 +5,7 @@ struct MailWindow: View {
     @ObservedObject private var store: NativeMailStore
     var isActive: Bool
     var newAlias: () -> Void
+    var lockMail: (() -> Void)?
     @State private var moreExpanded = false
     @State private var foldersExpanded = false
     @State private var labelsExpanded = false
@@ -16,7 +17,7 @@ struct MailWindow: View {
     @State private var readerExpanded = false
     @State private var pendingTrash: NativeMailStore.ListActionIntent?
     @FocusState private var focus: String?
-    init(store: NativeMailStore, isActive: Bool = true, newAlias: @escaping () -> Void = {}) { self.store = store; self.isActive = isActive; self.newAlias = newAlias }
+    init(store: NativeMailStore, isActive: Bool = true, newAlias: @escaping () -> Void = {}, lockMail: (() -> Void)? = nil) { self.store = store; self.isActive = isActive; self.newAlias = newAlias; self.lockMail = lockMail }
     var body: some View {
         Group {
             if store.phase == .open {
@@ -97,7 +98,7 @@ struct MailWindow: View {
             if store.phase == .locked && !store.demo && !store.previewOnly {
                 VStack(spacing: 0) {
                     LocalUnlockCard(product: "Mail", authentication: store.localAuthentication, isActive: isActive, busy: store.busy,
-                                    unlock: { store.unlock(mode: $0) }, cancel: { store.lock() })
+                                    unlock: { store.unlock(mode: $0) }, cancel: { store.lock(preserveBackgroundSync: store.lockedSyncEnabled) })
                     HStack(spacing: 20) {
                         Button("Explore demo inbox") { store.enterDemo() }
                         Button("Connect using Bridge…") { bridge = true }
@@ -240,7 +241,9 @@ struct MailWindow: View {
                         }
                         if store.demo { Label("Synthetic preview", systemImage: "testtube.2").font(.caption).foregroundStyle(.secondary) }
                         HStack {
-                            Button("Lock", systemImage: "lock") { store.lock() }
+                            Button("Lock", systemImage: "lock") {
+                                if let lockMail { lockMail() } else { store.lock(preserveBackgroundSync: store.lockedSyncEnabled) }
+                            }
                             Spacer()
                             if !store.demo { Button("Sign Out…") { confirmSignOut = true }.disabled(store.busy) }
                         }.font(.callout)
@@ -265,11 +268,29 @@ struct MailWindow: View {
                             .disabled(store.busy || !MailSearchPolicy.valid(store.query.trimmingCharacters(in: .whitespacesAndNewlines)))
                     }.padding(.horizontal, 18).padding(.bottom, 12)
                 }
-                HStack(alignment: .firstTextBaseline) {
-                    Text(store.searchQuery == nil ? folderTitle : "Search results").font(.system(size: 20, weight: .semibold))
-                    Spacer()
-                    Text("\(store.visibleConversations.count) loaded").font(.caption).foregroundStyle(.secondary)
-                }.padding(.horizontal, 18).padding(.bottom, 16)
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(store.searchQuery == nil ? folderTitle : "Search results").font(.system(size: 20, weight: .semibold))
+                        Spacer()
+                        Text("\(store.visibleConversations.count) loaded").font(.caption).foregroundStyle(.secondary)
+                    }
+                    if !store.demo && store.searchQuery == nil {
+                        HStack(spacing: 8) {
+                            SyncStatusIndicator(
+                                isSyncing: store.isSyncing,
+                                syncingLabel: store.syncingStatusLabel,
+                                lastSynced: store.lastSynced,
+                                warning: store.syncWarning ?? (store.cacheRefreshFailed ? "Offline · showing saved mail" : nil),
+                                savedOnly: store.showingSavedContent
+                            )
+                            if !store.isSyncing && (store.syncWarning != nil || store.cacheRefreshFailed) {
+                                Button("Retry") { store.refresh() }
+                                    .buttonStyle(.plain).font(.caption).foregroundStyle(MailTheme.accent)
+                            }
+                            Spacer()
+                        }
+                    }
+                }.padding(.horizontal, 18).padding(.bottom, 12)
                 Divider()
                 List(selection: $store.selectedItem) {
                     ForEach(store.visibleConversations) { conversation in
@@ -325,7 +346,7 @@ struct MailWindow: View {
                     }
                 Divider()
                 HStack {
-                    if store.loading { ProgressView().controlSize(.small); Text("Syncing…") }
+                    if store.isSyncing { ProgressView().controlSize(.small); Text(store.syncingStatusLabel) }
                     else if store.showingSavedContent { Label(store.cacheRefreshFailed ? "Saved content · refresh unavailable" : "Saved on this Mac", systemImage: "internaldrive") }
                     else { Text("\(store.messages.count) messages loaded") }
                     Spacer()

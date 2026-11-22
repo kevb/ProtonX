@@ -60,11 +60,55 @@ import ProtonXCore
         case nil: false
         }
     }
+    var toolbarSyncLabel: String? {
+        switch selected {
+        case .pass: pass?.isSyncing == true ? (pass?.syncingStatusLabel ?? "Syncing vault…") : nil
+        case .mail: mail?.isSyncing == true ? (mail?.syncingStatusLabel ?? "Syncing…") : nil
+        case .contacts: mail?.contactsBusy == true ? "Syncing contacts…" : nil
+        case .calendar: calendar?.isSyncing == true ? "Syncing calendar…" : nil
+        case nil: nil
+        }
+    }
+    var refreshHelp: String {
+        switch selected {
+        case .pass:
+            if let synced = pass?.lastSyncedAt { return "Refresh Pass · \(SyncTimeFormatter.label(for: synced))" }
+            return "Refresh Pass (⌘R)"
+        case .mail:
+            if let synced = mail?.lastSynced { return "Refresh Mail · \(SyncTimeFormatter.label(for: synced))" }
+            return "Refresh Mail (⌘R)"
+        case .calendar:
+            if let synced = calendar?.lastSyncedAt { return "Refresh Calendar · \(SyncTimeFormatter.label(for: synced))" }
+            return "Refresh Calendar (⌘R)"
+        case .contacts:
+            return "Refresh Contacts (⌘R)"
+        case nil:
+            return "Refresh"
+        }
+    }
+    private func configurePassStore(_ store: PassStore) {
+        store.setSystemSuspended(systemAuthenticationSuspended)
+        if !previewOnly, makeNotificationsAvailable {
+            store.configureBackgroundSync(lockedCacheSync: LockSettings.load(from: defaults).passBackgroundCacheSync)
+        }
+        store.objectWillChange.sink { [weak self] _ in self?.productChanged() }.store(in: &observations)
+    }
+    private func configureMailStore(_ store: NativeMailStore) {
+        store.setSystemSuspended(systemAuthenticationSuspended)
+        if !previewOnly, makeNotificationsAvailable {
+            store.configureNotifications(NativeNotifications.shared)
+            store.configureBackgroundSync(whileLocked: LockSettings.load(from: defaults).mailBackgroundSyncWhileLocked)
+        }
+        store.objectWillChange.sink { [weak self] _ in self?.productChanged() }.store(in: &observations)
+    }
+    private func configureCalendarStore(_ store: CalendarStore) {
+        store.setSystemSuspended(systemAuthenticationSuspended)
+        store.objectWillChange.sink { [weak self] _ in self?.productChanged() }.store(in: &observations)
+    }
     func openAlias() {
         guard selected == .mail ? mail?.phase == .open : selected == .pass && pass?.phase == .open else { return }
         if pass == nil {
-            let store = makePass(); store.localAuthentication.systemSuspended = systemAuthenticationSuspended; pass = store
-            store.objectWillChange.sink { [weak self] _ in self?.productChanged() }.store(in: &observations)
+            let store = makePass(); pass = store; configurePassStore(store)
         }
         if pass?.phase == .locked { pass?.localAuthentication.arm() }
         showingAlias = true
@@ -74,34 +118,57 @@ import ProtonXCore
         pass?.cancelLocalUnlock()
         if pass?.phase != .open, pass?.busy == true { pass?.cancelLogin() }
     }
+    private var canUseLinkedMailCalendarUnlock: Bool {
+        guard !previewOnly, !systemAuthenticationSuspended, LockSettings.load(from: defaults).linkMailCalendarUnlock else { return false }
+        let mailOpen = mail.map { $0.phase == .open && !$0.demo && !$0.previewOnly } ?? false
+        let calendarOpen = calendar.map { $0.phase == .connected && !$0.previewOnly } ?? false
+        return mailOpen || calendarOpen
+    }
+    func lockMailGroup(origin: LockTarget) {
+        if LockSettings.load(from: defaults).linkMailCalendarUnlock {
+            lock(targets: [.mail, .calendar], forAutomaticLock: false)
+        } else {
+            lock(targets: [origin], forAutomaticLock: false)
+        }
+    }
     func select(_ product: ProductRoute?) {
-        if selected != product {
+        let changing = selected != product
+        if changing {
             if showingAlias { closeAlias() }
             if product != .mail { returnToContacts = false }
             if selected == .calendar { waitingForAccount = nil }
             if selected == .calendar && calendar?.phase == .signingIn { calendar?.lock(); accountSourceIsValid = nil }
             if let pending = returnToCalendarFrom, product != pending { returnToCalendarFrom = nil }
             pass?.cancelLocalUnlock(); mail?.cancelLocalUnlock(); calendar?.cancelLocalUnlock()
-            if product == .pass { pass?.localAuthentication.arm() }
-            if product == .mail { mail?.localAuthentication.arm() }
-            if product == .calendar { calendar?.localAuthentication.arm() }
         }
         if product != .pass { passSearchRequested = false }
         if product == .pass && pass == nil {
-            let store = makePass(); store.localAuthentication.systemSuspended = systemAuthenticationSuspended; pass = store
-            store.objectWillChange.sink { [weak self] _ in self?.productChanged() }.store(in: &observations)
+            let store = makePass(); pass = store; configurePassStore(store)
         }
         if (product == .mail || product == .contacts) && mail == nil {
-            let store = makeMail(); store.localAuthentication.systemSuspended = systemAuthenticationSuspended; mail = store
-            if !previewOnly, makeNotificationsAvailable { store.configureNotifications(NativeNotifications.shared) }
-            store.objectWillChange.sink { [weak self] _ in self?.productChanged() }.store(in: &observations)
+            let store = makeMail(); mail = store; configureMailStore(store)
         }
         if product == .calendar && calendar == nil {
-            let store = makeCalendar(); store.localAuthentication.systemSuspended = systemAuthenticationSuspended; calendar = store
-            store.objectWillChange.sink { [weak self] _ in self?.productChanged() }.store(in: &observations)
+            let store = makeCalendar(); calendar = store; configureCalendarStore(store)
         }
         selected = product
         if let product, !previewOnly { defaults.set(product.rawValue, forKey: "suiteLastProduct") }
+        let linked = canUseLinkedMailCalendarUnlock
+        if product == .pass {
+            if changing { pass?.localAuthentication.arm() }
+        } else if product == .mail || product == .contacts {
+            if linked && mail?.phase == .locked {
+                mail?.unlockLinked()
+            } else if changing {
+                mail?.localAuthentication.arm()
+            }
+        } else if product == .calendar {
+            if linked && calendar?.phase == .locked {
+                calendar?.unlockLinked()
+            } else if changing {
+                calendar?.localAuthentication.arm()
+            }
+        }
         if product == .calendar, !previewOnly {
             prepareAccountSources()
             let available = calendarAccounts.filter { !$0.needsUnlock }
@@ -132,15 +199,12 @@ import ProtonXCore
     private func prepareAccountSources() {
         // Saved-state hints may construct a locked view, never read credentials or restore.
         if mail == nil && defaults.bool(forKey:"nativeMailConnected") {
-            let store = makeMail(); store.localAuthentication.systemSuspended = systemAuthenticationSuspended; mail = store
-            if makeNotificationsAvailable { store.configureNotifications(NativeNotifications.shared) }
-            store.objectWillChange.sink { [weak self] _ in self?.productChanged() }.store(in:&observations)
+            let store = makeMail(); mail = store; configureMailStore(store)
         }
         if pass == nil {
             let store = makePass()
             if store.hasSession {
-                pass = store
-                store.objectWillChange.sink { [weak self] _ in self?.productChanged() }.store(in:&observations)
+                pass = store; configurePassStore(store)
             }
         }
     }
@@ -193,36 +257,109 @@ import ProtonXCore
     }
     func suspendAuthentication(_ suspended: Bool) {
         systemAuthenticationSuspended = suspended
-        pass?.localAuthentication.systemSuspended = suspended
-        mail?.localAuthentication.systemSuspended = suspended
-        calendar?.localAuthentication.systemSuspended = suspended
+        pass?.setSystemSuspended(suspended)
+        mail?.setSystemSuspended(suspended)
+        calendar?.setSystemSuspended(suspended)
     }
-    func lock(forAutomaticLock: Bool = false) {
-        if showingAlias { closeAlias() }
-        returnToContacts = false
-        waitingForAccount = nil; returnToCalendarFrom = nil; accountSourceIsValid = nil
-        passSearchRequested = false
+    func startBackgroundSync() {
+        guard !previewOnly else { return }
+        let settings = LockSettings.load(from: defaults)
+        if settings.mailBackgroundSyncWhileLocked && defaults.bool(forKey: "nativeMailConnected") {
+            if mail == nil {
+                let store = makeMail(); mail = store; configureMailStore(store)
+            } else {
+                mail?.configureBackgroundSync(whileLocked: true)
+            }
+            if mail?.phase == .locked { mail?.startLockedBackgroundSync() }
+        }
+        if settings.passBackgroundCacheSync {
+            if pass == nil {
+                let store = makePass()
+                if store.hasSession { pass = store; configurePassStore(store) }
+            } else {
+                pass?.configureBackgroundSync(lockedCacheSync: true)
+            }
+        }
+    }
+    func applyBackgroundSyncSettings() {
+        guard !previewOnly else { return }
+        let settings = LockSettings.load(from: defaults)
+        mail?.configureBackgroundSync(whileLocked: settings.mailBackgroundSyncWhileLocked)
+        pass?.configureBackgroundSync(lockedCacheSync: settings.passBackgroundCacheSync)
+        if settings.mailBackgroundSyncWhileLocked || settings.passBackgroundCacheSync {
+            startBackgroundSync()
+        }
+    }
+    func handleForegroundReturn() {
+        guard !previewOnly else { return }
+        mail?.handleForegroundReturn()
+        pass?.handleForegroundReturn()
+        calendar?.handleForegroundReturn()
+    }
+    func handleWindowClose() {
+        let settings = LockSettings.load(from: defaults)
+        let targets = settings.targetsForWindowClose()
+        if targets.contains(.mail), !settings.mailBackgroundSyncWhileLocked, let mail, mail.hasUnsavedEditingDraft {
+            // Flush unsaved draft before tearing down Mail when background sync while locked is disabled.
+            lock(targets: targets.subtracting([.mail]), forAutomaticLock: false)
+            Task { [weak self] in
+                await mail.flushDraftBeforeShutdown()
+                self?.lock(targets: [.mail], forAutomaticLock: false)
+            }
+            return
+        }
+        lock(targets: targets, forAutomaticLock: false)
+    }
+    func prepareForTermination(_ done: @escaping @MainActor () -> Void) -> Bool {
+        guard let mail, mail.hasUnsavedEditingDraft else { return false }
+        Task { [weak self] in
+            await mail.flushDraftBeforeShutdown()
+            self?.terminate()
+            done()
+        }
+        return true
+    }
+    func terminate() {
+        lock(targets: Set(LockTarget.allCases), forAutomaticLock: false, preserveBackgroundSync: false)
+        mail?.terminate()
+        pass?.terminate()
+        calendar?.terminate()
+    }
+    func lock(targets: Set<LockTarget> = Set(LockTarget.allCases), forAutomaticLock: Bool = false, preserveBackgroundSync: Bool? = nil) {
+        let settings = LockSettings.load(from: defaults)
+        let keepMailSync = preserveBackgroundSync ?? (!previewOnly && settings.mailBackgroundSyncWhileLocked)
+        let keepPassCacheSync = preserveBackgroundSync ?? (!previewOnly && settings.passBackgroundCacheSync)
+        if targets.contains(.pass) || (targets.contains(.mail) && selected == .mail) {
+            if showingAlias { closeAlias() }
+        }
+        if targets.contains(.mail) { returnToContacts = false }
+        if targets.contains(.calendar) {
+            waitingForAccount = nil; returnToCalendarFrom = nil; accountSourceIsValid = nil
+        }
+        if targets.contains(.pass) { passSearchRequested = false }
         // Repeated automatic locks must leave already-locked products alone: otherwise
         // overlapping sleep/lock events could disarm the pending attempt or undo Cancel.
-        if let pass, !forAutomaticLock || pass.phase == .open || pass.busy {
+        if targets.contains(.pass), let pass, !forAutomaticLock || pass.phase == .open || pass.busy {
             let rearm = forAutomaticLock && !pass.previewOnly && !pass.isDemo &&
                 (pass.phase == .open || (pass.localAuthentication.state == .authenticating && pass.localAuthentication.mode == .touchID))
-            pass.lock()
+            pass.lock(preserveLockedCacheSync: keepPassCacheSync)
             if rearm, pass.phase == .locked { pass.localAuthentication.arm() }
         }
-        if let mail, !forAutomaticLock || (mail.phase != .locked && mail.phase != .welcome) || mail.busy {
+        if targets.contains(.mail), let mail, !forAutomaticLock || (mail.phase != .locked && mail.phase != .welcome) || mail.busy {
             let rearm = forAutomaticLock && !mail.previewOnly && !mail.demo &&
                 (mail.phase == .open || (mail.localAuthentication.state == .authenticating && mail.localAuthentication.mode == .touchID))
-            mail.lock()
+            mail.lock(preserveBackgroundSync: keepMailSync)
             if rearm, mail.phase == .locked { mail.localAuthentication.arm() }
         }
-        if let calendar, !forAutomaticLock || (calendar.phase != .locked && calendar.phase != .welcome) || calendar.busy {
+        if targets.contains(.calendar), let calendar, !forAutomaticLock || (calendar.phase != .locked && calendar.phase != .welcome) || calendar.busy {
             let rearm = forAutomaticLock && !calendar.previewOnly &&
                 (calendar.phase == .connected || (calendar.localAuthentication.state == .authenticating && calendar.localAuthentication.mode == .touchID))
-            calendar.lock()
+            calendar.lock(preserveRetainedState: keepMailSync)
             if rearm, calendar.phase == .locked { calendar.localAuthentication.arm() }
         }
-        NotificationCenter.default.post(name: .protonXLock, object: nil)
+        if targets.contains(.mail) {
+            NotificationCenter.default.post(name: .protonXLock, object: nil)
+        }
     }
     func refresh() {
         guard canRefresh else { return }
@@ -250,7 +387,7 @@ struct SuiteWindow: View {
                         .allowsHitTesting(workspace.selected == .pass).accessibilityHidden(workspace.selected != .pass)
                 }
                 if let mail = workspace.mail {
-                    MailWindow(store: mail, isActive: workspace.selected == .mail, newAlias: { workspace.openAlias() })
+                    MailWindow(store: mail, isActive: workspace.selected == .mail, newAlias: { workspace.openAlias() }, lockMail: { workspace.lockMailGroup(origin: .mail) })
                         .opacity(workspace.selected == .mail ? 1 : 0)
                         .allowsHitTesting(workspace.selected == .mail).accessibilityHidden(workspace.selected != .mail)
                 }
@@ -260,7 +397,7 @@ struct SuiteWindow: View {
                         .allowsHitTesting(workspace.selected == .contacts).accessibilityHidden(workspace.selected != .contacts)
                 }
                 if let calendar = workspace.calendar {
-                    CalendarWindow(store: calendar, isActive: workspace.selected == .calendar, accounts: workspace.calendarAccounts, connectAccount: { workspace.connectCalendar(using:$0) }, useAnotherAccount: { workspace.cancelCalendarAccountIntent() })
+                    CalendarWindow(store: calendar, isActive: workspace.selected == .calendar, accounts: workspace.calendarAccounts, connectAccount: { workspace.connectCalendar(using:$0) }, useAnotherAccount: { workspace.cancelCalendarAccountIntent() }, lockCalendar: { workspace.lockMailGroup(origin: .calendar) })
                         .opacity(workspace.selected == .calendar ? 1 : 0)
                         .allowsHitTesting(workspace.selected == .calendar).accessibilityHidden(workspace.selected != .calendar)
                 }
@@ -294,13 +431,12 @@ struct SuiteWindow: View {
                     Button { workspace.openAlias() } label: { Label("New email alias…", systemImage: "at.badge.plus") }
                         .help("Create a hide-my-email alias in Pass").accessibilityIdentifier("suiteNewAlias")
                 }
-                if (workspace.selected == .pass && workspace.pass?.busy == true) ||
-                   (workspace.selected == .mail && workspace.mail?.busy == true) ||
-                   (workspace.selected == .calendar && workspace.calendar?.busy == true) {
-                    ProgressView().controlSize(.small).accessibilityLabel("Working")
+                if let syncLabel = workspace.toolbarSyncLabel {
+                    ToolbarSyncPill(label: syncLabel)
                 }
                 if workspace.selected != nil {
                     Button { workspace.refresh() } label: { Label("Refresh", systemImage: "arrow.clockwise") }
+                        .help(workspace.refreshHelp)
                         .disabled(!workspace.canRefresh)
                     if workspace.selected != .contacts {
                     if workspace.selected == .pass {
@@ -319,10 +455,13 @@ struct SuiteWindow: View {
                 }
             }
         }
-        .background(SuiteWindowRegistration(onClose: { workspace.lock() }).frame(width: 0, height: 0))
+        .background(SuiteWindowRegistration(onClose: { workspace.handleWindowClose() }).frame(width: 0, height: 0))
+        .onReceive(NotificationCenter.default.publisher(for: .protonXSettingsChanged)) { _ in
+            workspace.applyBackgroundSyncSettings()
+        }
         .onAppear {
             if workspace.selected == .pass { workspace.pass?.localAuthentication.arm() }
-            if workspace.selected == .mail { workspace.mail?.localAuthentication.arm() }
+            if workspace.selected == .mail || workspace.selected == .contacts { workspace.mail?.localAuthentication.arm() }
             if workspace.selected == .calendar { workspace.calendar?.localAuthentication.arm() }
             ProductWindows.shared.installSelector { workspace.select($0) }
             ProductWindows.shared.installOpener { _ in openWindow(id: "suite") }
@@ -333,12 +472,17 @@ struct SuiteWindow: View {
                 if let target { workspace.mail?.openNotification(folder: target.folder, item: target.item) }
             }
             SystemIntegration.shared.lockSuite = { workspace.lock() }
+            SystemIntegration.shared.terminateSuite = { workspace.terminate() }
+            SystemIntegration.shared.prepareForTermination = { done in workspace.prepareForTermination(done) }
             SystemIntegration.shared.suspendAuthentication = { workspace.suspendAuthentication($0) }
             SystemIntegration.shared.lockSuiteAutomatically = { workspace.lock(forAutomaticLock: true) }
+            SystemIntegration.shared.lockProductsAutomatically = { targets in workspace.lock(targets: targets, forAutomaticLock: true) }
+            SystemIntegration.shared.appDidBecomeActive = { workspace.handleForegroundReturn() }
             SystemIntegration.shared.openSettings = { openSettings(); NSApp.activate(ignoringOtherApps: true) }
             SystemIntegration.shared.configure()
+            workspace.startBackgroundSync()
         }
-        .onDisappear { workspace.lock() }
+        .onDisappear { workspace.handleWindowClose() }
     }
     private var rail: some View {
         VStack(spacing: 12) {

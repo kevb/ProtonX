@@ -62,8 +62,11 @@ final class NativeMailStore: ObservableObject {
     @Published private(set) var email = ""
     @Published private(set) var busy = false
     @Published private(set) var loading = false
+    @Published private(set) var backgroundSyncing = false
+    @Published private(set) var backgroundSyncActive = false
     @Published private(set) var showingSavedContent = false
     @Published private(set) var cacheRefreshFailed = false
+    @Published private(set) var syncWarning: String?
     @Published private(set) var lastSynced: Date?
     @Published private(set) var demo = false
     @Published var selectedFolder: UInt64?
@@ -93,6 +96,27 @@ final class NativeMailStore: ObservableObject {
     private var notificationEpoch = SessionEpoch()
     private var notifications: NativeNotifications?
     private var notificationInterval: Duration = .seconds(5)
+    private var lastKnownUnread: UInt64?
+    private var backgroundRefreshTask: Task<Void, Never>?
+    private var periodicRefreshTask: Task<Void, Never>?
+    private var lockedSyncTask: Task<Void, Never>?
+    private var lockedSyncEpoch = SessionEpoch()
+    private var backgroundSyncInterval: Duration = .seconds(60)
+    private(set) var lockedSyncEnabled = false
+    private var helperSessionActive = false
+    private var initialSyncPending = false
+    private struct RetainedMailState {
+        let folders: [NativeMailFolder]
+        let messages: [NativeMailMessage]
+        let selectedFolder: UInt64?
+        let loadedFolder: UInt64?
+        let selectedItem: UInt64?
+        let email: String
+        let lastSynced: Date?
+        let contacts: [ContactEntry]
+        let contactsLoaded: Bool
+    }
+    private var retainedState: RetainedMailState?
     private var sendPolling: Task<Void, Never>?
     let previewOnly: Bool
     var accountHandoffGeneration: UInt64? { phase == .open && !demo && !previewOnly ? epoch.value : nil }
@@ -137,6 +161,12 @@ final class NativeMailStore: ObservableObject {
     }
     var isLoadingList: Bool { phase == .open && !demo && (loading || (busy && (loadedFolder == nil || loadedFolder != selectedFolder))) }
     var initialListFailed: Bool { phase == .open && !demo && !busy && error != nil && (loadedFolder == nil || loadedFolder != selectedFolder) }
+    var isSyncing: Bool { phase == .open && !demo && (busy || loading || backgroundSyncing || initialSyncPending) }
+    var syncingStatusLabel: String {
+        if showingSavedContent && isSyncing { return "Syncing saved mail…" }
+        if initialSyncPending && messages.isEmpty { return "Checking for mail…" }
+        return "Syncing…"
+    }
     func signIn(username: String, password: String) {
         guard !previewOnly, !busy, !username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !password.isEmpty else { return }
         if demo { lock(); demo = false }
@@ -167,19 +197,73 @@ final class NativeMailStore: ObservableObject {
             let allowed = try await localAuthentication.authenticate(mode, reason: "Unlock ProtonX Mail on this Mac")
             guard allowed else { throw ProtonXError.cancelled }
             try check(captured)
+            if helperSessionActive {
+                stopLockedBackgroundSync(keepHelper: true)
+                do {
+                    try await applyAuthentication(.init(phase: .connected, cacheFirst: cacheFirstActive), captured: captured, preserveDeliveredNotifications: true)
+                    return
+                } catch {
+                    try check(captured)
+                    if (error as? NativeMailFailure) == .sessionExpired { throw error }
+                    helperSessionActive = false
+                }
+            }
             let result = try await runner.request(NativeMailCommand("restore"))
             try check(captured); try await applyAuthentication(result, captured: captured)
         }
     }
-    private func applyAuthentication(_ result: NativeMailResult, captured: UInt64) async throws {
+    /// Restores Mail's independent saved session after macOS local authentication
+    /// already succeeded in a linked product (Calendar). Never runs in preview/demo or while suspended.
+    func unlockLinked() {
+        guard !busy, !previewOnly, !demo, phase == .locked, !localAuthentication.systemSuspended else { return }
+        perform { [self] captured in
+            if helperSessionActive {
+                stopLockedBackgroundSync(keepHelper: true)
+                do {
+                    try await applyAuthentication(.init(phase: .connected, cacheFirst: cacheFirstActive), captured: captured, preserveDeliveredNotifications: true)
+                    return
+                } catch {
+                    try check(captured)
+                    if (error as? NativeMailFailure) == .sessionExpired { throw error }
+                    helperSessionActive = false
+                }
+            }
+            let result = try await runner.request(NativeMailCommand("restore"))
+            try check(captured); try await applyAuthentication(result, captured: captured)
+        }
+    }
+    private func applyAuthentication(_ result: NativeMailResult, captured: UInt64, preserveDeliveredNotifications: Bool = false) async throws {
         switch result.phase {
         case .totp: phase = .totp
         case .mailboxPassword: phase = .mailboxPassword
         case .securityKey: phase = .securityKey
         case .connected:
-            hasSession = true; defaults.set(true, forKey: "nativeMailConnected"); phase = .open
-            restartNotifications()
+            hasSession = true; helperSessionActive = true; defaults.set(true, forKey: "nativeMailConnected"); phase = .open
+            syncWarning = nil
             cacheFirstActive = result.cacheFirst == true
+            if let retained = retainedState {
+                retainedState = nil
+                folders = retained.folders; messages = retained.messages
+                selectedFolder = retained.selectedFolder; loadedFolder = retained.loadedFolder
+                selectedItem = retained.selectedItem; email = retained.email
+                lastSynced = retained.lastSynced
+                contacts = retained.contacts; contactsLoaded = retained.contactsLoaded
+                initialSyncPending = false
+                restartNotifications(preserveDelivered: preserveDeliveredNotifications)
+                startPeriodicRefresh()
+                // Return immediately so the inbox renders in 0ms, then reload any selected
+                // message body and run a non-blocking live sync in the background.
+                Task { @MainActor [weak self] in
+                    await Task.yield()
+                    guard let self, self.epoch.accepts(captured), self.phase == .open else { return }
+                    if self.selectedItem != nil { self.select() }
+                    self.backgroundRefresh()
+                }
+                return
+            }
+            initialSyncPending = true
+            restartNotifications(preserveDelivered: preserveDeliveredNotifications)
+            startPeriodicRefresh()
             try await load(captured: captured, mode: cacheFirstActive ? "local" : nil)
         default: throw ProtonXError.invalidResponse
         }
@@ -238,8 +322,14 @@ final class NativeMailStore: ObservableObject {
         email = result.email ?? ""; loading = result.loading ?? false
         showingSavedContent = cacheFirstActive && result.fresh != true
         cacheRefreshFailed = result.refreshFailed == true
-        if cacheRefreshFailed { error = "Could not refresh. Showing saved Mail content; retry when connected." }
-        if cacheFirstActive ? result.fresh == true : !loading { lastSynced = Date(); mustRefreshBeforeActions = false }
+        if cacheRefreshFailed {
+            initialSyncPending = false
+            syncWarning = "Offline · showing saved mail"
+            error = "Could not refresh. Showing saved Mail content; retry when connected."
+        }
+        if cacheFirstActive ? result.fresh == true : !loading {
+            lastSynced = Date(); mustRefreshBeforeActions = false; initialSyncPending = false; syncWarning = nil
+        }
         reconcileSelection()
         // Read saved rows first, then refresh once. Later polls read status only.
         // Lock and folder changes invalidate any scheduled work.
@@ -633,12 +723,244 @@ final class NativeMailStore: ObservableObject {
     }
     func configureNotifications(_ controller: NativeNotifications, interval: Duration = .seconds(5)) {
         notifications = controller; notificationInterval = interval
-        controller.configurationChanged = { [weak self] in self?.restartNotifications() }
-        restartNotifications()
+        controller.configurationChanged = { [weak self] in
+            guard let self else { return }
+            if self.phase == .open { self.restartNotifications() }
+            else if self.phase == .locked && self.lockedSyncEnabled { self.startLockedBackgroundSync() }
+        }
+        if phase == .open { restartNotifications() }
+        else if phase == .locked && lockedSyncEnabled { startLockedBackgroundSync() }
     }
-    private func restartNotifications() {
+    func configureBackgroundSync(whileLocked: Bool, interval: Duration = .seconds(60)) {
+        let changed = lockedSyncEnabled != whileLocked || backgroundSyncInterval != interval
+        lockedSyncEnabled = whileLocked
+        backgroundSyncInterval = interval
+        guard !previewOnly, !demo else { return }
+        if phase == .open {
+            if changed || periodicRefreshTask == nil { startPeriodicRefresh() }
+        } else if phase == .locked && hasSession {
+            if whileLocked {
+                if !localAuthentication.systemSuspended { startLockedBackgroundSync() }
+            } else {
+                stopLockedBackgroundSync(keepHelper: false)
+                notifications?.clearMail()
+            }
+        }
+    }
+    func setSystemSuspended(_ suspended: Bool) {
+        let changed = localAuthentication.systemSuspended != suspended
+        localAuthentication.systemSuspended = suspended
+        guard changed, !previewOnly, !demo else { return }
+        if suspended {
+            // Pause background network/Keychain polling during sleep/screen lock without dropping UI state.
+            lockedSyncEpoch.invalidate(); lockedSyncTask?.cancel(); lockedSyncTask = nil
+            periodicRefreshTask?.cancel(); periodicRefreshTask = nil
+        } else if phase == .locked && lockedSyncEnabled && hasSession {
+            startLockedBackgroundSync()
+        } else if phase == .open {
+            startPeriodicRefresh()
+            backgroundRefresh()
+        }
+    }
+    func handleForegroundReturn() {
+        guard phase == .open, !demo, !previewOnly else { return }
+        if lastSynced == nil || Date().timeIntervalSince(lastSynced!) >= 30 {
+            backgroundRefresh()
+        }
+    }
+    func backgroundRefresh() {
+        guard phase == .open, !demo, !previewOnly, !busy, !backgroundSyncing, !loading,
+              draft == nil, searchQuery == nil, !mustRefreshBeforeActions else { return }
+        let captured = epoch.value
+        let folder = selectedFolder
+        backgroundSyncing = true
+        backgroundRefreshTask?.cancel()
+        backgroundRefreshTask = Task { [weak self] in
+            defer {
+                if let self, self.epoch.accepts(captured) { self.backgroundSyncing = false }
+            }
+            guard let self else { return }
+            do {
+                let mode = self.cacheFirstActive ? "refresh" : nil
+                let result = try await self.runner.request(NativeMailCommand("snapshot", folder: folder, more: false, mode: mode))
+                try self.check(captured)
+                guard self.phase == .open, self.selectedFolder == folder, self.searchQuery == nil, self.draft == nil else { return }
+                guard let nextFolders = result.folders, let nextMessages = result.messages, let nextFolder = result.folder,
+                      nextFolders.contains(where: { $0.id == nextFolder }) else { throw ProtonXError.invalidResponse }
+                self.folders = nextFolders; self.messages = nextMessages; self.selectedFolder = nextFolder; self.loadedFolder = nextFolder
+                if let email = result.email { self.email = email }
+                self.loading = result.loading ?? false
+                self.showingSavedContent = self.cacheFirstActive && result.fresh != true
+                self.cacheRefreshFailed = result.refreshFailed == true
+                if self.cacheRefreshFailed {
+                    self.initialSyncPending = false
+                    self.syncWarning = "Offline · showing saved mail"
+                } else if self.cacheFirstActive ? result.fresh == true : !self.loading {
+                    self.lastSynced = Date(); self.mustRefreshBeforeActions = false; self.initialSyncPending = false; self.syncWarning = nil
+                }
+                self.reconcileSelection()
+                if self.loading {
+                    let expectedFolder = nextFolder
+                    self.polling?.cancel()
+                    self.polling = Task { [weak self] in
+                        try? await Task.sleep(for: self?.cacheFirstActive == true ? .seconds(1) : .seconds(3))
+                        guard let self, !Task.isCancelled, self.epoch.accepts(captured), self.phase == .open,
+                              self.selectedFolder == expectedFolder, self.searchQuery == nil, self.draft == nil else { return }
+                        if !self.busy && !self.backgroundSyncing {
+                            self.pollBackgroundRefresh(captured: captured, expectedFolder: expectedFolder)
+                        }
+                    }
+                }
+            } catch {
+                guard !Task.isCancelled, self.epoch.accepts(captured), self.phase == .open else { return }
+                if (error as? NativeMailFailure) == .sessionExpired { self.expireSession() }
+                else if (error as? NativeMailFailure) == .invalidState || !(error is NativeMailFailure) {
+                    // Recover cleanly if the background helper restarted while locked.
+                    self.helperSessionActive = false
+                    if let restored = try? await self.runner.request(NativeMailCommand("restore")),
+                       !Task.isCancelled, self.epoch.accepts(captured), self.phase == .open, restored.phase == .connected {
+                        self.helperSessionActive = true
+                        self.cacheFirstActive = restored.cacheFirst == true
+                        let mode = self.cacheFirstActive ? "refresh" : nil
+                        if let retry = try? await self.runner.request(NativeMailCommand("snapshot", folder: folder, more: false, mode: mode)),
+                           !Task.isCancelled, self.epoch.accepts(captured), self.phase == .open,
+                           self.selectedFolder == folder, self.searchQuery == nil, self.draft == nil,
+                           let nextFolders = retry.folders, let nextMessages = retry.messages, let nextFolder = retry.folder,
+                           nextFolders.contains(where: { $0.id == nextFolder }) {
+                            self.folders = nextFolders; self.messages = nextMessages; self.selectedFolder = nextFolder; self.loadedFolder = nextFolder
+                            if let email = retry.email { self.email = email }
+                            self.loading = retry.loading ?? false
+                            self.showingSavedContent = self.cacheFirstActive && retry.fresh != true
+                            self.cacheRefreshFailed = retry.refreshFailed == true
+                            if !self.cacheRefreshFailed && (self.cacheFirstActive ? retry.fresh == true : !self.loading) {
+                                self.lastSynced = Date(); self.mustRefreshBeforeActions = false; self.initialSyncPending = false; self.syncWarning = nil
+                            }
+                            self.reconcileSelection()
+                            return
+                        }
+                    }
+                    self.syncWarning = "Sync delayed"
+                } else { self.syncWarning = "Sync delayed" }
+            }
+        }
+    }
+    private func pollBackgroundRefresh(captured: UInt64, expectedFolder: UInt64) {
+        guard phase == .open, !demo, !previewOnly, !busy, !backgroundSyncing,
+              selectedFolder == expectedFolder, searchQuery == nil, draft == nil else { return }
+        backgroundSyncing = true
+        backgroundRefreshTask = Task { [weak self] in
+            defer {
+                if let self, self.epoch.accepts(captured) { self.backgroundSyncing = false }
+            }
+            guard let self else { return }
+            do {
+                let mode = self.cacheFirstActive ? "poll" : nil
+                let result = try await self.runner.request(NativeMailCommand("snapshot", folder: expectedFolder, more: false, mode: mode))
+                try self.check(captured)
+                guard self.phase == .open, self.selectedFolder == expectedFolder, self.searchQuery == nil, self.draft == nil else { return }
+                guard let nextFolders = result.folders, let nextMessages = result.messages, let nextFolder = result.folder,
+                      nextFolders.contains(where: { $0.id == nextFolder }) else { throw ProtonXError.invalidResponse }
+                self.folders = nextFolders; self.messages = nextMessages; self.selectedFolder = nextFolder; self.loadedFolder = nextFolder
+                self.loading = result.loading ?? false
+                self.showingSavedContent = self.cacheFirstActive && result.fresh != true
+                self.cacheRefreshFailed = result.refreshFailed == true
+                if self.cacheRefreshFailed { self.initialSyncPending = false; self.syncWarning = "Offline · showing saved mail" }
+                else if self.cacheFirstActive ? result.fresh == true : !self.loading {
+                    self.lastSynced = Date(); self.mustRefreshBeforeActions = false; self.initialSyncPending = false; self.syncWarning = nil
+                }
+                self.reconcileSelection()
+            } catch {
+                guard !Task.isCancelled, self.epoch.accepts(captured), self.phase == .open else { return }
+                if (error as? NativeMailFailure) == .sessionExpired { self.expireSession() }
+                else { self.syncWarning = "Sync delayed" }
+            }
+        }
+    }
+    private func startPeriodicRefresh() {
+        periodicRefreshTask?.cancel(); periodicRefreshTask = nil
+        guard !previewOnly, !demo, phase == .open, !localAuthentication.systemSuspended else { return }
+        let captured = epoch.value
+        let interval = backgroundSyncInterval
+        periodicRefreshTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: interval)
+                guard let self, !Task.isCancelled, self.epoch.accepts(captured), self.phase == .open else { return }
+                if !self.localAuthentication.systemSuspended { self.backgroundRefresh() }
+            }
+        }
+    }
+    func startLockedBackgroundSync() {
+        lockedSyncEpoch.invalidate(); lockedSyncTask?.cancel(); lockedSyncTask = nil
+        guard lockedSyncEnabled, !previewOnly, !demo, hasSession, phase == .locked else {
+            backgroundSyncActive = false; return
+        }
+        guard !localAuthentication.systemSuspended else { return }
+        let ticket = lockedSyncEpoch.value
+        backgroundSyncActive = true
+        lockedSyncTask = Task { [weak self] in
+            guard let self else { return }
+            while !Task.isCancelled {
+                guard self.lockedSyncEpoch.accepts(ticket), self.phase == .locked, self.lockedSyncEnabled, !self.localAuthentication.systemSuspended else { return }
+                do {
+                    if !self.helperSessionActive {
+                        let restored = try await self.runner.request(NativeMailCommand("restore"))
+                        guard !Task.isCancelled, self.lockedSyncEpoch.accepts(ticket), self.phase == .locked, self.lockedSyncEnabled else { return }
+                        guard restored.phase == .connected else { return }
+                        self.helperSessionActive = true
+                        self.cacheFirstActive = restored.cacheFirst == true
+                    }
+                    if let notifications = self.notifications {
+                        await notifications.refreshPermission()
+                        guard !Task.isCancelled, self.lockedSyncEpoch.accepts(ticket), self.phase == .locked, self.lockedSyncEnabled else { return }
+                        if notifications.active {
+                            let start = try await self.runner.request(NativeMailCommand("notifications_start"))
+                            guard !Task.isCancelled, self.lockedSyncEpoch.accepts(ticket), self.phase == .locked, self.lockedSyncEnabled else { return }
+                            notifications.beginLockedMail(preserveDelivered: true)
+                            await notifications.receive(start.notifications ?? [], unread: start.unreadCount ?? 0)
+                            while !Task.isCancelled {
+                                try await Task.sleep(for: self.notificationInterval)
+                                await notifications.refreshPermission()
+                                guard !Task.isCancelled, self.lockedSyncEpoch.accepts(ticket), self.phase == .locked, self.lockedSyncEnabled, !self.localAuthentication.systemSuspended else { return }
+                                if !notifications.active {
+                                    _ = try? await self.runner.request(NativeMailCommand("notifications_stop"))
+                                    notifications.clearMail()
+                                    break
+                                }
+                                let poll = try await self.runner.request(NativeMailCommand("notifications_poll"))
+                                guard !Task.isCancelled, self.lockedSyncEpoch.accepts(ticket), self.phase == .locked, self.lockedSyncEnabled else { return }
+                                guard let batch = poll.notifications, let unread = poll.unreadCount else { throw ProtonXError.invalidResponse }
+                                await notifications.receive(batch, unread: unread)
+                            }
+                        } else {
+                            // Keep the helper alive for Proton's SDK event loop even when OS alerts are off.
+                            try await Task.sleep(for: self.backgroundSyncInterval)
+                        }
+                    } else {
+                        try await Task.sleep(for: self.backgroundSyncInterval)
+                    }
+                } catch {
+                    if Task.isCancelled || !self.lockedSyncEpoch.accepts(ticket) || self.phase != .locked || !self.lockedSyncEnabled { return }
+                    if (error as? NativeMailFailure) == .sessionExpired { self.expireSession(); return }
+                    if !(error is NativeMailFailure) || (error as? NativeMailFailure) == .invalidState {
+                        self.helperSessionActive = false
+                    }
+                    try? await Task.sleep(for: .seconds(15))
+                }
+            }
+        }
+    }
+    private func stopLockedBackgroundSync(keepHelper: Bool) {
+        lockedSyncEpoch.invalidate(); lockedSyncTask?.cancel(); lockedSyncTask = nil
+        backgroundSyncActive = false
+        if !keepHelper {
+            helperSessionActive = false
+            runner.cancelAll()
+        }
+    }
+    private func restartNotifications(preserveDelivered: Bool = false) {
         notificationEpoch.invalidate(); notificationTask?.cancel(); notificationTask = nil
-        notifications?.clearMail()
+        if preserveDelivered { notifications?.beginMail(preserveDelivered: true) }
+        else { notifications?.clearMail() }
         guard !previewOnly, !demo, phase == .open, let notifications else { return }
         let session = epoch.value, generation = notificationEpoch.value
         notificationTask = Task { [weak self] in
@@ -647,7 +969,8 @@ final class NativeMailStore: ObservableObject {
             do {
                 let result = try await self.runner.request(NativeMailCommand(notifications.active ? "notifications_start" : "notifications_stop"))
                 guard !Task.isCancelled, self.epoch.accepts(session), self.notificationEpoch.accepts(generation), notifications.active else { return }
-                notifications.beginMail()
+                notifications.beginMail(preserveDelivered: preserveDelivered)
+                self.lastKnownUnread = result.unreadCount
                 await notifications.receive(result.notifications ?? [], unread: result.unreadCount ?? 0)
                 while !Task.isCancelled {
                     try await Task.sleep(for: self.notificationInterval)
@@ -657,7 +980,12 @@ final class NativeMailStore: ObservableObject {
                         let result = try await self.runner.request(NativeMailCommand("notifications_poll"))
                         guard !Task.isCancelled, self.epoch.accepts(session), self.notificationEpoch.accepts(generation) else { return }
                         guard let batch = result.notifications, let unread = result.unreadCount else { throw ProtonXError.invalidResponse }
+                        let unreadChanged = self.lastKnownUnread != nil && self.lastKnownUnread != unread
+                        self.lastKnownUnread = unread
                         await notifications.receive(batch, unread: unread)
+                        if !batch.isEmpty || unreadChanged {
+                            self.backgroundRefresh()
+                        }
                     } catch {
                         if Task.isCancelled || !self.epoch.accepts(session) || !self.notificationEpoch.accepts(generation) { return }
                         if (error as? NativeMailFailure) == .sessionExpired { self.expireSession(); return }
@@ -687,19 +1015,97 @@ final class NativeMailStore: ObservableObject {
             selectedItem = item; select(preferred: item)
         }
     }
-    func cancelLocalUnlock() { if localAuthentication.state == .authenticating { lock() } }
-    func lock() {
+    private func autoSavePayload() -> (token: UInt64, content: NativeMailComposeContent)? {
+        guard phase == .open, !demo, !previewOnly, !attachmentBusy, !attachmentNeedsRefresh,
+              let draft, draft.state == .editing, let editorState else { return nil }
+        var content = editorState.content
+        let hasContent = !content.to.isEmpty || !content.cc.isEmpty || !content.bcc.isEmpty ||
+            !content.subject.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+            !content.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        guard hasContent else { return nil }
+        if (try? content.validate(senders: draft.senders, sending: false)) == nil {
+            // Strip any half-typed invalid recipient token so the subject and message body still save as a draft.
+            let cleanSubject = String(content.subject.unicodeScalars.filter { !CharacterSet.controlCharacters.contains($0) }).prefix(998)
+            content = NativeMailComposeContent(
+                sender: draft.senders.contains(content.sender) ? content.sender : draft.sender,
+                to: content.to.filter(ContactRecipients.valid),
+                cc: content.cc.filter(ContactRecipients.valid),
+                bcc: content.bcc.filter(ContactRecipients.valid),
+                subject: String(cleanSubject),
+                text: content.text
+            )
+            guard (try? content.validate(senders: draft.senders, sending: false)) != nil else { return nil }
+        }
+        return (draft.token, content)
+    }
+    var hasUnsavedEditingDraft: Bool { autoSavePayload() != nil }
+    /// Best-effort bounded save of an open editing draft before quitting or closing the helper.
+    func flushDraftBeforeShutdown() async {
+        guard let pending = autoSavePayload() else { return }
+        draft = nil; composeStatus = nil
+        let runner = self.runner
+        let saveTask = Task {
+            _ = try? await runner.request(NativeMailCommand("save_draft", token: pending.token, content: pending.content))
+            _ = try? await runner.request(NativeMailCommand("close_draft", token: pending.token))
+        }
+        let timeoutTask = Task {
+            try? await Task.sleep(for: .seconds(3))
+            saveTask.cancel()
+        }
+        await saveTask.value
+        timeoutTask.cancel()
+    }
+    func cancelLocalUnlock() { if localAuthentication.state == .authenticating { lock(preserveBackgroundSync: lockedSyncEnabled) } }
+    func terminate() { retainedState = nil; lock(preserveBackgroundSync: false) }
+    func lock(preserveBackgroundSync: Bool = false) {
+        let keepSync = preserveBackgroundSync && lockedSyncEnabled && hasSession && !previewOnly && !demo
+        let pendingDraftSave = keepSync ? autoSavePayload() : nil
+        let openDraftToken = keepSync ? draft?.token : nil
+        if keepSync && phase == .open && !folders.isEmpty && searchQuery == nil {
+            // Keep folder/message list metadata privately behind the lock gate for instant 0ms unlock.
+            // Decrypted bodies, WKWebView, attachment previews, contact details and drafts are cleared.
+            retainedState = RetainedMailState(
+                folders: folders, messages: messages,
+                selectedFolder: selectedFolder, loadedFolder: loadedFolder,
+                selectedItem: selectedItem, email: email, lastSynced: lastSynced,
+                contacts: contacts, contactsLoaded: contactsLoaded
+            )
+        } else if !keepSync {
+            retainedState = nil
+        }
         clearContacts()
         draftAttachmentPolling?.cancel(); clearAttachments()
-        notificationEpoch.invalidate(); notificationTask?.cancel(); notificationTask = nil; notifications?.clearMail()
-        epoch.invalidate(); selectionEpoch.invalidate(); operation?.cancel(); selection?.cancel(); polling?.cancel(); sendPolling?.cancel(); localAuthentication.cancel(); runner.cancelAll()
+        notificationEpoch.invalidate(); notificationTask?.cancel(); notificationTask = nil
+        periodicRefreshTask?.cancel(); periodicRefreshTask = nil
+        backgroundRefreshTask?.cancel(); backgroundRefreshTask = nil
+        backgroundSyncing = false; initialSyncPending = false; syncWarning = nil; lastKnownUnread = nil
+        epoch.invalidate(); selectionEpoch.invalidate(); operation?.cancel(); selection?.cancel(); polling?.cancel(); sendPolling?.cancel(); localAuthentication.cancel()
         searchQuery = nil; searchHasMore = false; searchReturnFolder = nil
         folders = []; messages = []; body = nil; sanitizedHTML = nil; selectedItem = nil; selectedFolder = nil; query = ""; email = ""; error = nil
         clearThread()
         draft = nil; composeStatus = nil; notice = nil; messageActions = []; mustRefreshBeforeActions = false; clearActionUndo()
         loading = false; lastSynced = nil; busy = false; demoBodies = [:]; demoHTML = [:]; demoMessages = []; loadedFolder = nil
-        cacheFirstActive = false; showingSavedContent = false; cacheRefreshFailed = false
-        phase = hasSession ? .locked : .welcome
+        showingSavedContent = false; cacheRefreshFailed = false
+        if keepSync {
+            phase = .locked
+            if let pendingDraftSave {
+                let runner = self.runner
+                Task {
+                    _ = try? await runner.request(NativeMailCommand("save_draft", token: pendingDraftSave.token, content: pendingDraftSave.content))
+                    _ = try? await runner.request(NativeMailCommand("close_draft", token: pendingDraftSave.token))
+                }
+            } else if let openDraftToken {
+                let runner = self.runner
+                Task { _ = try? await runner.request(NativeMailCommand("close_draft", token: openDraftToken)) }
+            }
+            notifications?.beginLockedMail(preserveDelivered: true)
+            startLockedBackgroundSync()
+        } else {
+            stopLockedBackgroundSync(keepHelper: false)
+            notifications?.clearMail()
+            cacheFirstActive = false
+            phase = hasSession ? .locked : .welcome
+        }
     }
     func cancelSignIn() { lock() }
     func enterDemo() {
@@ -948,12 +1354,15 @@ final class NativeMailStore: ObservableObject {
         return "Mail could not complete this operation. Retry or unlock your session again."
     }
     private func perform(_ action: @escaping @MainActor (UInt64) async throws -> Void) {
-        guard !busy else { return }; busy = true; error = nil
+        guard !busy else { return }
+        backgroundRefreshTask?.cancel(); backgroundRefreshTask = nil; backgroundSyncing = false
+        busy = true; error = nil
         let captured = epoch.value
         operation = Task { [self] in
             do { try await action(captured) }
             catch {
                 if !Task.isCancelled && epoch.accepts(captured) {
+                    initialSyncPending = false
                     let message = safeError(error)
                     let cancelled = (error as? ProtonXError) == .cancelled || [.userCancel, .appCancel, .systemCancel].contains((error as? LAError)?.code)
                     self.error = cancelled || error is LAError ? nil : message

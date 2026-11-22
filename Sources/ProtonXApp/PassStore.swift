@@ -27,8 +27,13 @@ final class PassStore: ObservableObject {
     @Published var showingTrash = false { didSet { reconcileSelection() } }
     @Published private(set) var detail: ItemDetail?
     @Published private(set) var busy = false
+    @Published private(set) var backgroundSyncing = false
+    @Published private(set) var syncWarning: String?
+    @Published private(set) var lastBackgroundCacheSyncAt: Date?
     @Published var error: String?
     @Published private(set) var challenge: AuthChallenge?
+    var isSyncing: Bool { phase == .open && !isDemo && (busy || backgroundSyncing) }
+    var syncingStatusLabel: String { isUsingSavedVault ? "Syncing saved vault…" : "Syncing vault…" }
     private var credentialRequestID: UUID?
     private var credentialContinuation: CheckedContinuation<String, Error>?
     var accountHandoffGeneration: UInt64? { phase == .open && !isDemo && !previewOnly && !isUsingSavedVault && !requiresSignIn && lastSyncedAt != nil && !mustRefreshBeforeWriting ? epoch.value : nil }
@@ -43,6 +48,13 @@ final class PassStore: ObservableObject {
     private var selectionEpoch = SessionEpoch()
     private var operation: Task<Void, Never>?
     private var selectionTask: Task<Void, Never>?
+    private var backgroundRefreshTask: Task<Void, Never>?
+    private var periodicRefreshTask: Task<Void, Never>?
+    private var lockedCacheSyncTask: Task<Void, Never>?
+    private var lockedCacheSyncEpoch = SessionEpoch()
+    private var backgroundSyncInterval: Duration = .seconds(300)
+    private var lockedCacheSyncInterval: Duration = .seconds(900)
+    private(set) var lockedCacheSyncEnabled = false
     private(set) var capabilities: PassCapabilities?
     let previewOnly: Bool
     private var demoDetails: [String: ItemDetail] = [:]
@@ -143,6 +155,7 @@ final class PassStore: ObservableObject {
             requiresSignIn = false
             phase = .open
             try await loadSnapshot()
+            startPeriodicRefresh()
         }
     }
     private func beginWebAuthentication(_ value: String, captured: UInt64) throws -> String {
@@ -201,22 +214,134 @@ final class PassStore: ObservableObject {
             try await refreshSnapshot()
             try check(captured)
             selectItem()
+            startPeriodicRefresh()
         }
     }
-    func cancelLocalUnlock() { if localAuthentication.state == .authenticating { lock() } }
-    func lock() {
+    func cancelLocalUnlock() { if localAuthentication.state == .authenticating { lock(preserveLockedCacheSync: lockedCacheSyncEnabled) } }
+    func terminate() { lock(preserveLockedCacheSync: false) }
+    func lock(preserveLockedCacheSync: Bool = false) {
         epoch.invalidate(); selectionEpoch.invalidate()
         localAuthentication.cancel()
         webAuthentication.cancel()
-        operation?.cancel(); selectionTask?.cancel(); service.cancel()
+        operation?.cancel(); selectionTask?.cancel()
+        backgroundRefreshTask?.cancel(); backgroundRefreshTask = nil
+        periodicRefreshTask?.cancel(); periodicRefreshTask = nil
+        lockedCacheSyncEpoch.invalidate(); lockedCacheSyncTask?.cancel(); lockedCacheSyncTask = nil
+        service.cancel()
         cacheExpiryTask?.cancel(); cacheExpiryTask = nil
         savedVaultGeneration = nil; savedVaultExpiresAt = nil; savedVaultSavedAt = nil; offlineCacheStatus = nil
         let continuation = credentialContinuation; credentialContinuation = nil; credentialRequestID = nil; challenge = nil
         continuation?.resume(throwing: ProtonXError.cancelled)
         ClipboardController.shared.clearOwned()
         vaults = []; items = []; trashedItems = []; lastSyncedAt = nil; mustRefreshBeforeWriting = false; detail = nil; demoDetails = [:]; capabilities = nil
-        selectedItem = nil; selectedVault = nil; query = ""; busy = false; error = nil
+        selectedItem = nil; selectedVault = nil; query = ""; busy = false; backgroundSyncing = false; syncWarning = nil; error = nil
         phase = isDemo || (!requiresSignIn && hasSession) ? .locked : .welcome
+        if preserveLockedCacheSync && lockedCacheSyncEnabled && phase == .locked && !isDemo && !previewOnly && !localAuthentication.systemSuspended {
+            startLockedCacheSync()
+        }
+    }
+    func configureBackgroundSync(lockedCacheSync: Bool, openInterval: Duration = .seconds(300), lockedInterval: Duration = .seconds(900)) {
+        lockedCacheSyncEnabled = lockedCacheSync
+        backgroundSyncInterval = openInterval
+        lockedCacheSyncInterval = lockedInterval
+        guard !previewOnly, !isDemo else { return }
+        if phase == .open {
+            startPeriodicRefresh()
+        } else if phase == .locked && hasSession && !requiresSignIn {
+            if lockedCacheSync && !localAuthentication.systemSuspended { startLockedCacheSync() }
+            else { lockedCacheSyncEpoch.invalidate(); lockedCacheSyncTask?.cancel(); lockedCacheSyncTask = nil }
+        }
+    }
+    func setSystemSuspended(_ suspended: Bool) {
+        let changed = localAuthentication.systemSuspended != suspended
+        localAuthentication.systemSuspended = suspended
+        guard changed, !previewOnly, !isDemo else { return }
+        if suspended {
+            periodicRefreshTask?.cancel(); periodicRefreshTask = nil
+            lockedCacheSyncEpoch.invalidate(); lockedCacheSyncTask?.cancel(); lockedCacheSyncTask = nil
+        } else if phase == .open {
+            startPeriodicRefresh()
+            backgroundRefresh()
+        } else if phase == .locked && lockedCacheSyncEnabled && hasSession && !requiresSignIn {
+            startLockedCacheSync()
+        }
+    }
+    func handleForegroundReturn() {
+        guard phase == .open, !isDemo, !previewOnly else { return }
+        if lastSyncedAt == nil || now().timeIntervalSince(lastSyncedAt!) >= 60 {
+            backgroundRefresh()
+        }
+    }
+    func backgroundRefresh() {
+        guard phase == .open, !isDemo, !previewOnly, !busy, !backgroundSyncing else { return }
+        let captured = epoch.value
+        backgroundSyncing = true
+        backgroundRefreshTask?.cancel()
+        backgroundRefreshTask = Task { [weak self] in
+            defer { if let self, self.epoch.accepts(captured) { self.backgroundSyncing = false } }
+            guard let self else { return }
+            do {
+                try await self.loadSnapshot()
+                guard !Task.isCancelled, self.epoch.accepts(captured), self.phase == .open else { return }
+                self.syncWarning = nil
+                self.selectItem()
+            } catch {
+                guard !Task.isCancelled, self.epoch.accepts(captured), self.phase == .open else { return }
+                if !self.handleSessionFailure(error, captured: captured) {
+                    self.syncWarning = "Sync delayed"
+                }
+            }
+        }
+    }
+    private func startPeriodicRefresh() {
+        periodicRefreshTask?.cancel(); periodicRefreshTask = nil
+        guard !previewOnly, !isDemo, phase == .open, !localAuthentication.systemSuspended else { return }
+        let captured = epoch.value
+        let interval = backgroundSyncInterval
+        periodicRefreshTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: interval)
+                guard let self, !Task.isCancelled, self.epoch.accepts(captured), self.phase == .open else { return }
+                if !self.localAuthentication.systemSuspended { self.backgroundRefresh() }
+            }
+        }
+    }
+    func startLockedCacheSync() {
+        lockedCacheSyncEpoch.invalidate(); lockedCacheSyncTask?.cancel(); lockedCacheSyncTask = nil
+        guard lockedCacheSyncEnabled, !previewOnly, !isDemo, hasSession, !requiresSignIn, phase == .locked, !localAuthentication.systemSuspended else { return }
+        let ticket = lockedCacheSyncEpoch.value
+        let interval = lockedCacheSyncInterval
+        lockedCacheSyncTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: interval)
+                guard let self, !Task.isCancelled, self.lockedCacheSyncEpoch.accepts(ticket), self.phase == .locked, self.lockedCacheSyncEnabled, !self.localAuthentication.systemSuspended else { return }
+                await self.refreshSavedCacheOnce(ticket: ticket)
+            }
+        }
+    }
+    func refreshSavedCacheInBackground() {
+        guard lockedCacheSyncEnabled, !previewOnly, !isDemo, hasSession, !requiresSignIn, phase == .locked, !busy, !localAuthentication.systemSuspended else { return }
+        let ticket = lockedCacheSyncEpoch.value
+        lockedCacheSyncTask?.cancel()
+        lockedCacheSyncTask = Task { [weak self] in
+            guard let self else { return }
+            await self.refreshSavedCacheOnce(ticket: ticket)
+        }
+    }
+    private func refreshSavedCacheOnce(ticket: UInt64) async {
+        guard phase == .locked, lockedCacheSyncEnabled, hasSession, !requiresSignIn, !busy, !localAuthentication.systemSuspended else { return }
+        do {
+            // The helper atomically refreshes the encrypted SQLCipher saved vault on disk.
+            // Discard returned Swift metadata immediately while Pass remains locked.
+            let snapshot = try await service.snapshot()
+            guard !Task.isCancelled, lockedCacheSyncEpoch.accepts(ticket), phase == .locked else { return }
+            if snapshot.cacheStatus == "ready" { lastBackgroundCacheSyncAt = now() }
+        } catch {
+            guard !Task.isCancelled, lockedCacheSyncEpoch.accepts(ticket), phase == .locked else { return }
+            if case ProtonXError.helperDiagnostic(let diagnostic) = error, diagnostic.failure == .sessionInvalidated {
+                requiresSignIn = true; phase = .welcome; lockedCacheSyncEpoch.invalidate()
+            }
+        }
     }
     func refresh() {
         guard phase == .open else { return }
@@ -287,7 +412,7 @@ final class PassStore: ObservableObject {
         cacheExpiryTask?.cancel(); cacheExpiryTask = nil
         savedVaultGeneration = nil; savedVaultExpiresAt = nil; savedVaultSavedAt = nil
         offlineCacheStatus = snapshot.cacheStatus
-        lastSyncedAt = now(); mustRefreshBeforeWriting = false
+        lastSyncedAt = now(); mustRefreshBeforeWriting = false; syncWarning = nil
     }
     func selectItem() {
         selectionEpoch.invalidate(); selectionTask?.cancel(); detail = nil
@@ -435,6 +560,8 @@ final class PassStore: ObservableObject {
     }
     private func perform(_ action: @escaping @MainActor () async throws -> Void) {
         guard !busy else { return }
+        backgroundRefreshTask?.cancel(); backgroundRefreshTask = nil; backgroundSyncing = false
+        lockedCacheSyncEpoch.invalidate(); lockedCacheSyncTask?.cancel(); lockedCacheSyncTask = nil
         error = nil; busy = true
         let captured = epoch.value
         operation = Task {

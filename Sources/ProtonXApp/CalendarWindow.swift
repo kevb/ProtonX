@@ -10,6 +10,7 @@ struct CalendarWindow: View {
     var accounts: [SuiteWorkspace.CalendarAccountOption] = []
     var connectAccount: (ProductRoute) -> Void = { _ in }
     var useAnotherAccount: () -> Void = {}
+    var lockCalendar: (() -> Void)? = nil
     @State private var separateAccount = false
     @FocusState private var searchFocused: Bool
     @State private var deletion: CalendarStore.DeleteIntent?
@@ -130,7 +131,7 @@ struct CalendarWindow: View {
             Text(store.phase == .connected ? "Proton Calendar" : "Calendar preview").font(.callout.weight(.medium))
             Text(store.phase == .connected ? "Connected to Proton\nEvents stay in memory until lock." : "Sample events only. Proton Calendar is not connected.").font(.caption).foregroundStyle(.secondary)
             if store.phase == .connected {
-                HStack { Button("Lock") { store.lock() }; Spacer(); Button("Sign out") { store.signOut() }.disabled(store.busy) }
+                HStack { Button("Lock") { if let lockCalendar { lockCalendar() } else { store.lock() } }; Spacer(); Button("Sign out") { store.signOut() }.disabled(store.busy) }
             }
         }.padding(16).background(PassTheme.sidebar)
     }
@@ -166,10 +167,27 @@ struct CalendarWindow: View {
                 Spacer()
                 Picker("Time zone", selection: $store.timeZoneID) { ForEach(calendarZoneIDs(store.timeZoneID), id: \.self) { Text($0).tag($0) } }.labelsHidden().frame(maxWidth: 210).accessibilityLabel("Calendar time zone")
             }.padding(8).background(PassTheme.sidebar, in: RoundedRectangle(cornerRadius: 9))
-            HStack(spacing:8) {
-                if store.busy { ProgressView().controlSize(.small) }
-                Text(store.busy ? "Loading calendars and events…" : store.notice ?? (store.phase == .connected ? "Connected to Proton" : "Preview · edits stay in memory"))
-                    .font(.caption).foregroundStyle(.secondary)
+            HStack(spacing: 8) {
+                if store.phase == .connected {
+                    SyncStatusIndicator(
+                        isSyncing: store.isSyncing,
+                        syncingLabel: "Syncing calendars and events…",
+                        lastSynced: store.lastSyncedAt,
+                        warning: store.syncWarning,
+                        savedOnly: false
+                    )
+                    if !store.isSyncing && store.syncWarning != nil {
+                        Button("Retry") { store.refresh() }
+                            .buttonStyle(.plain).font(.caption).foregroundStyle(PassTheme.accent)
+                    }
+                    if let notice = store.notice {
+                        Text("· \(notice)").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                } else {
+                    if store.busy { ProgressView().controlSize(.small) }
+                    Text(store.busy ? "Loading calendars and events…" : store.notice ?? "Preview · edits stay in memory")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
             }
         }.padding(16)
     }

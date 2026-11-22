@@ -75,7 +75,7 @@ struct PassWindow: View {
                 VStack(alignment: .leading, spacing: 10) {
                     Text(store.isDemo ? "Demo workspace" : "Pass workspace").font(.system(size: 13, weight: .medium))
                     if store.isUsingSavedVault {
-                        Label(store.busy ? "Saved vault · refreshing" : "Saved vault · read only", systemImage: "internaldrive").font(.caption).foregroundStyle(PassTheme.accent)
+                        Label(store.isSyncing ? "Saved vault · refreshing" : "Saved vault · read only", systemImage: "internaldrive").font(.caption).foregroundStyle(PassTheme.accent)
                         Button("Refresh Online") { store.refresh() }.disabled(store.busy).accessibilityIdentifier("recoverPassSync")
                     } else if store.mustRefreshBeforeWriting {
                         Label("Refresh needed before changes", systemImage: "exclamationmark.arrow.triangle.2.circlepath").font(.caption).foregroundStyle(.orange)
@@ -90,14 +90,23 @@ struct PassWindow: View {
                             Text("This account requires an online connection").font(.caption).foregroundStyle(.secondary)
                         }
                     }
-                    if let synced = store.lastSyncedAt {
+                    if !store.isDemo {
+                        SyncStatusIndicator(
+                            isSyncing: store.isSyncing,
+                            syncingLabel: store.syncingStatusLabel,
+                            lastSynced: store.lastSyncedAt,
+                            warning: store.mustRefreshBeforeWriting ? nil : store.syncWarning,
+                            savedOnly: store.isUsingSavedVault,
+                            prefix: store.isUsingSavedVault ? "Last synced" : "Updated"
+                        )
+                    } else if let synced = store.lastSyncedAt {
                         HStack(spacing: 6) {
-                            Circle().fill(store.mustRefreshBeforeWriting ? Color.orange : Color.green).frame(width: 5, height: 5).accessibilityHidden(true)
-                            Text("\(store.isUsingSavedVault ? "Last synced" : "Updated") \(synced, style: .relative) ago").font(.caption).foregroundStyle(.secondary)
+                            Circle().fill(Color.green).frame(width: 5, height: 5).accessibilityHidden(true)
+                            Text(SyncTimeFormatter.label(for: synced)).font(.caption).foregroundStyle(.secondary)
                         }
                     }
                     HStack {
-                        Button { store.lock() } label: { Label("Lock", systemImage: "lock").fixedSize() }.buttonStyle(PassPillStyle()).help("Lock ProtonX (⌘L)")
+                        Button { store.lock(preserveLockedCacheSync: store.lockedCacheSyncEnabled) } label: { Label("Lock", systemImage: "lock").fixedSize() }.buttonStyle(PassPillStyle()).help("Lock ProtonX (⌘L)")
                         Spacer()
                         Menu { Button("Settings…") { openSettings() }; Button("Sign Out…", role: .destructive) { confirmSignOut = true } } label: { Image(systemName: "ellipsis.circle") }
                             .menuStyle(.borderlessButton).frame(width: 44, height: 28).accessibilityLabel("Account actions")
@@ -214,7 +223,7 @@ struct WelcomeView: View {
             if store.phase == .locked && !store.isDemo && !store.previewOnly {
                 VStack(spacing: 0) {
                     LocalUnlockCard(product: "Pass", authentication: store.localAuthentication, isActive: isActive, busy: store.busy,
-                                    unlock: { store.unlock(mode: $0) }, cancel: { store.lock() })
+                                    unlock: { store.unlock(mode: $0) }, cancel: { store.lock(preserveLockedCacheSync: store.lockedCacheSyncEnabled) })
                     Button("Sign In Again") { store.login() }.buttonStyle(.plain).foregroundStyle(.secondary).disabled(store.busy)
                 }.frame(maxWidth: .infinity, maxHeight: .infinity)
             } else { welcome }
