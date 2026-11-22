@@ -284,7 +284,10 @@ view targets one message. Menu choices follow the SDK's stable folder kind and
 the official client's folder policy, but the helper independently checks current
 capabilities and destinations. Delete/Backspace in the list requires an explicit
 whole-conversation Trash confirmation. The helper derives the identity from the
-current folder row and checks the caller's expected identity. No arbitrary
+current folder row and checks the caller's expected identity. Custom folder moves
+and label toggles (`move_to_folder`, `toggle_label`) recheck Proton's SDK-provided
+available custom destinations and label lists on every dispatch so arbitrary IDs
+cannot be targeted, and retain the SDK's 30-second one-use undo token. No arbitrary
 conversation IDs, arrays of targets, destinations or permanent-delete flags are
 accepted. Intent tickets bind to session, folder, selection and view mode; stale
 confirmations cannot dispatch. Reader-card actions remain single-message scoped.
