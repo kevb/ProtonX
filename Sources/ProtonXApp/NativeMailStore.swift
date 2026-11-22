@@ -83,6 +83,7 @@ final class NativeMailStore: ObservableObject {
     @Published private(set) var composeStatus: String?
     @Published private(set) var notice: String?
     @Published private(set) var messageActions: [NativeMailAction] = []
+    @Published private(set) var messageLabels: [NativeMailLabelOption] = []
     @Published private(set) var mustRefreshBeforeActions = false
     @Published private(set) var undoToken: UInt64?
     private var undoExpiry: Date?
@@ -189,7 +190,7 @@ final class NativeMailStore: ObservableObject {
         guard phase == .open, !busy, MailSearchPolicy.valid(keywords) else { return }
         if searchQuery == nil { searchReturnFolder = selectedFolder }
         query = keywords; searchQuery = keywords; searchHasMore = false
-        clearActionUndo(); polling?.cancel(); clearThread(); selectedItem = nil; body = nil; sanitizedHTML = nil; messageActions = []
+        clearActionUndo(); polling?.cancel(); clearThread(); selectedItem = nil; body = nil; sanitizedHTML = nil; messageActions = []; messageLabels = []
         selectionEpoch.invalidate(); selection?.cancel(); loadedFolder = nil; messages = []
         if demo {
             messages = demoMessages.filter { $0.subject.localizedStandardContains(keywords) || $0.sender.localizedStandardContains(keywords) || $0.senderName.localizedStandardContains(keywords) || $0.recipient.localizedStandardContains(keywords) }
@@ -205,7 +206,7 @@ final class NativeMailStore: ObservableObject {
         guard searchQuery != nil, !busy else { return }
         let folder = searchReturnFolder
         searchQuery = nil; searchReturnFolder = nil; searchHasMore = false
-        clearThread(); selectedItem = nil; body = nil; sanitizedHTML = nil; messageActions = []
+        clearThread(); selectedItem = nil; body = nil; sanitizedHTML = nil; messageActions = []; messageLabels = []
         selectionEpoch.invalidate(); selection?.cancel(); messages = []; loadedFolder = nil; selectedFolder = folder
         if demo { messages = demoMessages.filter { demoLocations[$0.id] == selectedFolder }; loadedFolder = selectedFolder }
         else { refresh() }
@@ -261,7 +262,7 @@ final class NativeMailStore: ObservableObject {
     func changeFolder() {
         guard selectedFolder != loadedFolder else { return }
         if searchQuery != nil { searchQuery = nil; searchHasMore = false; searchReturnFolder = nil; query = "" }
-        clearThread(); body = nil; sanitizedHTML = nil; messageActions = []; selectedItem = nil; selectionEpoch.invalidate(); selection?.cancel()
+        clearThread(); body = nil; sanitizedHTML = nil; messageActions = []; messageLabels = []; selectedItem = nil; selectionEpoch.invalidate(); selection?.cancel()
         messages = []
         if demo { messages = demoMessages.filter { demoLocations[$0.id] == selectedFolder }; loadedFolder = selectedFolder; return }
         if cacheFirstActive {
@@ -271,13 +272,13 @@ final class NativeMailStore: ObservableObject {
     func reconcileSelection() {
         if let selectedItem, !visibleConversations.contains(where: { $0.messages.contains(where: { $0.id == selectedItem }) }) {
             clearThread()
-            self.selectedItem = nil; body = nil; sanitizedHTML = nil; messageActions = []; selectionEpoch.invalidate(); selection?.cancel()
+            self.selectedItem = nil; body = nil; sanitizedHTML = nil; messageActions = []; messageLabels = []; selectionEpoch.invalidate(); selection?.cancel()
         }
     }
     private func clearThread() { clearAttachments(); thread = nil; expandedThreadItem = nil; threadLoading = false; threadError = nil }
     func select(preferred: UInt64? = nil, preservingContent: Bool = false) {
         if !preservingContent { clearThread(); body = nil; sanitizedHTML = nil }
-        messageActions = []; error = nil; threadError = nil; selectionEpoch.invalidate(); selection?.cancel()
+        messageActions = []; messageLabels = []; error = nil; threadError = nil; selectionEpoch.invalidate(); selection?.cancel()
         guard let anchor = selectedAnchor else { clearThread(); return }
         let item = anchor.id
         if demo {
@@ -321,7 +322,7 @@ final class NativeMailStore: ObservableObject {
     func expandThreadMessage(_ item: UInt64) {
         guard !threadLoading, thread?.messages.contains(where: { $0.id == item }) == true,
               let anchor = selectedItem, let folder = selectedFolder else { return }
-        clearAttachments(); selectionEpoch.invalidate(); selection?.cancel(); messageActions = []; body = nil; sanitizedHTML = nil; error = nil
+        clearAttachments(); selectionEpoch.invalidate(); selection?.cancel(); messageActions = []; messageLabels = []; body = nil; sanitizedHTML = nil; error = nil
         if expandedThreadItem == item { expandedThreadItem = nil; return }
         expandedThreadItem = item
         if demo { setDemoAttachments(item); body = demoBodies[item]; sanitizedHTML = demoHTML[item]; setDemoActions(); return }
@@ -343,7 +344,7 @@ final class NativeMailStore: ObservableObject {
         let result = try await runner.request(NativeMailCommand("message", folder: folder, item: item))
         try checkSelection(captured: captured, generation: generation, anchor: anchor, folder: folder)
         guard expandedThreadItem == item, result.id == item, let next = result.body else { throw ProtonXError.invalidResponse }
-        body = next; sanitizedHTML = result.sanitizedHTML; messageActions = result.actions ?? []; attachmentList = result.attachmentList ?? []; try MailAttachmentPolicy.validateList(attachmentList)
+        body = next; sanitizedHTML = result.sanitizedHTML; messageActions = result.actions ?? []; messageLabels = result.labels ?? []; attachmentList = result.attachmentList ?? []; try MailAttachmentPolicy.validateList(attachmentList)
     }
     var canUndoAction: Bool { undoToken != nil && (undoExpiry ?? .distantPast) > Date() && !busy && !mustRefreshBeforeActions && draft == nil }
     // Menu presentation follows Proton WebClients' useLabelActions by SDK folder kind.
@@ -446,6 +447,126 @@ final class NativeMailStore: ObservableObject {
             notice = action.title + " queued for sync"
             try await load(captured: captured)
             if selectedAnchor != nil && selectedFolder == folder { select(preferred: item, preservingContent: true) }
+        }
+    }
+    var customFolders: [NativeMailFolder] {
+        folders.filter { $0.isCustom == true && $0.isLabel != true && $0.id != selectedFolder }
+    }
+    var customLabels: [NativeMailFolder] {
+        folders.filter { $0.isLabel == true }
+    }
+    var canOrganizeSelectedMessage: Bool {
+        searchQuery == nil && phase == .open && !busy && !threadLoading && !mustRefreshBeforeActions && draft == nil && selectedMessage != nil
+    }
+    var canOrganizeListItems: Bool {
+        searchQuery == nil && phase == .open && !busy && !mustRefreshBeforeActions && draft == nil && selectedFolder != nil
+    }
+    func moveSelectedMessage(toFolder target: NativeMailFolder) {
+        guard canOrganizeSelectedMessage, customFolders.contains(where: { $0.id == target.id }),
+              let item = selectedMessage?.id, let folder = selectedFolder else { return }
+        clearActionUndo()
+        if demo {
+            let previous = (messages: demoMessages, locations: demoLocations)
+            demoLocations[item] = target.id
+            messages = demoMessages.filter { demoLocations[$0.id] == selectedFolder }
+            reconcileSelection(); if selectedAnchor != nil { select(preferred: item) }; setDemoActions()
+            demoUndo = previous; setActionUndo(1)
+            notice = "Moved to \(target.name) · demo"
+            return
+        }
+        perform { [self] captured in
+            mustRefreshBeforeActions = true
+            let result = try await runner.request(NativeMailCommand("move_to_folder", folder: folder, item: item, target: target.id))
+            try check(captured)
+            guard result.queued == true, result.id == item else { throw ProtonXError.invalidResponse }
+            mustRefreshBeforeActions = false
+            if let token = result.undoToken { setActionUndo(token) }
+            notice = "Move to \(target.name) queued for sync"
+            try await load(captured: captured)
+            if selectedAnchor != nil && selectedFolder == folder { select(preferred: item, preservingContent: true) }
+        }
+    }
+    func moveListItem(_ item: UInt64?, toFolder target: NativeMailFolder) {
+        guard canOrganizeListItems, customFolders.contains(where: { $0.id == target.id }),
+              let item, let folder = selectedFolder,
+              let message = visibleConversations.flatMap(\.messages).first(where: { $0.id == item }) else { return }
+        let conversation = conversationView ? message.conversationID.flatMap { $0 > 0 ? $0 : nil } : nil
+        clearActionUndo()
+        selectionEpoch.invalidate(); selection?.cancel()
+        if demo {
+            let previous = (messages: demoMessages, locations: demoLocations)
+            let items = demoMessages.filter { row in
+                if let conversation { return row.conversationID == conversation }
+                return row.id == item
+            }
+            for row in items { demoLocations[row.id] = target.id }
+            messages = demoMessages.filter { demoLocations[$0.id] == selectedFolder }
+            reconcileSelection(); if selectedAnchor != nil { select() }; setDemoActions()
+            demoUndo = previous; setActionUndo(1)
+            notice = "Moved to \(target.name) · demo"
+            return
+        }
+        perform { [self] captured in
+            mustRefreshBeforeActions = true
+            let result = try await runner.request(NativeMailCommand("move_to_folder", folder: folder, item: item, conversation: conversation, target: target.id))
+            try check(captured)
+            guard result.queued == true, result.id == item, result.conversationID == conversation else { throw ProtonXError.invalidResponse }
+            mustRefreshBeforeActions = false
+            if let token = result.undoToken { setActionUndo(token) }
+            notice = "Move to \(target.name) queued for sync"
+            try await load(captured: captured)
+            if selectedAnchor != nil && selectedFolder == folder { select(preservingContent: true) }
+        }
+    }
+    func toggleSelectedMessageLabel(_ label: NativeMailLabelOption) {
+        guard canOrganizeSelectedMessage, messageLabels.contains(where: { $0.id == label.id }),
+              let item = selectedMessage?.id, let folder = selectedFolder else { return }
+        let apply = label.state != .selected
+        clearActionUndo()
+        if demo {
+            messageLabels = messageLabels.map { option in
+                guard option.id == label.id else { return option }
+                return NativeMailLabelOption(id: option.id, name: option.name, state: apply ? .selected : .unselected)
+            }
+            notice = (apply ? "Applied " : "Removed ") + "\(label.name) · demo"
+            return
+        }
+        perform { [self] captured in
+            mustRefreshBeforeActions = true
+            let result = try await runner.request(NativeMailCommand("toggle_label", folder: folder, item: item, label: label.id, apply: apply))
+            try check(captured)
+            guard result.queued == true, result.id == item else { throw ProtonXError.invalidResponse }
+            mustRefreshBeforeActions = false
+            if let token = result.undoToken { setActionUndo(token) }
+            messageLabels = messageLabels.map { option in
+                guard option.id == label.id else { return option }
+                return NativeMailLabelOption(id: option.id, name: option.name, state: apply ? .selected : .unselected)
+            }
+            notice = (apply ? "Apply " : "Remove ") + "\(label.name) queued for sync"
+            try await load(captured: captured)
+            if selectedAnchor != nil && selectedFolder == folder { select(preferred: item, preservingContent: true) }
+        }
+    }
+    func toggleListItemLabel(_ item: UInt64?, label: NativeMailFolder, apply: Bool) {
+        guard canOrganizeListItems, customLabels.contains(where: { $0.id == label.id }),
+              let item, let folder = selectedFolder,
+              let message = visibleConversations.flatMap(\.messages).first(where: { $0.id == item }) else { return }
+        let conversation = conversationView ? message.conversationID.flatMap { $0 > 0 ? $0 : nil } : nil
+        clearActionUndo()
+        if demo {
+            notice = (apply ? "Applied " : "Removed ") + "\(label.name) · demo"
+            return
+        }
+        perform { [self] captured in
+            mustRefreshBeforeActions = true
+            let result = try await runner.request(NativeMailCommand("toggle_label", folder: folder, item: item, conversation: conversation, label: label.id, apply: apply))
+            try check(captured)
+            guard result.queued == true, result.id == item, result.conversationID == conversation else { throw ProtonXError.invalidResponse }
+            mustRefreshBeforeActions = false
+            if let token = result.undoToken { setActionUndo(token) }
+            notice = (apply ? "Apply " : "Remove ") + "\(label.name) queued for sync"
+            try await load(captured: captured)
+            if selectedAnchor != nil && selectedFolder == folder { select(preservingContent: true) }
         }
     }
     func undoMessageAction() {
@@ -696,7 +817,7 @@ final class NativeMailStore: ObservableObject {
         searchQuery = nil; searchHasMore = false; searchReturnFolder = nil
         folders = []; messages = []; body = nil; sanitizedHTML = nil; selectedItem = nil; selectedFolder = nil; query = ""; email = ""; error = nil
         clearThread()
-        draft = nil; composeStatus = nil; notice = nil; messageActions = []; mustRefreshBeforeActions = false; clearActionUndo()
+        draft = nil; composeStatus = nil; notice = nil; messageActions = []; messageLabels = []; mustRefreshBeforeActions = false; clearActionUndo()
         loading = false; lastSynced = nil; busy = false; demoBodies = [:]; demoHTML = [:]; demoMessages = []; loadedFolder = nil
         cacheFirstActive = false; showingSavedContent = false; cacheRefreshFailed = false
         phase = hasSession ? .locked : .welcome

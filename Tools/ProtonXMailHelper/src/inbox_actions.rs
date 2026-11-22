@@ -1,9 +1,12 @@
 // Copyright (c) 2026 ProtonX contributors. SPDX-License-Identifier: AGPL-3.0-only
 // SDK queue actions for one message or one disclosed conversation. No permanent delete or app replay.
 use super::*;
-use mail_uniffi::mail::datatypes::{ListActions, MoveDestination, Undo};
+use mail_uniffi::mail::datatypes::{CustomFolderDestination, IsSelected, LabelAsAction, ListActions, MoveDestination, Undo};
 use mail_uniffi::mail::datatypes::system_folder::MovableSystemFolder;
 use mail_uniffi::mail::messages;
+
+const MAX_CUSTOM_TARGETS: usize = 512;
+const MAX_FOLDER_DEPTH: usize = 16;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -27,6 +30,59 @@ impl Options {
         actions
     }
     fn destination(&self, action: Action) -> Option<Id> { self.destinations.iter().find(|(a, _)| *a == action).map(|(_, id)| *id) }
+}
+fn collect_custom_folders(folders: &[CustomFolderDestination], depth: usize, out: &mut Vec<Id>) {
+    if depth >= MAX_FOLDER_DEPTH { return; }
+    for folder in folders {
+        if out.len() >= MAX_CUSTOM_TARGETS { return; }
+        out.push(folder.local_id);
+        collect_custom_folders(&folder.children, depth + 1, out);
+    }
+}
+fn custom_folder_ids(destinations: &[MoveDestination]) -> Vec<Id> {
+    let mut ids = Vec::new();
+    for destination in destinations {
+        if let MoveDestination::CustomFolder(custom) = destination {
+            collect_custom_folders(std::slice::from_ref(custom), 0, &mut ids);
+        }
+    }
+    ids
+}
+fn label_state(selected: &IsSelected) -> &'static str {
+    match selected {
+        IsSelected::Selected => "selected",
+        IsSelected::Unselected => "unselected",
+        IsSelected::Partial => "partial",
+    }
+}
+pub fn label_values(actions: &[LabelAsAction]) -> Vec<Value> {
+    actions.iter().take(MAX_CUSTOM_TARGETS).map(|label| {
+        json!({"id": label.label_id.as_u64(), "name": label.name, "state": label_state(&label.is_selected)})
+    }).collect()
+}
+fn toggle_label_sets(actions: &[(Id, IsSelected)], target: u64, apply: bool) -> Result<(Vec<Id>, Vec<Id>), &'static str> {
+    if !actions.iter().take(MAX_CUSTOM_TARGETS).any(|(id, _)| id.as_u64() == target) {
+        return Err("action_unavailable");
+    }
+    let mut selected = Vec::new();
+    let mut partial = Vec::new();
+    for (id, state) in actions.iter().take(MAX_CUSTOM_TARGETS) {
+        if id.as_u64() == target {
+            if apply { selected.push(*id); }
+        } else {
+            match state {
+                IsSelected::Selected => selected.push(*id),
+                IsSelected::Partial => partial.push(*id),
+                IsSelected::Unselected => {}
+            }
+        }
+    }
+    Ok((selected, partial))
+}
+pub fn available_labels(mailbox: Arc<Mailbox>, id: Id) -> Result<Vec<Value>, &'static str> {
+    let actions = sdk_result!(messages::AvailableLabelAsActionsForMessagesResult, block_on(messages::available_label_as_actions_for_messages(mailbox, vec![id])))
+        .map_err(|e| action_failure(e, "message_failed"))?;
+    Ok(label_values(&actions))
 }
 fn folder_action(name: MovableSystemFolder) -> Option<Action> {
     match name { MovableSystemFolder::Archive => Some(Action::Archive), MovableSystemFolder::Trash => Some(Action::Trash), MovableSystemFolder::Inbox => Some(Action::Inbox), MovableSystemFolder::Spam => Some(Action::Spam) }
@@ -138,6 +194,86 @@ impl Backend {
         self.action_state.uncertain = false;
         Ok(json!({"queued":true}))
     }
+    pub(crate) fn move_to_folder(&mut self, folder: u64, item: u64, conversation: Option<u64>, target: u64) -> Result<Value, &'static str> {
+        search::allow_search_action(&self.search_query)?;
+        if self.action_state.uncertain { return Err("action_uncertain"); }
+        if self.composer.is_some() || target == 0 { return Err("invalid_selection"); }
+        let mailbox = self.mailbox.clone().ok_or("invalid_state")?;
+        let undo = if let Some(expected) = conversation {
+            if self.folder != Some(folder) { return Err("invalid_selection"); }
+            let derived = conversation_for_row(&self.listing.0.lock().unwrap().items.iter()
+                .map(|m| (m.id.as_u64(), m.conversation_id.as_u64())).collect::<Vec<_>>(), item, expected)?;
+            use mail_uniffi::mail::conversations;
+            let destinations = sdk_result!(conversations::AvailableMoveToDestinationsForConversationsResult, block_on(conversations::available_move_to_destinations_for_conversations(mailbox.clone(), vec![Id::from(derived)])))
+                .map_err(|e| action_failure(e, "message_failed"))?;
+            let target_id = custom_folder_ids(&destinations).into_iter().find(|id| id.as_u64() == target).ok_or("action_unavailable")?;
+            self.action_state.uncertain = true;
+            self.action_state.undo = None;
+            let undo = sdk_result!(conversations::MoveConversationsResult, block_on(conversations::move_conversations(mailbox, target_id, vec![Id::from(derived)])))
+                .map_err(|e| action_failure(e, "action_uncertain"))?;
+            self.action_state.uncertain = false;
+            (Some(derived), undo)
+        } else {
+            self.selected_message(folder, item)?;
+            let destinations = sdk_result!(messages::AvailableMoveToDestinationsForMessagesResult, block_on(messages::available_move_to_destinations_for_messages(mailbox.clone(), vec![Id::from(item)])))
+                .map_err(|e| action_failure(e, "message_failed"))?;
+            let target_id = custom_folder_ids(&destinations).into_iter().find(|id| id.as_u64() == target).ok_or("action_unavailable")?;
+            self.action_state.uncertain = true;
+            self.action_state.undo = None;
+            let undo = sdk_result!(messages::MoveMessagesResult, block_on(messages::move_messages(mailbox, target_id, vec![Id::from(item)])))
+                .map_err(|e| action_failure(e, "action_uncertain"))?;
+            self.action_state.uncertain = false;
+            (None, undo)
+        };
+        let token = if let Some(u) = undo.1 {
+            self.action_state.next = self.action_state.next.checked_add(1).ok_or("invalid_state")?;
+            let token = self.action_state.next;
+            self.action_state.undo = Some((token, Instant::now(), u));
+            Some(token)
+        } else { None };
+        Ok(json!({"id":item,"conversationID":undo.0,"queued":true,"undoToken":token}))
+    }
+    pub(crate) fn toggle_label(&mut self, folder: u64, item: u64, conversation: Option<u64>, label: u64, apply: bool) -> Result<Value, &'static str> {
+        search::allow_search_action(&self.search_query)?;
+        if self.action_state.uncertain { return Err("action_uncertain"); }
+        if self.composer.is_some() || label == 0 { return Err("invalid_selection"); }
+        let mailbox = self.mailbox.clone().ok_or("invalid_state")?;
+        let (derived_conversation, output) = if let Some(expected) = conversation {
+            if self.folder != Some(folder) { return Err("invalid_selection"); }
+            let derived = conversation_for_row(&self.listing.0.lock().unwrap().items.iter()
+                .map(|m| (m.id.as_u64(), m.conversation_id.as_u64())).collect::<Vec<_>>(), item, expected)?;
+            use mail_uniffi::mail::conversations;
+            let current = sdk_result!(conversations::AvailableLabelAsActionsForConversationsResult, block_on(conversations::available_label_as_actions_for_conversations(mailbox.clone(), vec![Id::from(derived)])))
+                .map_err(|e| action_failure(e, "message_failed"))?;
+            let states: Vec<_> = current.into_iter().map(|a| (a.label_id, a.is_selected)).collect();
+            let (selected, partial) = toggle_label_sets(&states, label, apply)?;
+            self.action_state.uncertain = true;
+            self.action_state.undo = None;
+            let output = sdk_result!(conversations::LabelConversationsAsResult, block_on(conversations::label_conversations_as(mailbox, vec![Id::from(derived)], selected, partial, false)))
+                .map_err(|e| action_failure(e, "action_uncertain"))?;
+            self.action_state.uncertain = false;
+            (Some(derived), output)
+        } else {
+            self.selected_message(folder, item)?;
+            let current = sdk_result!(messages::AvailableLabelAsActionsForMessagesResult, block_on(messages::available_label_as_actions_for_messages(mailbox.clone(), vec![Id::from(item)])))
+                .map_err(|e| action_failure(e, "message_failed"))?;
+            let states: Vec<_> = current.into_iter().map(|a| (a.label_id, a.is_selected)).collect();
+            let (selected, partial) = toggle_label_sets(&states, label, apply)?;
+            self.action_state.uncertain = true;
+            self.action_state.undo = None;
+            let output = sdk_result!(messages::LabelMessagesAsResult, block_on(messages::label_messages_as(mailbox, vec![Id::from(item)], selected, partial, false)))
+                .map_err(|e| action_failure(e, "action_uncertain"))?;
+            self.action_state.uncertain = false;
+            (None, output)
+        };
+        let token = if let Some(u) = output.undo {
+            self.action_state.next = self.action_state.next.checked_add(1).ok_or("invalid_state")?;
+            let token = self.action_state.next;
+            self.action_state.undo = Some((token, Instant::now(), u));
+            Some(token)
+        } else { None };
+        Ok(json!({"id":item,"conversationID":derived_conversation,"queued":true,"undoToken":token}))
+    }
 }
 fn conversation_for_row(listing: &[(u64, u64)], item: u64, expected: u64) -> Result<u64, &'static str> {
     listing.iter().find(|(id, conversation)| *id == item && *conversation == expected && expected > 0)
@@ -199,5 +335,28 @@ mod tests {
         assert_eq!(folder_kind(&LabelDescription::System(Some(SystemLabel::Starred))), "starred");
         assert_eq!(folder_kind(&LabelDescription::Folder), "other");
         assert_eq!(folder_kind(&LabelDescription::System(None)), "other");
+    }
+    #[test]
+    fn custom_folder_and_label_projection_enforces_sdk_ids_and_preserves_other_labels() {
+        let tree = vec![MoveDestination::CustomFolder(CustomFolderDestination {
+            local_id: Id::from(401_u64),
+            name: "Projects".into(),
+            color: None,
+            children: vec![CustomFolderDestination {
+                local_id: Id::from(402_u64),
+                name: "ProtonX".into(),
+                color: None,
+                children: vec![],
+            }],
+        })];
+        assert_eq!(custom_folder_ids(&tree), vec![Id::from(401_u64), Id::from(402_u64)]);
+        let actions = vec![
+            (Id::from(501_u64), IsSelected::Selected),
+            (Id::from(502_u64), IsSelected::Unselected),
+            (Id::from(503_u64), IsSelected::Partial),
+        ];
+        assert_eq!(toggle_label_sets(&actions, 502, true), Ok((vec![Id::from(501_u64), Id::from(502_u64)], vec![Id::from(503_u64)])));
+        assert_eq!(toggle_label_sets(&actions, 501, false), Ok((vec![], vec![Id::from(503_u64)])));
+        assert_eq!(toggle_label_sets(&actions, 999, true), Err("action_unavailable"));
     }
 }

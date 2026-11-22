@@ -305,6 +305,31 @@ struct MailWindow: View {
                                 ForEach(actions.filter { $0 == .read || $0 == .unread }, id: \.self) { action in
                                     contextAction(action, item: item)
                                 }
+                                if !store.customFolders.isEmpty {
+                                    Divider()
+                                    Menu("Move to Folder", systemImage: "folder") {
+                                        ForEach(store.customFolders) { folder in
+                                            Button(folder.name, systemImage: "folder") {
+                                                store.moveListItem(item, toFolder: folder)
+                                            }.disabled(!store.canOrganizeListItems)
+                                        }
+                                    }
+                                }
+                                if !store.customLabels.isEmpty {
+                                    Menu("Labels", systemImage: "tag") {
+                                        ForEach(store.customLabels) { label in
+                                            Button("Apply \(label.name)", systemImage: "plus.circle") {
+                                                store.toggleListItemLabel(item, label: label, apply: true)
+                                            }.disabled(!store.canOrganizeListItems)
+                                        }
+                                        Divider()
+                                        ForEach(store.customLabels) { label in
+                                            Button("Remove \(label.name)", systemImage: "minus.circle") {
+                                                store.toggleListItemLabel(item, label: label, apply: false)
+                                            }.disabled(!store.canOrganizeListItems)
+                                        }
+                                    }
+                                }
                             }
                     }
                 }.listStyle(.plain).scrollContentBackground(.hidden)
@@ -351,6 +376,46 @@ struct MailWindow: View {
             if store.messageActions.contains(.inbox) { mailAction(.inbox) }
             mailAction(.trash)
             if store.messageActions.contains(.spam) { mailAction(.spam) }
+            if !store.customFolders.isEmpty {
+                Menu {
+                    ForEach(store.customFolders) { folder in
+                        Button(folder.name, systemImage: "folder") {
+                            store.moveSelectedMessage(toFolder: folder)
+                        }
+                    }
+                } label: {
+                    Image(systemName: "folder")
+                }
+                .menuStyle(.borderlessButton)
+                .frame(width: 28, height: 24)
+                .help("Move to custom folder")
+                .accessibilityLabel("Move to folder")
+                .accessibilityIdentifier("mailMoveToFolder")
+                .disabled(!store.canOrganizeSelectedMessage)
+            }
+            if !store.messageLabels.isEmpty {
+                Menu {
+                    ForEach(store.messageLabels) { label in
+                        Button {
+                            store.toggleSelectedMessageLabel(label)
+                        } label: {
+                            HStack {
+                                Text(label.name)
+                                if label.state == .selected { Image(systemName: "checkmark") }
+                                else if label.state == .partial { Image(systemName: "minus") }
+                            }
+                        }
+                    }
+                } label: {
+                    Image(systemName: "tag")
+                }
+                .menuStyle(.borderlessButton)
+                .frame(width: 28, height: 24)
+                .help("Apply or remove labels")
+                .accessibilityLabel("Labels")
+                .accessibilityIdentifier("mailMessageLabels")
+                .disabled(!store.canOrganizeSelectedMessage)
+            }
         }.fixedSize()
     }
     private func contextAction(_ action: NativeMailAction, item: UInt64) -> some View {

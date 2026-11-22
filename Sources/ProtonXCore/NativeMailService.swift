@@ -53,7 +53,15 @@ public struct NativeMailNotification: Codable, Equatable, Sendable {
               !subject.unicodeScalars.contains(where: { $0.properties.generalCategory == .control }) else { throw ProtonXError.invalidResponse }
     }
 }
+public struct NativeMailLabelOption: Codable, Identifiable, Equatable, Sendable {
+    public enum State: String, Codable, Sendable { case selected, unselected, partial }
+    public let id: UInt64
+    public let name: String
+    public let state: State
+    public init(id: UInt64, name: String, state: State) { self.id = id; self.name = name; self.state = state }
+}
 public struct NativeMailResult: Codable, Sendable {
+    public var labels: [NativeMailLabelOption]?
     public var searchQuery: String?
     public var hasMore: Bool?
     public var contacts: [ContactEntry]?
@@ -85,7 +93,8 @@ public struct NativeMailResult: Codable, Sendable {
     public var conversationID: UInt64?
     public var notifications: [NativeMailNotification]?
     public var unreadCount: UInt64?
-    public init(phase: NativeMailPhase? = nil, folders: [NativeMailFolder]? = nil, folder: UInt64? = nil, messages: [NativeMailMessage]? = nil, loading: Bool? = nil, email: String? = nil, id: UInt64? = nil, body: String? = nil, sanitizedHTML: String? = nil, attachments: Int? = nil, draft: NativeMailDraft? = nil, token: UInt64? = nil, sendState: NativeMailSendState? = nil, closed: Bool? = nil, cacheFirst: Bool? = nil, fresh: Bool? = nil, refreshFailed: Bool? = nil, actions: [NativeMailAction]? = nil, queued: Bool? = nil, undoToken: UInt64? = nil, thread: NativeMailThread? = nil, conversationID: UInt64? = nil, notifications: [NativeMailNotification]? = nil, unreadCount: UInt64? = nil, attachmentList: [NativeMailAttachment]? = nil, transfer: NativeMailTransfer? = nil, handoff: AccountHandoff? = nil, contacts: [ContactEntry]? = nil, contactDetail: ContactDetail? = nil, searchQuery: String? = nil, hasMore: Bool? = nil) {
+    public init(phase: NativeMailPhase? = nil, folders: [NativeMailFolder]? = nil, folder: UInt64? = nil, messages: [NativeMailMessage]? = nil, loading: Bool? = nil, email: String? = nil, id: UInt64? = nil, body: String? = nil, sanitizedHTML: String? = nil, attachments: Int? = nil, draft: NativeMailDraft? = nil, token: UInt64? = nil, sendState: NativeMailSendState? = nil, closed: Bool? = nil, cacheFirst: Bool? = nil, fresh: Bool? = nil, refreshFailed: Bool? = nil, actions: [NativeMailAction]? = nil, queued: Bool? = nil, undoToken: UInt64? = nil, thread: NativeMailThread? = nil, conversationID: UInt64? = nil, notifications: [NativeMailNotification]? = nil, unreadCount: UInt64? = nil, attachmentList: [NativeMailAttachment]? = nil, transfer: NativeMailTransfer? = nil, handoff: AccountHandoff? = nil, contacts: [ContactEntry]? = nil, contactDetail: ContactDetail? = nil, searchQuery: String? = nil, hasMore: Bool? = nil, labels: [NativeMailLabelOption]? = nil) {
+        self.labels = labels
         self.searchQuery = searchQuery; self.hasMore = hasMore
         self.contacts = contacts; self.contactDetail = contactDetail
         self.handoff = handoff; self.phase = phase; self.folders = folders; self.folder = folder; self.messages = messages
@@ -182,7 +191,11 @@ public struct NativeMailCommand: Encodable, Sendable {
     public var name: String?
     public var size: Int?
     public var conversation: UInt64?
-    public init(_ method: String, username: String? = nil, password: String? = nil, code: String? = nil, folder: UInt64? = nil, item: UInt64? = nil, more: Bool? = nil, mode: String? = nil, token: UInt64? = nil, content: NativeMailComposeContent? = nil, action: NativeMailAction? = nil, conversation: UInt64? = nil, attachment: UInt64? = nil, transfer: UInt64? = nil, offset: Int? = nil, data: String? = nil, name: String? = nil, size: Int? = nil, keywords: String? = nil) {
+    public var target: UInt64?
+    public var label: UInt64?
+    public var apply: Bool?
+    public init(_ method: String, username: String? = nil, password: String? = nil, code: String? = nil, folder: UInt64? = nil, item: UInt64? = nil, more: Bool? = nil, mode: String? = nil, token: UInt64? = nil, content: NativeMailComposeContent? = nil, action: NativeMailAction? = nil, conversation: UInt64? = nil, attachment: UInt64? = nil, transfer: UInt64? = nil, offset: Int? = nil, data: String? = nil, name: String? = nil, size: Int? = nil, keywords: String? = nil, target: UInt64? = nil, label: UInt64? = nil, apply: Bool? = nil) {
+        self.target = target; self.label = label; self.apply = apply
         self.keywords = keywords
         self.method = method; self.username = username; self.password = password; self.code = code
         self.folder = folder; self.item = item; self.more = more
@@ -319,6 +332,10 @@ public final class NativeMailProcess: NativeMailRunning, @unchecked Sendable {
         }
         if let attachments = result.attachmentList { try MailAttachmentPolicy.validateList(attachments) }
         if let transfer = result.transfer { try transfer.validate() }
+        if let labels = result.labels {
+            guard labels.count <= 512, labels.allSatisfy({ $0.id > 0 && !$0.name.isEmpty }),
+                  Set(labels.map(\.id)).count == labels.count else { throw ProtonXError.invalidResponse }
+        }
         if let draft = result.draft {
             if let attachments = draft.attachmentList { try MailAttachmentPolicy.validateList(attachments) }
             guard draft.token > 0, draft.senders.count <= 256, Set(draft.senders).count == draft.senders.count,

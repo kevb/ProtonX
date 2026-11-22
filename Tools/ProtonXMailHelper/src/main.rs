@@ -143,6 +143,8 @@ enum Command {
     },
     MessageAction { folder: u64, item: u64, action: inbox_actions::Action },
     ConversationAction { folder: u64, item: u64, conversation: u64, action: inbox_actions::Action },
+    MoveToFolder { folder: u64, item: u64, conversation: Option<u64>, target: u64 },
+    ToggleLabel { folder: u64, item: u64, conversation: Option<u64>, label: u64, apply: bool },
     UndoAction { token: u64 },
     AttachmentList { folder: u64, item: u64 },
     AttachmentDownload { folder: u64, item: u64, attachment: u64 },
@@ -744,12 +746,15 @@ impl Backend {
                 }
                 let (body, sanitized_html) = reader::prepare(&raw, message.mime_type())?;
                 let actions = if self.search_query.is_some() { vec![] } else { inbox_actions::available(mailbox.clone(), Id::from(item))?.names() };
+                let labels = if self.search_query.is_some() { vec![] } else { inbox_actions::available_labels(mailbox.clone(), Id::from(item)).unwrap_or_default() };
                 Ok(
-                    json!({"id":item,"body":body,"sanitizedHTML":sanitized_html,"attachments":message.attachments().len(),"attachmentList":attachments::message_list(&message.attachments())?,"actions":actions}),
+                    json!({"id":item,"body":body,"sanitizedHTML":sanitized_html,"attachments":message.attachments().len(),"attachmentList":attachments::message_list(&message.attachments())?,"actions":actions,"labels":labels}),
                 )
             }
             Command::MessageAction { folder, item, action } => self.message_action(folder, item, action),
             Command::ConversationAction { folder, item, conversation, action } => self.conversation_action(folder, item, conversation, action),
+            Command::MoveToFolder { folder, item, conversation, target } => self.move_to_folder(folder, item, conversation, target),
+            Command::ToggleLabel { folder, item, conversation, label, apply } => self.toggle_label(folder, item, conversation, label, apply),
             Command::UndoAction { token } => self.undo_action(token),
             Command::Compose { mode, folder, item } => self.compose(&mode, folder, item),
             Command::SaveDraft { token, content } => {
