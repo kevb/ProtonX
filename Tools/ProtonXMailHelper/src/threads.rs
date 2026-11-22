@@ -10,7 +10,7 @@ pub(crate) struct SelectedThread {
     items: Vec<Message>,
 }
 pub(crate) fn message_value(m: &Message) -> Value {
-    json!({"id":m.id.as_u64(),"conversationID":m.conversation_id.as_u64(),"subject":m.subject,"sender":m.sender.address,"senderName":m.sender.name,"recipient":m.to_list.iter().map(|r|r.address.as_str()).collect::<Vec<_>>().join(", "),"date":m.time.0,"unread":m.unread,"attachments":m.num_attachments,"isDraft":m.is_draft,"canReply":m.can_reply,"isScheduled":m.is_scheduled})
+    json!({"id":m.id.as_u64(),"conversationID":m.conversation_id.as_u64(),"subject":m.subject,"sender":m.sender.address,"senderName":m.sender.name,"recipient":m.to_list.iter().map(|r|r.address.as_str()).collect::<Vec<_>>().join(", "),"date":m.time.0,"unread":m.unread,"starred":m.starred,"attachments":m.num_attachments,"isDraft":m.is_draft,"canReply":m.can_reply,"isScheduled":m.is_scheduled})
 }
 fn valid_members(
     anchor: u64,

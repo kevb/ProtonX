@@ -290,6 +290,7 @@ struct MailWindow: View {
                                     .font(.system(size: 13, weight: conversation.unread ? .medium : .regular)).lineLimit(2)
                                 HStack(spacing: 6) {
                                     if conversation.unread { Circle().fill(MailTheme.accent).frame(width: 6, height: 6); Text("Unread") }
+                                    if conversation.starred { Image(systemName: "star.fill").foregroundStyle(.orange) }
                                     if message.attachments > 0 { Image(systemName: "paperclip"); Text("\(message.attachments)") }
                                     if conversation.messages.count > 1 { Text("\(conversation.messages.count) messages").help("Messages loaded in this folder; open the conversation for other messages") }
                                 }.font(.system(size: 10)).foregroundStyle(.secondary)
@@ -298,11 +299,11 @@ struct MailWindow: View {
                             .contextMenu {
                                 let item = conversation.selectionID(store.selectedItem)
                                 let actions = store.listActions(for: item)
-                                ForEach(actions.filter { $0 != .read && $0 != .unread }, id: \.self) { action in
+                                ForEach(actions.filter { ![.read, .unread, .star, .unstar].contains($0) }, id: \.self) { action in
                                     contextAction(action, item: item)
                                 }
                                 Divider()
-                                ForEach(actions.filter { $0 == .read || $0 == .unread }, id: \.self) { action in
+                                ForEach(actions.filter { [.read, .unread, .star, .unstar].contains($0) }, id: \.self) { action in
                                     contextAction(action, item: item)
                                 }
                             }
@@ -347,6 +348,11 @@ struct MailWindow: View {
     private func organizationActions(_ message: NativeMailMessage) -> some View {
         HStack(spacing: 8) {
             mailAction(store.messageActions.contains(.read) ? .read : .unread).keyboardShortcut("u", modifiers: [.command, .shift])
+            if store.messageActions.contains(.unstar) || store.messageActions.contains(.star) {
+                mailAction(store.messageActions.contains(.unstar) ? .unstar : .star)
+                    .foregroundStyle(store.messageActions.contains(.unstar) ? .orange : .primary)
+                    .keyboardShortcut("s", modifiers: [.command, .shift])
+            }
             mailAction(.archive).keyboardShortcut("e", modifiers: [.command])
             if store.messageActions.contains(.inbox) { mailAction(.inbox) }
             mailAction(.trash)
@@ -364,9 +370,16 @@ struct MailWindow: View {
         HStack(spacing: 8) {
             if message.isDraft == true && message.isScheduled != true {
                 Button("Edit draft", systemImage: "pencil") { store.compose("open") }.buttonStyle(MailActionStyle())
-            } else if message.canReply != false {
-                Button("Reply", systemImage: "arrowshape.turn.up.left") { store.compose("reply") }.buttonStyle(MailActionStyle())
-                Button("Reply all", systemImage: "arrowshape.turn.up.left.2") { store.compose("reply_all") }.buttonStyle(MailActionStyle())
+            } else {
+                if message.canReply != false {
+                    Button("Reply", systemImage: "arrowshape.turn.up.left") { store.compose("reply") }.buttonStyle(MailActionStyle())
+                    Button("Reply all", systemImage: "arrowshape.turn.up.left.2") { store.compose("reply_all") }.buttonStyle(MailActionStyle())
+                }
+                if message.isDraft != true {
+                    Button("Forward", systemImage: "arrowshape.turn.up.right") { store.compose("forward") }
+                        .buttonStyle(MailActionStyle())
+                        .accessibilityIdentifier("mailForward")
+                }
             }
         }.fixedSize().disabled(store.busy || store.threadLoading || store.body == nil || store.draft != nil)
     }

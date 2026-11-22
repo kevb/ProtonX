@@ -25,6 +25,7 @@ public struct NativeMailConversation: Identifiable, Equatable, Sendable {
     public var representative: NativeMailMessage { messages[0] }
     public let messages: [NativeMailMessage]
     public var unread: Bool { messages.contains(where: \.unread) }
+    public var starred: Bool { messages.contains { $0.starred == true } }
     private enum Key: Hashable { case conversation(UInt64), message(UInt64) }
     public static func group(_ messages: [NativeMailMessage]) -> [Self] {
         var groups: [[NativeMailMessage]] = [], indices: [Key: Int] = [:]

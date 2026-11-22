@@ -7,7 +7,7 @@ use mail_uniffi::mail::messages;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum Action { Read, Unread, Archive, Trash, Inbox, Spam }
+pub enum Action { Read, Unread, Star, Unstar, Archive, Trash, Inbox, Spam }
 #[derive(Default)]
 pub struct State {
     pub uncertain: bool,
@@ -17,12 +17,14 @@ pub struct State {
 impl State {
     pub(crate) fn clear_undo(&mut self) { self.undo = None; }
 }
-pub struct Options { read: bool, unread: bool, destinations: Vec<(Action, Id)> }
+pub struct Options { read: bool, unread: bool, star: bool, unstar: bool, destinations: Vec<(Action, Id)> }
 impl Options {
     pub fn names(&self) -> Vec<Action> {
         let mut actions = vec![];
         if self.read { actions.push(Action::Read); }
         if self.unread { actions.push(Action::Unread); }
+        if self.star { actions.push(Action::Star); }
+        if self.unstar { actions.push(Action::Unstar); }
         actions.extend(self.destinations.iter().map(|(action, _)| *action));
         actions
     }
@@ -46,7 +48,13 @@ pub fn folder_kind(description: &mail_uniffi::mail::datatypes::LabelDescription)
     }
 }
 fn options(list: Vec<ListActions>, destinations: Vec<MoveDestination>) -> Options {
-    let mut options = Options { read: list.contains(&ListActions::MarkRead), unread: list.contains(&ListActions::MarkUnread), destinations: vec![] };
+    let mut options = Options {
+        read: list.contains(&ListActions::MarkRead),
+        unread: list.contains(&ListActions::MarkUnread),
+        star: list.contains(&ListActions::Star),
+        unstar: list.contains(&ListActions::Unstar),
+        destinations: vec![],
+    };
     if !list.iter().any(|action| matches!(action, ListActions::MoveTo | ListActions::MoveToSystemFolder(_) | ListActions::NotSpam(_))) { return options; }
     for destination in destinations {
         match destination {
@@ -86,10 +94,13 @@ impl Backend {
         if !options.names().contains(&action) { return Err("action_unavailable"); }
         self.action_state.uncertain = true;
         self.action_state.undo = None;
+        let user = self.user.clone().ok_or("invalid_state")?;
         use mail_uniffi::mail::conversations;
         let undo = match action {
             Action::Read => { sdk_void!(mail_uniffi::errors::VoidActionResult, block_on(conversations::mark_conversations_as_read(mailbox, vec![Id::from(conversation)]))).map_err(|e| action_failure(e, "action_uncertain"))?; None }
             Action::Unread => { sdk_void!(mail_uniffi::errors::VoidActionResult, block_on(conversations::mark_conversations_as_unread(mailbox, vec![Id::from(conversation)]))).map_err(|e| action_failure(e, "action_uncertain"))?; None }
+            Action::Star => { sdk_void!(mail_uniffi::errors::VoidActionResult, block_on(conversations::star_conversations(user, vec![Id::from(conversation)]))).map_err(|e| action_failure(e, "action_uncertain"))?; None }
+            Action::Unstar => { sdk_void!(mail_uniffi::errors::VoidActionResult, block_on(conversations::unstar_conversations(user, vec![Id::from(conversation)]))).map_err(|e| action_failure(e, "action_uncertain"))?; None }
             _ => sdk_result!(conversations::MoveConversationsResult, block_on(conversations::move_conversations(mailbox, options.destination(action).ok_or("action_unavailable")?, vec![Id::from(conversation)]))).map_err(|e| action_failure(e, "action_uncertain"))?,
         };
         self.action_state.uncertain = false;
@@ -112,9 +123,12 @@ impl Backend {
         // Close the retry window BEFORE crossing the SDK's durable queue boundary.
         self.action_state.uncertain = true;
         self.action_state.undo = None;
+        let user = self.user.clone().ok_or("invalid_state")?;
         let undo = match action {
             Action::Read => { sdk_void!(mail_uniffi::errors::VoidActionResult, block_on(messages::mark_messages_read(mailbox, vec![Id::from(item)]))).map_err(|e| action_failure(e, "action_uncertain"))?; None }
             Action::Unread => { sdk_void!(mail_uniffi::errors::VoidActionResult, block_on(messages::mark_messages_unread(mailbox, vec![Id::from(item)]))).map_err(|e| action_failure(e, "action_uncertain"))?; None }
+            Action::Star => { sdk_void!(mail_uniffi::errors::VoidActionResult, block_on(messages::star_messages(user, vec![Id::from(item)]))).map_err(|e| action_failure(e, "action_uncertain"))?; None }
+            Action::Unstar => { sdk_void!(mail_uniffi::errors::VoidActionResult, block_on(messages::unstar_messages(user, vec![Id::from(item)]))).map_err(|e| action_failure(e, "action_uncertain"))?; None }
             _ => sdk_result!(messages::MoveMessagesResult, block_on(messages::move_messages(mailbox, options.destination(action).ok_or("action_unavailable")?, vec![Id::from(item)]))).map_err(|e| action_failure(e, "action_uncertain"))?,
         };
         self.action_state.uncertain = false;
@@ -163,7 +177,7 @@ mod tests {
     fn closed_action_schema_rejects_bulk_and_permanent_deletion() {
         for method in ["delete", "permanent_delete", "all", "block", "move"] { assert!(serde_json::from_value::<Action>(json!(method)).is_err()); }
         assert_eq!(serde_json::from_value::<Action>(json!("trash")).unwrap(), Action::Trash);
-        for action in ["read", "unread", "archive", "trash", "inbox", "spam"] {
+        for action in ["read", "unread", "star", "unstar", "archive", "trash", "inbox", "spam"] {
             assert!(serde_json::from_value::<Request>(json!({"schema":1,"id":1,"command":{"method":"conversation_action","folder":1,"item":11,"conversation":70,"action":action}})).is_ok());
         }
     }
@@ -172,8 +186,8 @@ mod tests {
         assert_eq!(folder_action(MovableSystemFolder::Trash), Some(Action::Trash));
         assert_eq!(folder_action(MovableSystemFolder::Archive), Some(Action::Archive));
         assert_eq!(folder_action(MovableSystemFolder::Spam), Some(Action::Spam));
-        let options = Options { read:true, unread:false, destinations:vec![(Action::Archive, Id::from(731_u64))] };
-        assert_eq!(options.names(), vec![Action::Read, Action::Archive]);
+        let options = Options { read:true, unread:false, star:true, unstar:false, destinations:vec![(Action::Archive, Id::from(731_u64))] };
+        assert_eq!(options.names(), vec![Action::Read, Action::Star, Action::Archive]);
         assert_eq!(options.destination(Action::Archive).unwrap().as_u64(), 731);
         assert!(options.destination(Action::Trash).is_none());
     }

@@ -19,6 +19,8 @@ final class NativeMailStore: ObservableObject {
             switch action {
             case .read: return "Mark \(scope) as Read"
             case .unread: return "Mark \(scope) as Unread"
+            case .star: return "Star \(scope)"
+            case .unstar: return "Remove star from \(scope)"
             case .archive: return "Move \(scope) to Archive"
             case .trash: return "Move \(scope) to Trash"
             case .spam: return "Move \(scope) to Spam"
@@ -360,7 +362,7 @@ final class NativeMailStore: ObservableObject {
         case .spam: moves = [.trash, .inbox]
         case .trash: moves = [.inbox, .archive]
         }
-        return moves + [row.unread ? .read : .unread]
+        return moves + [row.unread ? .read : .unread, row.starred ? .unstar : .star]
     }
     func trashIntent(for item: UInt64?) -> ListActionIntent? { listActionIntent(for: item, action: .trash) }
     func listActionIntent(for item: UInt64?, action: NativeMailAction) -> ListActionIntent? {
@@ -385,19 +387,21 @@ final class NativeMailStore: ObservableObject {
                 return message.id == intent.item
             }
             let affected = Set(items.map(\.id))
-            if intent.action == .read || intent.action == .unread || intent.action == .trash {
+            if intent.action == .read || intent.action == .unread || intent.action == .star || intent.action == .unstar || intent.action == .trash {
                 demoMessages = demoMessages.map { message in
                     guard affected.contains(message.id) else { return message }
-                    return NativeMailMessage(id: message.id, subject: message.subject, sender: message.sender, senderName: message.senderName, recipient: message.recipient, date: message.date, unread: intent.action == .unread, attachments: message.attachments, isDraft: message.isDraft ?? false, canReply: message.canReply ?? true, isScheduled: message.isScheduled ?? false, conversationID: message.conversationID)
+                    let nextUnread = (intent.action == .read || intent.action == .unread || intent.action == .trash) ? (intent.action == .unread) : message.unread
+                    let nextStarred = (intent.action == .star || intent.action == .unstar) ? (intent.action == .star) : (message.starred ?? false)
+                    return NativeMailMessage(id: message.id, subject: message.subject, sender: message.sender, senderName: message.senderName, recipient: message.recipient, date: message.date, unread: nextUnread, starred: nextStarred, attachments: message.attachments, isDraft: message.isDraft ?? false, canReply: message.canReply ?? true, isScheduled: message.isScheduled ?? false, conversationID: message.conversationID)
                 }
             }
-            if intent.action != .read && intent.action != .unread {
+            if ![.read, .unread, .star, .unstar].contains(intent.action) {
                 let location: UInt64 = intent.action == .trash ? 4 : (intent.action == .archive ? 3 : (intent.action == .spam ? 5 : 1))
                 for message in items { demoLocations[message.id] = location }
             }
             messages = demoMessages.filter { demoLocations[$0.id] == selectedFolder }
             reconcileSelection(); if selectedAnchor != nil { select() }; setDemoActions()
-            if intent.action != .read && intent.action != .unread { setActionUndo(1); demoUndo = previous }
+            if ![.read, .unread, .star, .unstar].contains(intent.action) { setActionUndo(1); demoUndo = previous }
             notice = intent.actionTitle + " · demo"; return
         }
         perform { [self] captured in
@@ -423,15 +427,17 @@ final class NativeMailStore: ObservableObject {
         clearActionUndo()
         if demo {
             let previous = (messages: demoMessages, locations: demoLocations)
-            if action == .read || action == .unread {
+            if [.read, .unread, .star, .unstar].contains(action) {
                 demoMessages = demoMessages.map { message in
                     guard message.id == item else { return message }
-                    return NativeMailMessage(id: message.id, subject: message.subject, sender: message.sender, senderName: message.senderName, recipient: message.recipient, date: message.date, unread: action == .unread, attachments: message.attachments, isDraft: message.isDraft ?? false, canReply: message.canReply ?? true, isScheduled: message.isScheduled ?? false, conversationID: message.conversationID)
+                    let nextUnread = (action == .read || action == .unread) ? (action == .unread) : message.unread
+                    let nextStarred = (action == .star || action == .unstar) ? (action == .star) : (message.starred ?? false)
+                    return NativeMailMessage(id: message.id, subject: message.subject, sender: message.sender, senderName: message.senderName, recipient: message.recipient, date: message.date, unread: nextUnread, starred: nextStarred, attachments: message.attachments, isDraft: message.isDraft ?? false, canReply: message.canReply ?? true, isScheduled: message.isScheduled ?? false, conversationID: message.conversationID)
                 }
             } else { demoLocations[item] = action == .trash ? 4 : (action == .archive ? 3 : (action == .spam ? 5 : 1)) }
             messages = demoMessages.filter { demoLocations[$0.id] == selectedFolder }
             reconcileSelection(); if selectedAnchor != nil { select(preferred: item) }; setDemoActions()
-            if action != .read && action != .unread { demoUndo = previous; setActionUndo(1) }
+            if ![.read, .unread, .star, .unstar].contains(action) { demoUndo = previous; setActionUndo(1) }
             notice = action.title + " · demo"
             return
         }
@@ -482,6 +488,7 @@ final class NativeMailStore: ObservableObject {
         guard phase == .open, !busy, !threadLoading, draft == nil else { return }
         guard mode == "new" || selectedMessage != nil else { return }
         if mode == "open" { guard selectedMessage?.isDraft == true, selectedMessage?.isScheduled != true else { return } }
+        if mode == "forward" { guard selectedMessage?.isDraft != true else { return } }
         if mode == "reply" || mode == "reply_all" { guard selectedMessage?.canReply != false else { return } }
         cancelAttachmentTransfer(); clearAttachmentPreview(); attachmentError = nil
         notice = nil; composeStatus = nil
@@ -490,9 +497,15 @@ final class NativeMailStore: ObservableObject {
             let senders = [email, "alex.demo@gmail.com"]
             let ownMessage = reply.map { senders.contains($0.sender) } ?? false
             let sender = reply.flatMap { senders.contains($0.sender) ? $0.sender : (senders.contains($0.recipient) ? $0.recipient : nil) } ?? email
-            let subject = reply.map { $0.subject.lowercased().hasPrefix("re:") ? $0.subject : "Re: " + $0.subject } ?? ""
-            let quote = reply.map { "\n\n" + ($0.senderName.isEmpty ? $0.sender : $0.senderName) + " wrote:\n" + (demoBodies[$0.id] ?? "") } ?? "Alex"
-            draft = NativeMailDraft(token: 1, sender: sender, senders: senders, to: reply.map { [ownMessage ? $0.recipient : $0.sender] } ?? [], subject: subject, quote: quote, state: .editing)
+            let subject: String
+            if mode == "forward", let reply {
+                subject = reply.subject.lowercased().hasPrefix("fwd:") ? reply.subject : "Fwd: " + reply.subject
+            } else {
+                subject = reply.map { $0.subject.lowercased().hasPrefix("re:") ? $0.subject : "Re: " + $0.subject } ?? ""
+            }
+            let quote = reply.map { "\n\n" + (mode == "forward" ? "---------- Forwarded message ----------\nFrom: \($0.sender)\n" : ($0.senderName.isEmpty ? $0.sender : $0.senderName) + " wrote:\n") + (demoBodies[$0.id] ?? "") } ?? "Alex"
+            let toList = mode == "forward" ? [] : (reply.map { [ownMessage ? $0.recipient : $0.sender] } ?? [])
+            draft = NativeMailDraft(token: 1, sender: sender, senders: senders, to: toList, subject: subject, quote: quote, state: .editing)
             editorState?.to = recipients.isEmpty ? (editorState?.to ?? "") : recipients.joined(separator: ", ")
             return
         }
@@ -733,7 +746,7 @@ final class NativeMailStore: ObservableObject {
     private func setDemoActions() {
         guard searchQuery == nil else { messageActions = []; return }
         guard let message = selectedMessage else { messageActions = []; return }
-        messageActions = [message.unread ? .read : .unread]
+        messageActions = [message.unread ? .read : .unread, message.starred == true ? .unstar : .star]
         let location = demoLocations[message.id] ?? selectedFolder
         if location != 3 { messageActions.append(.archive) }
         if location != 4 { messageActions.append(.trash) }
