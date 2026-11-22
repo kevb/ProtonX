@@ -44,9 +44,20 @@ include passwords, tokens, real message bodies or vault exports in public issues
   is an untrusted Boolean hint; reopening requires local unlock and SDK restore.
   Native credentials/challenges travel on private stdin. Human verification and
   FIDO-only challenges fail explicitly; no product limit or challenge is bypassed.
-  The helper persists only while Mail is unlocked. Lock/close terminates it,
-  cancels queued requests and clears visible contents. It may retain its encrypted
-  session on disk; lock is not remote logout. Sign-out uses the SDK's account logout.
+  Lock clears all visible Mail contents, cancels queued UI requests, and invalidates
+  UI/selection/contact/attachment epochs. When background sync while locked is enabled
+  (default), the Mail helper may stay running behind the Touch ID/password UI gate
+  using only `restore`, `notifications_start` and `notifications_poll` so Proton's SDK
+  event loop keeps the local mailbox synced and delivers anonymous alerts while Mail
+  remains locked; polling pauses during system sleep and screen lock and resumes on wake.
+  In this mode, Mail also retains its loaded folder/message list metadata privately in
+  process memory (unmounted from SwiftUI) so unlocking displays the inbox immediately
+  before refreshing in the background, while still clearing decrypted message bodies,
+  ephemeral `WKWebView` instances, attachment previews, contact details and active
+  composers on lock. Viewing any Mail content still requires macOS local authentication.
+  Disabling locked background sync, signing out, session expiry, or quitting ProtonX
+  clears all retained state, terminates the helper, and clears alerts and the Dock badge.
+  Lock is not remote logout; sign-out uses the SDK's account logout.
 - Main Proton passwords travel through a private pipe and are not stored in UI
   preferences, argument lists, credential environment variables or logs. Decrypted
   Pass item data lives in app memory while open; Mail's core also persists decoded
@@ -87,8 +98,12 @@ include passwords, tokens, real message bodies or vault exports in public issues
   attempt can also rearm on that transition; repeated foreground notifications do
   not retry. Password fallback is never retried automatically. Choosing a product
   again or reopening the window may arm a new attempt. Switching products cancels pending authentication;
-  epochs reject late success before helper access. Products retain separate gates.
-  Preview/demo workspaces never evaluate real authentication.
+  epochs reject late success before helper access. When linked Mail, Contacts and Calendar unlock is
+  enabled (default), completing macOS local authentication for Mail/Contacts or Calendar lets switching
+  to the other product in that group restore its own independent saved session without a second Touch ID
+  prompt, and locking either locks both; no credentials or sessions are shared across helpers, and
+  preview/demo workspaces never satisfy linked unlock. Pass always retains an independent local
+  authentication gate. Preview/demo workspaces never evaluate real authentication.
   A UI lock doesn't revoke the remote session or defend against malware
   running as the same macOS user and accessing that user's login Keychain.
 - A shared app process is a shared address-space boundary, not independent product
@@ -117,7 +132,11 @@ include passwords, tokens, real message bodies or vault exports in public issues
   invalidate the generation before network access. No replay queue exists. Local
   unlock cannot detect server revocation while disconnected. Authentication/TLS/
   invalid-data errors fail closed; missing keys/corruption never reset credentials.
-  Expiry/lock clears the visible workspace and owned clipboard. See
+  Expiry/lock clears the visible workspace and owned clipboard. An opt-in Pass
+  background cache refresh setting (`passBackgroundCacheSync`, off by default) can
+  periodically invoke `native-snapshot` while Pass is locked and the Mac is awake to
+  refresh the encrypted SQLCipher saved vault on disk; returned Swift metadata is
+  discarded immediately and never populates locked UI state. See
   docs/OFFLINE_DESIGN.md for exact scope and remaining account acceptance.
 - Pass session invalidation clears the visible workspace and returns to sign-in
   across snapshot, detail and write paths, including post-write refresh.
@@ -153,8 +172,12 @@ include passwords, tokens, real message bodies or vault exports in public issues
   queue can continue on restore. Lock/close does not cancel remote delivery.
   New text is limited to 32 KiB, recipients to 100 distinct addresses and subjects
   to 998 bytes without control characters. Editor text belongs to a Mail-session
-  model and stays in memory across product switches; it is never persisted in preferences. Save explicitly before lock;
-  lock, sign-out, draft close and suite-window close release unsaved editor state.
+  model and stays in memory across product switches; it is never persisted in preferences.
+  On Mail UI lock (with background sync active), window close (when locking Mail), or Quit,
+  a non-empty editing draft is best-effort auto-saved through the validated `save_draft` and
+  `close_draft` helper commands (bounded to 3 seconds on Quit; stripping only half-typed
+  invalid recipient tokens so subject and body still save) before releasing editor state.
+  Sign-out and draft discard release unsaved editor state without auto-saving.
 - Native Mail preserves HTML structure using Proton's pinned whitelist/CSS
   sanitizer in the helper, with depth/node/output bounds and a text fallback.
   The selected sanitized body is displayed in an ephemeral local WKWebView, with
@@ -343,12 +366,16 @@ selection, search, scroll and unsaved Mail editor state in the existing product
 objects. Calendar may request a one-use account handoff from an already unlocked
 Mail or online Pass session, as described below; switching never bypasses a saved
 product's local unlock or merges product stores. Shared defaults contain
-only startup/last-product navigation preferences. Home does not start product
-helpers, and the preview ignores real startup preferences. The product rail
+only navigation and lock/sync policy preferences. Preview ignores real startup and
+background-sync preferences. The product rail
 excludes hidden content from input/accessibility and uses selected-product
 capabilities for commands. Mail authentication-field values clear on switching
-away. Suite-window close, screen/inactivity lock and Quit lock all products,
-including hidden ones; late helper replies remain subject to existing epochs.
+away. Pass uses a strict lock policy (short in-app inactivity, screen lock, sleep,
+display sleep, user switch and window close). Mail and Calendar use configurable
+per-product lock settings (Mac-wide idle time, default 24 hours; optional lock on
+Mac screen lock/sleep, excluding brief display dimming; optional keep-open on window
+close). Explicit Lock (`⌘L`) locks every product; Quit (`⌘Q`) terminates all products,
+background sync helpers and alerts. Late helper replies remain subject to existing epochs.
 Public product links still accept only the four closed routes defined above and
 select the product before activating the same suite window. No account data is
 accepted in routes, and no global account/session cache is introduced.
@@ -365,24 +392,30 @@ not delete account profiles, Keychain items or user documents.
 
 ## Desktop notifications
 
-Mail notification monitoring is opt-in and runs only in the unlocked Mail session.
-A bounded, nonpersistent queue observes committed SDK CREATE events; no new
-push service, device token, secret store, account sharing or transport is added.
-The Swift adapter reads this queue over the existing private helper pipe. It
-never derives incoming alerts from list diffs, paging, read/unread changes or
-message bodies. Screen lock, window close, logout and session expiry stop the
-helper and clear pending/delivered app alerts and the unread Dock count.
+Mail notification monitoring is opt-in. A bounded, nonpersistent queue observes
+committed SDK CREATE events; no new push service, device token, secret store, account
+sharing or transport is added. The Swift adapter reads this queue over the existing
+private helper pipe. It never derives incoming alerts from list diffs, paging,
+read/unread changes or message bodies.
 
 Private previews are the default. Enabling sender/subject previews explicitly
-shares that metadata with macOS Notification Center, whose OS display, Focus
-and preview settings also apply. Clearing alerts is not a promise to erase OS
-logs, screenshots or notification history after a crash. No message body,
-recipient, account identity or session token enters notification content or
-routing metadata. OS click routing uses bounded, random in-memory tickets,
-invalidated on lock and policy changes. Stale tickets only open the Mail interface, with its usual local authentication
-requirements. Valid clicks navigate only to messages disclosed by the current bounded SDK
-list and preserve an open composer. Test alerts contain synthetic text only;
-preview builds cannot request OS permission, deliver alerts or set a Dock badge.
+shares that metadata with macOS Notification Center only while Mail is unlocked;
+OS display, Focus and preview settings also apply. Locking Mail immediately clears
+any previously delivered preview notifications and invalidates message-level click
+tickets. When background sync while locked is enabled, Mail continues monitoring
+while locked and awake, but forces strictly anonymous alerts ("New mail received.
+Unlock ProtonX Mail to view.") with no sender, subject, or message-routing target;
+clicking opens the Mail unlock screen without bypassing local authentication.
+Disabling locked background sync, logout, session expiry and quitting ProtonX stop
+the helper and clear pending/delivered app alerts and the unread Dock count.
+Clearing alerts is not a promise to erase OS logs, screenshots or notification
+history after a crash. No message body, recipient, account identity or session token
+enters notification content or routing metadata. OS click routing uses bounded,
+random in-memory tickets, invalidated on lock and policy changes. Stale tickets only
+open the Mail interface, with its usual local authentication requirements. Valid
+unlocked clicks navigate only to messages disclosed by the current bounded SDK list
+and preserve an open composer. Test alerts contain synthetic text only; preview builds
+cannot request OS permission, deliver alerts or set a Dock badge.
 
 ## Native Mail attachment files
 

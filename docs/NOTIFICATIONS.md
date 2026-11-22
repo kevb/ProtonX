@@ -22,9 +22,15 @@ The pane links there and offers a synthetic **Send test notification**.
 - Clicking an alert brings Mail forward and opens its message when present in
   the current bounded mailbox page. An open draft is preserved. A stale alert
   never bypasses local authentication or opens a message from another session.
-- ProtonX must be running and Mail unlocked. Switching to Pass keeps the Mail
-  monitor alive. Lock, close, sign-out or expiry clears alerts and the badge.
-  There is no background login, APNS device registration or locked-state push.
+- ProtonX must be running. Switching to Pass keeps the Mail monitor alive.
+  When background sync while locked is enabled (default in **General Settings**),
+  locking Mail immediately clears previously delivered sender/subject previews and
+  continues delivering strictly anonymous alerts ("New mail received. Unlock ProtonX
+  Mail to view.") and the unread Dock badge while your Mac is awake; clicking an
+  anonymous alert opens the Mail unlock screen without bypassing Touch ID/password.
+  Quitting ProtonX, signing out, session expiry, or disabling locked background sync
+  stops the helper and clears alerts and the Dock badge.
+  There is no APNS device registration or remote push service.
 - The SDK's existing event polling interval is 60 seconds. The adapter reads the
   local event queue every five seconds. Notifications therefore are not instant
   push; network interruptions can delay them. Snoozed-reminder alerts remain on

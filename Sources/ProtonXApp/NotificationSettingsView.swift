@@ -33,9 +33,9 @@ struct NotificationSettingsView: View {
                     Text("Private — new mail only").tag(false)
                     Text("Sender and subject").tag(true)
                 }.disabled(!notifications.active)
-                Text("Alerts follow Proton’s Inbox categories and folder notification settings. Imported messages, read mail and Spam are excluded. Alerts continue while you use another product; Mail must be unlocked and ProtonX running.")
+                Text("Alerts follow Proton’s Inbox categories and folder notification settings. Imported messages, read mail and Spam are excluded. Alerts continue while you use another product or while Mail is locked (when background sync while locked is enabled in General Settings).")
                     .font(.caption).foregroundStyle(.secondary)
-                Text("Sender and subject previews are shared with macOS Notification Center. Locking Mail clears its alerts and Dock count.")
+                Text("Sender and subject previews are shared with macOS Notification Center only while Mail is unlocked. Locking Mail immediately clears delivered previews and switches new alerts to anonymous notices (“New mail received”). Quitting ProtonX stops alerts and clears the Dock count.")
                     .font(.caption).foregroundStyle(.secondary)
                 Button { Task { await notifications.testAlert() } } label: { Label("Send test notification", systemImage: "paperplane") }
                     .disabled(!notifications.active || notifications.working).accessibilityIdentifier("testNotification")

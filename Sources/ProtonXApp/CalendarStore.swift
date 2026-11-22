@@ -73,14 +73,29 @@ import ProtonXCore
         }
     }
     @Published private(set) var busy = false
+    @Published private(set) var backgroundSyncing = false
     @Published private(set) var writeBlocked = false
+    @Published private(set) var lastSyncedAt: Date?
+    @Published private(set) var syncWarning: String?
     @Published var error: String?
     @Published private(set) var notice: String?
     private var source: (any CalendarDataSource)?
     private var editorObservation: AnyCancellable?
     private var editorValidationError = false
+    private struct RetainedCalendarState {
+        let calendars: [CalendarCollection]
+        let events: [CalendarEventRecord]
+        let visibleCalendarIDs: Set<String>
+        let loadedRange: CalendarQueryRange?
+        let lastSyncedAt: Date?
+    }
+    private var retainedState: RetainedCalendarState?
     private var operation: Task<Void,Never>?
+    private var backgroundRefreshTask: Task<Void,Never>?
+    private var periodicRefreshTask: Task<Void,Never>?
+    private var backgroundSyncInterval: Duration = .seconds(300)
     private var epoch = SessionEpoch()
+    var isSyncing: Bool { phase == .connected && (busy || backgroundSyncing) }
     let localAuthentication: LocalUnlockAuthentication
     let previewOnly: Bool
     private let defaults: UserDefaults
@@ -133,7 +148,11 @@ import ProtonXCore
                 if phase == .connected && requestedRange != requestRange { needsRangeReload = true; return }
                 let previousIDs = Set(calendars.map(\.id))
                 calendars = snapshot.calendars; events = snapshot.events; writeBlocked = false; loadedRange = requestedRange
-                if phase == .connected { notice = snapshot.omitted > 0 ? "\(snapshot.omitted) event occurrences could not be decrypted or displayed. The visible range may be incomplete." : "Connected to Proton" }
+                lastSyncedAt = now(); syncWarning = nil
+                if phase == .connected {
+                    notice = snapshot.omitted > 0 ? "\(snapshot.omitted) event occurrences could not be decrypted or displayed. The visible range may be incomplete." : nil
+                    startPeriodicRefresh()
+                }
                 if initial { visibleCalendarIDs = Set(calendars.map(\.id)) }
                 else { visibleCalendarIDs.formIntersection(Set(calendars.map(\.id))); visibleCalendarIDs.formUnion(Set(calendars.map(\.id)).subtracting(previousIDs)) }
                 if !events.contains(where: { $0.id == selectedEventID }) { selectedEventID = nil }
@@ -193,6 +212,7 @@ import ProtonXCore
     }
     private func perform(_ work: @escaping @MainActor () async throws -> (@MainActor () -> Void)) {
         editorValidationError = false
+        backgroundRefreshTask?.cancel(); backgroundRefreshTask = nil; backgroundSyncing = false
         busy = true; error = nil; notice = nil; let ticket = epoch.value
         operation = Task { [weak self] in
             do {
@@ -212,11 +232,89 @@ import ProtonXCore
             }
         }
     }
-    func lock() {
+    func terminate() { retainedState = nil; lock(preserveRetainedState: false) }
+    func lock(preserveRetainedState: Bool = false) {
+        if preserveRetainedState && phase == .connected && !previewOnly && !calendars.isEmpty {
+            retainedState = RetainedCalendarState(
+                calendars: calendars, events: events, visibleCalendarIDs: visibleCalendarIDs,
+                loadedRange: loadedRange, lastSyncedAt: lastSyncedAt
+            )
+        } else if !preserveRetainedState {
+            retainedState = nil
+        }
         epoch.invalidate(); operation?.cancel(); operation = nil; source = nil; debounce?.cancel(); debounce = nil
+        backgroundRefreshTask?.cancel(); backgroundRefreshTask = nil
+        periodicRefreshTask?.cancel(); periodicRefreshTask = nil
         runner.cancelAll(); localAuthentication.cancel(); loadedRange = nil; needsRangeReload = false
         editor = nil; selectedEventID = nil; events = []; calendars = []; visibleCalendarIDs = []
-        writeBlocked = false; query = ""; error = nil; notice = nil; busy = false; phase = hasSession ? .locked : .welcome
+        writeBlocked = false; lastSyncedAt = nil; syncWarning = nil; backgroundSyncing = false
+        query = ""; error = nil; notice = nil; busy = false; phase = hasSession ? .locked : .welcome
+    }
+    func configureBackgroundSync(interval: Duration = .seconds(300)) {
+        backgroundSyncInterval = interval
+        if phase == .connected { startPeriodicRefresh() }
+    }
+    func setSystemSuspended(_ suspended: Bool) {
+        let changed = localAuthentication.systemSuspended != suspended
+        localAuthentication.systemSuspended = suspended
+        guard changed, !previewOnly else { return }
+        if suspended {
+            periodicRefreshTask?.cancel(); periodicRefreshTask = nil
+        } else if phase == .connected {
+            startPeriodicRefresh()
+            backgroundRefresh()
+        }
+    }
+    func handleForegroundReturn() {
+        guard phase == .connected, !previewOnly else { return }
+        if lastSyncedAt == nil || now().timeIntervalSince(lastSyncedAt!) >= 60 {
+            backgroundRefresh()
+        }
+    }
+    func backgroundRefresh() {
+        guard phase == .connected, !previewOnly, !busy, !backgroundSyncing, editor == nil, !writeBlocked, let source else { return }
+        let requestedRange = requestRange
+        let ticket = epoch.value
+        backgroundSyncing = true
+        backgroundRefreshTask?.cancel()
+        backgroundRefreshTask = Task { [weak self] in
+            defer { if let self, self.epoch.accepts(ticket) { self.backgroundSyncing = false } }
+            guard let self else { return }
+            do {
+                let snapshot = try await source.snapshot(in: requestedRange)
+                try snapshot.validate()
+                guard !Task.isCancelled, self.epoch.accepts(ticket), self.phase == .connected, self.editor == nil else { return }
+                guard requestedRange == self.requestRange else { return }
+                let previousIDs = Set(self.calendars.map(\.id))
+                self.calendars = snapshot.calendars; self.events = snapshot.events; self.loadedRange = requestedRange
+                self.lastSyncedAt = self.now(); self.syncWarning = nil
+                self.notice = snapshot.omitted > 0 ? "\(snapshot.omitted) event occurrences could not be decrypted or displayed. The visible range may be incomplete." : nil
+                self.visibleCalendarIDs.formIntersection(Set(self.calendars.map(\.id)))
+                self.visibleCalendarIDs.formUnion(Set(self.calendars.map(\.id)).subtracting(previousIDs))
+                if !self.events.contains(where: { $0.id == self.selectedEventID }) { self.selectedEventID = nil }
+            } catch {
+                guard !Task.isCancelled, self.epoch.accepts(ticket), self.phase == .connected else { return }
+                if let failure = error as? NativeCalendarFailure, failure == .sessionExpired {
+                    self.lock(); self.hasSession = false; self.defaults.set(false, forKey: "nativeCalendarConnected"); self.phase = .welcome
+                    self.error = failure.localizedDescription
+                } else {
+                    self.syncWarning = "Sync delayed"
+                }
+            }
+        }
+    }
+    private func startPeriodicRefresh() {
+        periodicRefreshTask?.cancel(); periodicRefreshTask = nil
+        guard phase == .connected, !previewOnly, !localAuthentication.systemSuspended else { return }
+        let ticket = epoch.value
+        let interval = backgroundSyncInterval
+        periodicRefreshTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: interval)
+                guard let self, !Task.isCancelled, self.epoch.accepts(ticket), self.phase == .connected else { return }
+                if !self.localAuthentication.systemSuspended { self.backgroundRefresh() }
+            }
+        }
     }
     var isWorkspaceOpen: Bool { phase == .preview || phase == .connected }
     var editableCalendars: [CalendarCollection] { calendars.filter { phase == .preview || $0.writable == true } }
@@ -293,6 +391,25 @@ import ProtonXCore
             }
         }
     }
+    private func finishRestore(ticket: UInt64) {
+        source = NativeCalendarDataSource(runner: runner)
+        phase = .connected
+        if let retained = retainedState {
+            retainedState = nil
+            calendars = retained.calendars; events = retained.events
+            visibleCalendarIDs = retained.visibleCalendarIDs
+            loadedRange = retained.loadedRange; lastSyncedAt = retained.lastSyncedAt
+            needsRangeReload = false
+            startPeriodicRefresh()
+            Task { @MainActor [weak self] in
+                await Task.yield()
+                guard let self, self.epoch.accepts(ticket), self.phase == .connected else { return }
+                self.backgroundRefresh()
+            }
+        } else {
+            needsRangeReload = true
+        }
+    }
     func unlock(mode: LocalUnlockAuthentication.Mode = .system) {
         guard !previewOnly, phase == .locked, !busy else { return }
         let ticket = epoch.value
@@ -301,7 +418,18 @@ import ProtonXCore
             guard allowed, epoch.accepts(ticket), !Task.isCancelled else { throw CancellationError() }
             let result = try await runner.request(NativeCalendarCommand("restore"))
             guard result.phase == "connected" else { throw ProtonXError.invalidResponse }
-            return { [self] in source = NativeCalendarDataSource(runner:runner); phase = .connected; needsRangeReload = true }
+            return { [self] in finishRestore(ticket: ticket) }
+        }
+    }
+    /// Restores Calendar's independent saved session after macOS local authentication
+    /// already succeeded in a linked product (Mail). Never runs in preview or while suspended.
+    func unlockLinked() {
+        guard !previewOnly, phase == .locked, !busy, !localAuthentication.systemSuspended else { return }
+        let ticket = epoch.value
+        perform { [self] in
+            let result = try await runner.request(NativeCalendarCommand("restore"))
+            guard result.phase == "connected", epoch.accepts(ticket), !Task.isCancelled else { throw ProtonXError.invalidResponse }
+            return { [self] in finishRestore(ticket: ticket) }
         }
     }
     func cancelLocalUnlock() { if phase == .locked && busy { lock() } }

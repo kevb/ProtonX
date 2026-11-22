@@ -34,12 +34,13 @@ struct DesktopNotice: Equatable {
     @Published private(set) var options: MailNotificationOptions
     @Published private(set) var working = false
     @Published private(set) var status: String?
+    @Published private(set) var lockedMode = false
     var configurationChanged: (() -> Void)?
     var openMail: (((folder: UInt64, item: UInt64)?) -> Void)?
     private let backend: any DesktopNotifying
     private let defaults: UserDefaults
     private var session: UUID?
-    private var routes: [String: (session: UUID, folder: UInt64, item: UInt64)] = [:]
+    private var routes: [String: (session: UUID, target: (folder: UInt64, item: UInt64)?)] = [:]
     private var order: [String] = []
     private var delivered: Set<UInt64> = []
     private var generation: UInt64 = 0
@@ -85,9 +86,24 @@ struct DesktopNotice: Equatable {
         // Remove previously disclosed previews as soon as their policy changes.
         clearMail(); configurationChanged?()
     }
-    func beginMail() { clearMail(); session = UUID() }
+    func beginMail(preserveDelivered: Bool = false) {
+        let kept = preserveDelivered ? delivered : []
+        clearMail()
+        delivered = kept
+        lockedMode = false
+        session = UUID()
+    }
+    func beginLockedMail(preserveDelivered: Bool = true) {
+        let kept = preserveDelivered ? delivered : []
+        generation &+= 1; routes = [:]; order = []; delivered = kept
+        // Always clear previously delivered preview notifications when locking.
+        backend.clear()
+        guard active else { session = nil; lockedMode = false; backend.badge(nil); return }
+        lockedMode = true
+        session = UUID()
+    }
     func clearMail() {
-        generation &+= 1; session = nil; routes = [:]; order = []; delivered = []
+        generation &+= 1; session = nil; lockedMode = false; routes = [:]; order = []; delivered = []
         backend.clear(); backend.badge(nil)
     }
     func monitorUnavailable() {
@@ -96,6 +112,7 @@ struct DesktopNotice: Equatable {
     func receive(_ batch: [NativeMailNotification], unread: UInt64) async {
         guard active, let captured = session, batch.count <= 64, (try? batch.forEach { try $0.validate() }) != nil else { return }
         let version = generation
+        let anonymous = lockedMode
         backend.badge(options.badge && unread > 0 ? unread : nil)
         let fresh = batch.filter { delivered.insert($0.id).inserted }
         // Dedupe state is bounded; SDK separately bounds CREATE-event replay.
@@ -106,10 +123,20 @@ struct DesktopNotice: Equatable {
         for message in notices {
             guard active, generation == version, session == captured, !Task.isCancelled else { return }
             let id = UUID().uuidString
-            routes[id] = (captured, message.folder, message.id); order.append(id)
+            routes[id] = (captured, anonymous ? nil : (message.folder, message.id)); order.append(id)
             if order.count > 64 { let expired = order.removeFirst(); routes[expired] = nil; backend.remove([expired]) }
+            let body: String
+            if anonymous {
+                body = grouped ? "\(fresh.count) new messages received. Unlock ProtonX Mail to view." : "New mail received. Unlock ProtonX Mail to view."
+            } else if grouped {
+                body = "\(fresh.count) new messages in Mail."
+            } else if options.previews {
+                body = "From: \(message.sender) — \(message.subject)"
+            } else {
+                body = "Open ProtonX Mail to read your message."
+            }
             let notice = DesktopNotice(id: id, title: grouped ? "New emails received" : "New email received",
-                body: grouped ? "\(fresh.count) new messages in Mail." : (options.previews ? "From: \(message.sender) — \(message.subject)" : "Open ProtonX Mail to read your message."), sound: options.sound)
+                body: body, sound: options.sound)
             do { try await backend.add(notice) }
             catch { routes[id] = nil; status = "An alert could not be delivered. Check macOS notification settings." }
             // A late OS completion must not resurrect a preview after locking.
@@ -119,8 +146,8 @@ struct DesktopNotice: Equatable {
     func clicked(_ id: String) {
         let route = routes[id]
         backend.remove([id]); routes[id] = nil; order.removeAll { $0 == id }
-        guard let route, session == route.session, active else { openMail?(nil); return }
-        openMail?((route.folder, route.item))
+        guard let route, session == route.session, active, let target = route.target else { openMail?(nil); return }
+        openMail?(target)
     }
     func testAlert() async {
         guard active, !working else { return }; working = true; status = nil

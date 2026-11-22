@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import Carbon
+import CoreGraphics
 import ProtonXCore
 
 extension Notification.Name {
@@ -12,6 +13,7 @@ extension Notification.Name {
     static let protonXNewItem = Notification.Name("ProtonX.newItem")
     static let protonXFocusSearch = Notification.Name("ProtonX.focusSearch")
     static let protonXLock = Notification.Name("ProtonX.lock")
+    static let protonXSettingsChanged = Notification.Name("ProtonX.settingsChanged")
 }
 
 @MainActor
@@ -26,13 +28,23 @@ final class SystemIntegration: NSObject {
     var openSettings: (() -> Void)?
     var lockSuite: (() -> Void)?
     var lockSuiteAutomatically: (() -> Void)?
+    var lockProductsAutomatically: ((Set<LockTarget>) -> Void)?
+    var terminateSuite: (() -> Void)?
+    var prepareForTermination: ((@escaping @MainActor () -> Void) -> Bool)?
     var suspendAuthentication: ((Bool) -> Void)?
+    var appDidBecomeActive: (() -> Void)?
+    var systemDidWake: (() -> Void)?
+    var defaults: UserDefaults = .standard
+    var systemIdleProvider: () -> TimeInterval = {
+        CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .null)
+    }
     enum SystemLockReason: CaseIterable { case sleep, displaySleep, sessionInactive, screenLocked }
     private var systemLocks: Set<SystemLockReason> = []
     private var statusItem: NSStatusItem?
     private var monitors: [Any] = []
     private var localMonitor: Any?
     private var lastActivity = ProcessInfo.processInfo.systemUptime
+    private var mailIdleLocked = false
     private var timer: Timer?
     private var hotKey: EventHotKeyRef?
     private var hotKeyHandler: EventHandlerRef?
@@ -63,11 +75,17 @@ final class SystemIntegration: NSObject {
                 MainActor.assumeIsolated { self?.updateSystemLock(.screenLocked, locked: locked) }
             })
         }
+        monitors.append(NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.appDidBecomeActive?() }
+        })
         timer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
-                let seconds = UserDefaults.standard.integer(forKey: "autoLockSeconds")
-                self.checkInactivity(at: ProcessInfo.processInfo.systemUptime, timeout: Double(seconds == 0 ? 300 : seconds))
+                self.checkProductInactivity(
+                    at: ProcessInfo.processInfo.systemUptime,
+                    systemIdleSeconds: self.systemIdleProvider(),
+                    settings: LockSettings.load(from: self.defaults)
+                )
             }
         }
     }
@@ -76,18 +94,47 @@ final class SystemIntegration: NSObject {
             guard systemLocks.insert(reason).inserted else { return }
             // Block evaluation before clearing stores/arming their next attempt.
             suspendAuthentication?(true)
-            (lockSuiteAutomatically ?? lockSuite)?()
+            if let lockProductsAutomatically {
+                let targets = LockSettings.load(from: defaults).targetsForSystemLock(reason)
+                if !targets.isEmpty { lockProductsAutomatically(targets) }
+            } else {
+                (lockSuiteAutomatically ?? lockSuite)?()
+            }
         } else {
             guard systemLocks.remove(reason) != nil, systemLocks.isEmpty else { return }
             // Wake, screen unlock and session activation can arrive independently.
             // Resume only after every observed lock reason has cleared.
             suspendAuthentication?(false)
+            systemDidWake?()
         }
     }
     func checkInactivity(at uptime: TimeInterval, timeout: TimeInterval) {
         guard uptime - lastActivity >= timeout else { return }
         (lockSuiteAutomatically ?? lockSuite)?()
         lastActivity = uptime
+    }
+    func checkProductInactivity(at uptime: TimeInterval, systemIdleSeconds: TimeInterval, settings: LockSettings) {
+        var targets: Set<LockTarget> = []
+        if settings.passAutoLockSeconds > 0, uptime - lastActivity >= Double(settings.passAutoLockSeconds) {
+            targets.insert(.pass)
+            lastActivity = uptime
+        }
+        if settings.mailAutoLockSeconds > 0 {
+            if systemIdleSeconds >= Double(settings.mailAutoLockSeconds) {
+                if !mailIdleLocked {
+                    mailIdleLocked = true
+                    targets.insert(.mail)
+                    targets.insert(.calendar)
+                }
+            } else {
+                mailIdleLocked = false
+            }
+        } else {
+            mailIdleLocked = false
+        }
+        guard !targets.isEmpty else { return }
+        if let lockProductsAutomatically { lockProductsAutomatically(targets) }
+        else { (lockSuiteAutomatically ?? lockSuite)?() }
     }
     func updateMenuBar() {
         guard Bundle.main.bundleIdentifier != "org.kevb.ProtonX.Preview" else { return }
@@ -120,7 +167,7 @@ final class SystemIntegration: NSObject {
     @objc private func showCalendar() { openCalendar?(); lastActivity = ProcessInfo.processInfo.systemUptime }
     @objc private func showSettings() { openSettings?() }
     @objc private func lockNow() { lockSuite?() }
-    @objc private func quit() { lockSuite?(); NSApp.terminate(nil) }
+    @objc private func quit() { NSApp.terminate(nil) }
     func updateHotKey() {
         guard Bundle.main.bundleIdentifier != "org.kevb.ProtonX.Preview" else { return }
         if let hotKey { UnregisterEventHotKey(hotKey) }; hotKey = nil
@@ -166,7 +213,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         MainActor.assumeIsolated { ProductWindows.shared.showSuite() }
         return false
     }
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        MainActor.assumeIsolated {
+            guard !duplicateInstance, let prepare = SystemIntegration.shared.prepareForTermination else {
+                return .terminateNow
+            }
+            return prepare({ NSApp.reply(toApplicationShouldTerminate: true) }) ? .terminateLater : .terminateNow
+        }
+    }
     func applicationWillTerminate(_ notification: Notification) {
-        MainActor.assumeIsolated { SystemIntegration.shared.lockSuite?() }
+        MainActor.assumeIsolated { (SystemIntegration.shared.terminateSuite ?? SystemIntegration.shared.lockSuite)?() }
     }
 }

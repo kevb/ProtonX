@@ -13,7 +13,19 @@ struct ContactsWindow: View {
     var body: some View {
         Group {
             if store.phase == .open { addressBook }
-            else {
+            else if store.phase == .locked && !store.demo && !store.previewOnly {
+                VStack(spacing: 0) {
+                    LocalUnlockCard(
+                        product: "Mail & Contacts",
+                        authentication: store.localAuthentication,
+                        isActive: isActive,
+                        busy: store.busy,
+                        unlock: { store.unlock(mode: $0) },
+                        cancel: { store.lock(preserveBackgroundSync: store.lockedSyncEnabled) }
+                    )
+                }.frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background { RadialGradient(colors: [PassTheme.accent.opacity(0.06), .clear], center: .center, startRadius: 0, endRadius: 520) }
+            } else {
                 VStack(spacing: 20) {
                     Image(systemName: "person.crop.rectangle.stack").font(.system(size: 54, weight: .light)).foregroundStyle(MailTheme.accent)
                     Text("Your Proton contacts").font(.largeTitle.weight(.semibold))
