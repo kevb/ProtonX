@@ -41,6 +41,24 @@ struct NotificationSettingsView: View {
                     .disabled(!notifications.active || notifications.working).accessibilityIdentifier("testNotification")
                 if let status = notifications.status { Text(status).font(.caption).foregroundStyle(.secondary) }
             }
+            Section("Calendar") {
+                Toggle("Upcoming event reminders", isOn: calendarOption(\.enabled))
+                    .disabled(notifications.permission != .authorized && !notifications.calendarOptions.enabled)
+                Picker("Remind me", selection: calendarOption(\.leadMinutes)) {
+                    Text("At time of event").tag(0)
+                    Text("5 minutes before").tag(5)
+                    Text("10 minutes before").tag(10)
+                    Text("15 minutes before").tag(15)
+                    Text("30 minutes before").tag(30)
+                }.disabled(!notifications.calendarActive)
+                Toggle("Play a sound", isOn: calendarOption(\.sound)).disabled(!notifications.calendarActive)
+                Picker("Reminder preview", selection: calendarOption(\.previews)) {
+                    Text("Private — upcoming event only").tag(false)
+                    Text("Event title and time").tag(true)
+                }.disabled(!notifications.calendarActive)
+                Text("Reminders are scheduled locally for upcoming timed events while Calendar is unlocked. Locking Calendar immediately cancels pending reminders and removes any disclosed titles.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             Section("Pass") {
                 Label("Vault changes stay quiet", systemImage: "key")
                 Text("Like Proton Pass, creating or syncing a vault item doesn’t produce a desktop alert. Sharing and security notices will appear as those features become available.")
@@ -52,6 +70,9 @@ struct NotificationSettingsView: View {
     }
     private func option<T>(_ key: WritableKeyPath<MailNotificationOptions, T>) -> Binding<T> {
         Binding(get: { notifications.options[keyPath: key] }, set: { value in notifications.update { $0[keyPath: key] = value } })
+    }
+    private func calendarOption<T>(_ key: WritableKeyPath<CalendarReminderOptions, T>) -> Binding<T> {
+        Binding(get: { notifications.calendarOptions[keyPath: key] }, set: { value in notifications.updateCalendar { $0[keyPath: key] = value } })
     }
     private var permissionText: String {
         switch notifications.permission {
