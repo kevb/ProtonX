@@ -36,6 +36,7 @@ struct DesktopNotice: Equatable {
     @Published private(set) var status: String?
     var configurationChanged: (() -> Void)?
     var openMail: (((folder: UInt64, item: UInt64)?) -> Void)?
+    var unreadCountChanged: ((UInt64?) -> Void)?
     private let backend: any DesktopNotifying
     private let defaults: UserDefaults
     private var session: UUID?
@@ -88,7 +89,7 @@ struct DesktopNotice: Equatable {
     func beginMail() { clearMail(); session = UUID() }
     func clearMail() {
         generation &+= 1; session = nil; routes = [:]; order = []; delivered = []
-        backend.clear(); backend.badge(nil)
+        backend.clear(); backend.badge(nil); unreadCountChanged?(nil)
     }
     func monitorUnavailable() {
         clearMail(); status = "Mail alerts are paused. Unlock Mail again or toggle notifications to retry."
@@ -97,6 +98,7 @@ struct DesktopNotice: Equatable {
         guard active, let captured = session, batch.count <= 64, (try? batch.forEach { try $0.validate() }) != nil else { return }
         let version = generation
         backend.badge(options.badge && unread > 0 ? unread : nil)
+        unreadCountChanged?(unread > 0 ? unread : nil)
         let fresh = batch.filter { delivered.insert($0.id).inserted }
         // Dedupe state is bounded; SDK separately bounds CREATE-event replay.
         if delivered.count > 4096 { delivered = Set(fresh.map(\.id)) }

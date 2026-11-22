@@ -50,14 +50,27 @@ struct ProtonXApp: App {
 
 struct GeneralSettingsView: View {
     @AppStorage("menuBarEnabled") private var menuBarEnabled = true
+    @AppStorage("menuBarUnreadBadge") private var menuBarUnreadBadge = true
     @AppStorage("quickAccessEnabled") private var quickAccessEnabled = false
     @AppStorage("autoLockSeconds") private var autoLockSeconds = 300
     @AppStorage("suiteStartup") private var suiteStartup = "last"
+    @ObservedObject private var loginItem = LoginItemManager.shared
     var body: some View {
         Form {
             Section("Mac integration") {
+                Toggle("Start ProtonX at login", isOn: Binding(get: { loginItem.isEnabled }, set: { loginItem.setEnabled($0) }))
+                    .disabled(loginItem.status == .unavailable)
+                if loginItem.status == .requiresApproval {
+                    Button("Open macOS Login Items…") { loginItem.openSystemLoginItems() }
+                }
+                if let loginMessage = loginItem.message {
+                    Text(loginMessage).font(.caption).foregroundStyle(.secondary)
+                }
                 Toggle("Show one ProtonX menu-bar icon", isOn: $menuBarEnabled)
                     .onChange(of: menuBarEnabled) { _, _ in SystemIntegration.shared.updateMenuBar() }
+                Toggle("Show unread Mail count in menu bar", isOn: $menuBarUnreadBadge)
+                    .disabled(!menuBarEnabled)
+                    .onChange(of: menuBarUnreadBadge) { _, _ in SystemIntegration.shared.updateMenuBar() }
                 Toggle("Quick access with ⌃⌥P", isOn: $quickAccessEnabled)
                     .onChange(of: quickAccessEnabled) { _, _ in SystemIntegration.shared.updateHotKey() }
                 Picker("On launch", selection: $suiteStartup) {
@@ -77,6 +90,7 @@ struct GeneralSettingsView: View {
                 Text("GPL-3.0-or-later · No warranty · Independent of Proton AG").font(.caption).foregroundStyle(.secondary)
             }
         }.formStyle(.grouped).padding(16).frame(maxWidth: .infinity)
+            .onAppear { loginItem.refresh() }
     }
 }
 

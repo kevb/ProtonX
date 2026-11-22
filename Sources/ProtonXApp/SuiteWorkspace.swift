@@ -328,6 +328,15 @@ struct SuiteWindow: View {
             ProductWindows.shared.installOpener { _ in openWindow(id: "suite") }
             SystemIntegration.shared.openHome = { workspace.select(nil); ProductWindows.shared.showSuite() }
             SystemIntegration.shared.openPassForSearch = { workspace.requestPassSearch(); ProductWindows.shared.open(.pass) }
+            SystemIntegration.shared.composeMail = {
+                ProductWindows.shared.open(.mail)
+                if workspace.mail?.phase == .open && workspace.mail?.draft == nil {
+                    workspace.mail?.compose()
+                }
+            }
+            NativeNotifications.shared.unreadCountChanged = { count in
+                SystemIntegration.shared.updateMailUnreadCount(count)
+            }
             NativeNotifications.shared.openMail = { target in
                 ProductWindows.shared.open(.mail)
                 if let target { workspace.mail?.openNotification(folder: target.folder, item: target.item) }
