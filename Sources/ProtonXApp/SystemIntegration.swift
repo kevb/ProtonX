@@ -21,6 +21,7 @@ final class SystemIntegration: NSObject {
     var openPassForSearch: (() -> Void)?
     var openPass: (() -> Void)? = { ProductWindows.shared.open(.pass) }
     var openMail: (() -> Void)? = { ProductWindows.shared.open(.mail) }
+    var composeMail: (() -> Void)?
     var openContacts: (() -> Void)? = { ProductWindows.shared.open(.contacts) }
     var openCalendar: (() -> Void)? = { ProductWindows.shared.open(.calendar) }
     var openSettings: (() -> Void)?
@@ -30,6 +31,8 @@ final class SystemIntegration: NSObject {
     enum SystemLockReason: CaseIterable { case sleep, displaySleep, sessionInactive, screenLocked }
     private var systemLocks: Set<SystemLockReason> = []
     private var statusItem: NSStatusItem?
+    private var mailMenuItem: NSMenuItem?
+    private var unreadMailCount: UInt64?
     private var monitors: [Any] = []
     private var localMonitor: Any?
     private var lastActivity = ProcessInfo.processInfo.systemUptime
@@ -92,23 +95,48 @@ final class SystemIntegration: NSObject {
     func updateMenuBar() {
         guard Bundle.main.bundleIdentifier != "org.kevb.ProtonX.Preview" else { return }
         let enabled = UserDefaults.standard.object(forKey: "menuBarEnabled") as? Bool ?? true
-        if !enabled { if let statusItem { NSStatusBar.system.removeStatusItem(statusItem) }; statusItem = nil; return }
-        guard statusItem == nil else { return }
-        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        item.button?.image = NSImage(systemSymbolName: "shield.lefthalf.filled", accessibilityDescription: "ProtonX")
-        item.button?.toolTip = "ProtonX · Pass, Mail, Calendar and Contacts"
-        let menu = NSMenu()
-        menu.addItem(actionItem("Open ProtonX", #selector(showHome)))
-        menu.addItem(actionItem("Open Pass", #selector(showPass)))
-        menu.addItem(actionItem("Open Mail", #selector(showMail)))
-        menu.addItem(actionItem("Open Calendar", #selector(showCalendar)))
-        menu.addItem(actionItem("Open Contacts", #selector(showContacts)))
-        menu.addItem(.separator())
-        menu.addItem(actionItem("Lock ProtonX", #selector(lockNow)))
-        menu.addItem(actionItem("Settings…", #selector(showSettings)))
-        menu.addItem(.separator())
-        menu.addItem(actionItem("Quit ProtonX", #selector(quit)))
-        item.menu = menu; statusItem = item
+        if !enabled {
+            if let statusItem { NSStatusBar.system.removeStatusItem(statusItem) }
+            statusItem = nil; mailMenuItem = nil; return
+        }
+        if statusItem == nil {
+            let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+            item.button?.image = NSImage(systemSymbolName: "shield.lefthalf.filled", accessibilityDescription: "ProtonX")
+            item.button?.imagePosition = .imageLeading
+            item.button?.toolTip = "ProtonX · Pass, Mail, Calendar and Contacts"
+            let menu = NSMenu()
+            menu.addItem(actionItem("Open ProtonX", #selector(showHome)))
+            menu.addItem(actionItem("Open Pass", #selector(showPass)))
+            let mailItem = actionItem("Open Mail", #selector(showMail))
+            mailMenuItem = mailItem
+            menu.addItem(mailItem)
+            menu.addItem(actionItem("New Mail Message", #selector(newMailMessage)))
+            menu.addItem(actionItem("Open Calendar", #selector(showCalendar)))
+            menu.addItem(actionItem("Open Contacts", #selector(showContacts)))
+            menu.addItem(.separator())
+            menu.addItem(actionItem("Lock ProtonX", #selector(lockNow)))
+            menu.addItem(actionItem("Settings…", #selector(showSettings)))
+            menu.addItem(.separator())
+            menu.addItem(actionItem("Quit ProtonX", #selector(quit)))
+            item.menu = menu; statusItem = item
+        }
+        applyMenuBarBadge()
+    }
+    func updateMailUnreadCount(_ count: UInt64?) {
+        unreadMailCount = count
+        applyMenuBarBadge()
+    }
+    private func applyMenuBarBadge() {
+        guard let statusItem else { return }
+        let showBadge = UserDefaults.standard.object(forKey: "menuBarUnreadBadge") as? Bool ?? true
+        let badge = showBadge ? MenuBarBadgeFormatter.label(for: unreadMailCount) : nil
+        statusItem.length = badge == nil ? NSStatusItem.squareLength : NSStatusItem.variableLength
+        statusItem.button?.title = badge.map { " " + $0 } ?? ""
+        if let unreadMailCount, unreadMailCount > 0 {
+            mailMenuItem?.title = "Open Mail (\(unreadMailCount) unread)"
+        } else {
+            mailMenuItem?.title = "Open Mail"
+        }
     }
     private func actionItem(_ title: String, _ action: Selector) -> NSMenuItem {
         let item = NSMenuItem(title: title, action: action, keyEquivalent: ""); item.target = self; return item
@@ -116,6 +144,7 @@ final class SystemIntegration: NSObject {
     @objc private func showPass() { openPass?(); lastActivity = ProcessInfo.processInfo.systemUptime }
     @objc private func showHome() { openHome?(); lastActivity = ProcessInfo.processInfo.systemUptime }
     @objc private func showMail() { openMail?(); lastActivity = ProcessInfo.processInfo.systemUptime }
+    @objc private func newMailMessage() { composeMail?(); lastActivity = ProcessInfo.processInfo.systemUptime }
     @objc private func showContacts() { openContacts?(); lastActivity = ProcessInfo.processInfo.systemUptime }
     @objc private func showCalendar() { openCalendar?(); lastActivity = ProcessInfo.processInfo.systemUptime }
     @objc private func showSettings() { openSettings?() }
