@@ -55,6 +55,20 @@ pub fn key_connection(connection: &Connection, key: &[u8; 32]) -> rusqlite::Resu
     Ok(())
 }
 
+/// Fast startup key/header check: verifies the SQLCipher key can open the
+/// database and decrypt its schema table without scanning every page.
+pub fn validate_encrypted_header(path: &Path, key: &[u8; 32]) -> Result<(), StorageError> {
+    let connection = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .map_err(|_| StorageError::Unavailable)?;
+    key_connection(&connection, key).map_err(|_| StorageError::Unavailable)?;
+    connection
+        .query_row("SELECT count(*) FROM sqlite_master", [], |r| {
+            r.get::<_, i64>(0)
+        })
+        .map_err(|_| StorageError::Unavailable)?;
+    Ok(())
+}
+
 /// Validate before calling an SDK that may otherwise rename/rebuild corrupt DBs.
 pub fn validate_encrypted(path: &Path, key: &[u8; 32]) -> Result<(), StorageError> {
     let connection = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)

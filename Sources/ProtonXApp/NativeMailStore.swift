@@ -66,6 +66,7 @@ final class NativeMailStore: ObservableObject {
     @Published private(set) var cacheRefreshFailed = false
     @Published private(set) var lastSynced: Date?
     @Published private(set) var demo = false
+    @Published private(set) var storageUpgradeRequired = false
     @Published var selectedFolder: UInt64?
     @Published var selectedItem: UInt64?
     @Published var query = ""
@@ -105,6 +106,7 @@ final class NativeMailStore: ObservableObject {
     }
     private let runner: any NativeMailRunning
     private let defaults: UserDefaults
+    private let storageDirectory: URL
     let localAuthentication: LocalUnlockAuthentication
     private var epoch = SessionEpoch(), selectionEpoch = SessionEpoch()
     private var operation: Task<Void, Never>?, selection: Task<Void, Never>?, polling: Task<Void, Never>?
@@ -114,9 +116,11 @@ final class NativeMailStore: ObservableObject {
     private var demoMessages: [NativeMailMessage] = []
     private var demoHTML: [UInt64: String] = [:]
     private var demoBodies: [UInt64: String] = [:]
-    init(runner: (any NativeMailRunning)? = nil, defaults: UserDefaults = .standard, previewOnly: Bool = false, localUnlock: (@MainActor @Sendable () async throws -> Bool)? = nil) {
+    init(runner: (any NativeMailRunning)? = nil, defaults: UserDefaults = .standard, previewOnly: Bool = false, storageDirectory: URL? = nil, localUnlock: (@MainActor @Sendable () async throws -> Bool)? = nil) {
         self.defaults = defaults; self.previewOnly = previewOnly; self.localAuthentication = LocalUnlockAuthentication(evaluate: localUnlock)
-        self.runner = runner ?? NativeMailProcess(executable: Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/protonx-mail"), directory: FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/ProtonX/Mail"))
+        let directory = storageDirectory ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/ProtonX/Mail")
+        self.storageDirectory = directory
+        self.runner = runner ?? NativeMailProcess(executable: Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/protonx-mail"), directory: directory)
         hasSession = !previewOnly && defaults.bool(forKey: "nativeMailConnected")
         phase = hasSession ? .locked : .welcome
         if previewOnly { enterDemo() }
@@ -177,7 +181,7 @@ final class NativeMailStore: ObservableObject {
         case .mailboxPassword: phase = .mailboxPassword
         case .securityKey: phase = .securityKey
         case .connected:
-            hasSession = true; defaults.set(true, forKey: "nativeMailConnected"); phase = .open
+            hasSession = true; defaults.set(true, forKey: "nativeMailConnected"); storageUpgradeRequired = false; phase = .open
             restartNotifications()
             cacheFirstActive = result.cacheFirst == true
             try await load(captured: captured, mode: cacheFirstActive ? "local" : nil)
@@ -744,6 +748,42 @@ final class NativeMailStore: ObservableObject {
         hasSession = false; defaults.set(false, forKey: "nativeMailConnected")
         lock(); demo = false; phase = .welcome
     }
+    /// Explicitly clears only Mail's local plaintext cache after user confirmation so
+    /// the next sign-in initializes a fresh SQLCipher-encrypted profile from Proton.
+    func resetLocalStorageForEncryptedUpgrade() {
+        guard !previewOnly, !demo, !busy, storageUpgradeRequired else { return }
+        epoch.invalidate(); selectionEpoch.invalidate(); operation?.cancel(); selection?.cancel(); polling?.cancel()
+        runner.cancelAll(); localAuthentication.cancel()
+        let fm = FileManager.default
+        if fm.fileExists(atPath: storageDirectory.path) {
+            guard let attrs = try? fm.attributesOfItem(atPath: storageDirectory.path),
+                  (attrs[.type] as? FileAttributeType) != .typeSymbolicLink else {
+                error = NativeMailFailure.storageUnavailable.localizedDescription
+                return
+            }
+            let knownEntries = ["sessions", "users", "cache", ".storage.lock", ".storage-format", ".storage-format.tmp", ".storage-migration"]
+            for name in knownEntries {
+                let target = storageDirectory.appendingPathComponent(name)
+                guard fm.fileExists(atPath: target.path) else { continue }
+                if let entryAttrs = try? fm.attributesOfItem(atPath: target.path),
+                   (entryAttrs[.type] as? FileAttributeType) == .typeSymbolicLink {
+                    error = NativeMailFailure.storageUnavailable.localizedDescription
+                    return
+                }
+                do { try fm.removeItem(at: target) }
+                catch {
+                    self.error = NativeMailFailure.storageUnavailable.localizedDescription
+                    return
+                }
+            }
+        }
+        hasSession = false
+        defaults.set(false, forKey: "nativeMailConnected")
+        storageUpgradeRequired = false
+        error = nil
+        phase = .welcome
+        notice = "Local Mail cache cleared. Sign in once to re-sync your mailbox into encrypted storage."
+    }
     var filePanelContext: UInt64? { phase == .open ? epoch.value : nil }
     enum AttachmentAction { case preview, save(URL) }
     func clearAttachmentPreview() { attachmentPreview?.remove(); attachmentPreview = nil }
@@ -959,6 +999,7 @@ final class NativeMailStore: ObservableObject {
                     self.error = cancelled || error is LAError ? nil : message
                     if phase == .signingIn { phase = .welcome }
                     if (error as? NativeMailFailure) == .sessionExpired { expireSession(); self.error = message }
+                    if (error as? NativeMailFailure) == .storageUpgradeRequired { storageUpgradeRequired = true }
                 }
             }
             if epoch.accepts(captured) { busy = false }

@@ -17,29 +17,22 @@ include passwords, tokens, real message bodies or vault exports in public issues
   preference `mailConnected` is a Boolean only.
 - Native Mail uses Proton's pinned Rust Mail SDK in a separate helper, profile
   `~/Library/Application Support/ProtonX/Mail`, and Keychain service
-  `org.kevb.ProtonX.Mail.Native`. The SDK protects session tokens/key secrets with
-  a Keychain-backed encryption key, but its Mail data database is ordinary SQLite.
-  Subjects, participants and previously decrypted bodies can persist unencrypted
-  in that database and its journals. Local UI lock does not encrypt or remove them.
-  This is an unresolved release blocker; see docs/LOCAL_STORAGE.md and its synthetic
-  storage contract. An opt-in SQLCipher candidate keys new SDK databases with a
-  separate Mail storage Keychain key; normal builds do not enable it. Existing
-  plaintext profiles are refused, not converted. A synthetic-tested migration
-  coordinator stages encrypted database copies while retaining originals; no
-  production upgrade/cutover is exposed. Both updated helpers lock the profile
-  and refuse pending migrations before Keychain/SDK access. Normal builds also
-  refuse encrypted profiles, avoiding SDK reset behavior. Historical older builds
-  do not honor these guards. The opt-in candidate now encrypts newly cached
-  attachment/embedded-MIME payloads in atomic SQLCipher blob containers and reads
-  them into memory, including SDK cache hits, cloning and calendar invite parsing.
-  The original filename stays in encrypted metadata; the cache filename is generic.
-  The native attachment export reads bounded cache bytes in memory through the SDK adapter; explicit save/preview produces a user-authorized plaintext file. Internal SDK attachment paths in this
-  candidate point to ciphertext, not files another app can open directly. Existing
-  cache activation/path rebasing, full file-path/export/staging audit, whole-profile cutover and
-  actual draft/send recovery remain release gates. See docs/MAIL_STORAGE_MIGRATION.md.
-  Synthetic-only attachment migration staging encrypts copies of existing files
-  and the source-path map; it retains originals and does not update SDK references
-  or activate the profile. Normal builds never invoke it.
+  `org.kevb.ProtonX.Mail.Native`. Packaged Mail helper builds now enable
+  `secure-storage` by default (`scripts/build-mail-helper.sh`), keying every SDK
+  SQLite connection with SQLCipher using a separate 256-bit key in local Keychain
+  service `org.kevb.ProtonX.Mail.Storage` (`database-v1`) and storing cached
+  attachments/embedded MIME payloads in atomic SQLCipher blob containers
+  (`content.pxb`, generic filenames, decrypted in memory). Fresh encrypted
+  profiles stamp `.storage-format` (`protonx-mail-sqlcipher-v1`) so legacy
+  unencrypted helpers fail closed. Startup preflight holds `.storage.lock`,
+  refuses symlinks and legacy plaintext profiles (`storage_upgrade_required`)
+  before Keychain/SDK access, and verifies each database header with the SQLCipher
+  key in O(1); attachment containers are verified on read. Existing plaintext
+  profiles are never silently rewritten: Mail offers an explicit, confirmed
+  **Reset Cache & Upgrade…** action that removes only Mail's local cache entries
+  (refusing symlinks) so a fresh sign-in re-syncs from Proton into encrypted
+  storage. Note that removing local files on APFS/SSD or existing backups does not
+  guarantee forensic erasure of historical blocks. See docs/LOCAL_STORAGE.md.
   It never reuses Pass or Bridge credentials. `nativeMailConnected`
   is an untrusted Boolean hint; reopening requires local unlock and SDK restore.
   Native credentials/challenges travel on private stdin. Human verification and

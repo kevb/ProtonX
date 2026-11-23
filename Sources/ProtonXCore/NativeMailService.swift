@@ -134,7 +134,7 @@ public enum NativeMailFailure: String, Codable, Error, LocalizedError, Sendable 
         case .storageVersionUnsupported: "This Mail profile uses encrypted storage that this build cannot open. Use a compatible build; your saved files have been retained."
         case .storageUnavailable: "Mail’s local storage could not open safely. Your saved files have been retained. Close other ProtonX copies and check Keychain access."
         case .storageKeyMissing: "Mail’s storage key is missing from this Mac’s Keychain. Your saved files have been retained; a replacement key will not be created."
-        case .storageUpgradeRequired: "This experimental build requires an encrypted Mail database. Existing storage has been retained. Continue using your current build until the storage upgrade is ready."
+        case .storageUpgradeRequired: "Mail now uses encrypted local storage. Your existing local cache has been retained; reset the local Mail cache to sign in once and re-sync from Proton."
         case .draftFailed: "Your draft could not complete this operation. Your text is still in the composer."
         case .draftUnsupported: "This draft contains content this composer cannot safely edit. Use the official client."
         case .senderUnavailable: "That sending address is unavailable. Check your Gmail connection or select an enabled address."

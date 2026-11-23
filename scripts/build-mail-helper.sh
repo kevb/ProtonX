@@ -2,13 +2,16 @@
 set -euo pipefail
 source "$(dirname "$0")/env.sh"
 cd "$PROTONX_ROOT"
-PROTONX_MAIL_FEATURES=()
+PROTONX_MAIL_FEATURES=(--features secure-storage)
 PROTONX_MAIL_OUTPUT="$PROTONX_ROOT/.tools/mail-helper"
 if [[ "${1:-}" == --secure-storage && $# == 1 ]]; then
   PROTONX_MAIL_FEATURES=(--features secure-storage)
   PROTONX_MAIL_OUTPUT="$PROTONX_ROOT/.tools/mail-helper-secure"
+elif [[ "${1:-}" == --legacy-storage && $# == 1 ]]; then
+  PROTONX_MAIL_FEATURES=()
+  PROTONX_MAIL_OUTPUT="$PROTONX_ROOT/.tools/mail-helper-legacy"
 elif [[ $# != 0 ]]; then
-  echo 'Use no arguments, or --secure-storage for the isolated experimental helper.' >&2
+  echo 'Use no arguments (encrypted SQLCipher default), --secure-storage, or --legacy-storage.' >&2
   exit 1
 fi
 python3 scripts/bootstrap.py --references

@@ -1,7 +1,8 @@
 // Copyright (c) 2026 ProtonX contributors. SPDX-License-Identifier: AGPL-3.0-only
-// Opt-in candidate: legacy profiles are refused, never automatically rewritten.
+// Encrypted Mail storage: legacy plaintext profiles are refused rather than silently rewritten.
 use protonx_mail_storage::{
-    ProfileGuard, StorageError, configure_database_key, database_files, validate_encrypted, attachment_files, read_blob, FORMAT_FILE,
+    ProfileGuard, StorageError, configure_database_key, database_files, validate_encrypted_header,
+    attachment_files, write_format_marker, FORMAT_FILE,
 };
 use security_framework::passwords::{get_generic_password, set_generic_password};
 use security_framework::random::SecRandom;
@@ -20,8 +21,8 @@ pub fn prepare(root: &Path) -> Result<ProfileGuard, &'static str> {
     })?;
     let databases = database_files(root).map_err(|_| "storage_unavailable")?;
     let attachments = attachment_files(root).map_err(|_| "storage_unavailable")?;
-    // Earlier candidate versions wrote ordinary attachment files. Keep them
-    // untouched and refuse the unsupported cache layout before Keychain access.
+    // Legacy profiles wrote ordinary attachment files. Keep them untouched and
+    // refuse the unsupported cache layout before Keychain access.
     if attachments.iter().any(|path| path.file_name().is_none_or(|name| name != "content.pxb")) {
         return Err("storage_upgrade_required");
     }
@@ -47,12 +48,12 @@ pub fn prepare(root: &Path) -> Result<ProfileGuard, &'static str> {
         Err(error) if error.code() == -25300 => return Err("storage_key_missing"),
         Err(_) => return Err("storage_unavailable"),
     };
+    // Verify the key decrypts each database header in O(1); attachment containers
+    // are verified and decrypted lazily on read to keep unlock fast.
     for path in &databases {
-        validate_encrypted(path, &key).map_err(|_| "storage_unavailable")?;
+        validate_encrypted_header(path, &key).map_err(|_| "storage_unavailable")?;
     }
-    for path in &attachments {
-        read_blob(path, &key).map_err(|_| "storage_unavailable")?;
-    }
+    write_format_marker(root).map_err(|_| "storage_unavailable")?;
     configure_database_key(*key).map_err(|_| "storage_unavailable")?;
     Ok(guard)
 }
