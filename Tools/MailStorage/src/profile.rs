@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ProtonX contributors. SPDX-License-Identifier: AGPL-3.0-only
 // This module has no database/crypto dependency; both helper variants use it.
 use std::fs::{self, File, OpenOptions};
-use std::io::Read;
+use std::io::{Read, Write};
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
@@ -178,6 +178,60 @@ impl ProfileGuard {
         }
         Ok(())
     }
+}
+
+/// Stamp the encrypted profile format marker atomically so older/unencrypted
+/// helpers fail closed instead of treating encrypted databases as corrupt.
+pub fn write_format_marker(root: &Path) -> Result<(), StorageError> {
+    if fs::symlink_metadata(root)
+        .map_err(|_| StorageError::Unavailable)?
+        .file_type()
+        .is_symlink()
+    {
+        return Err(StorageError::InvalidProfile);
+    }
+    let format_path = root.join(FORMAT_FILE);
+    match fs::symlink_metadata(&format_path) {
+        Ok(metadata) => {
+            if !metadata.is_file() || metadata.nlink() != 1 {
+                return Err(StorageError::InvalidProfile);
+            }
+            let mut file = OpenOptions::new()
+                .read(true)
+                .custom_flags(libc::O_NOFOLLOW)
+                .open(&format_path)
+                .map_err(|_| StorageError::Unavailable)?;
+            let mut value = Vec::new();
+            file.read_to_end(&mut value)
+                .map_err(|_| StorageError::Unavailable)?;
+            return if value == ENCRYPTED_FORMAT {
+                Ok(())
+            } else {
+                Err(StorageError::InvalidProfile)
+            };
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(_) => return Err(StorageError::Unavailable),
+    }
+    let temp_path = root.join(".storage-format.tmp");
+    let _ = fs::remove_file(&temp_path);
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(&temp_path)
+        .map_err(|_| StorageError::Unavailable)?;
+    if file.write_all(ENCRYPTED_FORMAT).is_err() || file.sync_all().is_err() {
+        let _ = fs::remove_file(&temp_path);
+        return Err(StorageError::Unavailable);
+    }
+    drop(file);
+    if fs::rename(&temp_path, &format_path).is_err() {
+        let _ = fs::remove_file(&temp_path);
+        return Err(StorageError::Unavailable);
+    }
+    Ok(())
 }
 
 /// SDK attachment/embedded-MIME files, including legacy names. Inspect before

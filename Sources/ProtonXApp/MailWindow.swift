@@ -13,6 +13,7 @@ struct MailWindow: View {
     @State private var code = ""
     @State private var bridge = false
     @State private var confirmSignOut = false
+    @State private var confirmStorageReset = false
     @State private var readerExpanded = false
     @State private var pendingTrash: NativeMailStore.ListActionIntent?
     @FocusState private var focus: String?
@@ -42,6 +43,11 @@ struct MailWindow: View {
                     Image(systemName: "exclamationmark.circle")
                     Text(error).font(.callout).textSelection(.enabled)
                     Spacer()
+                    if store.storageUpgradeRequired {
+                        Button("Reset Cache & Upgrade…") { confirmStorageReset = true }
+                            .disabled(store.busy)
+                            .accessibilityIdentifier("mailUpgradeEncryptedStorage")
+                    }
                     if store.mustRefreshBeforeActions { Button("Refresh Mail") { store.refresh() }.disabled(store.busy) }
                     Button("Dismiss") { store.error = nil }
                 }.padding(12).background(.orange.opacity(0.12))
@@ -70,6 +76,15 @@ struct MailWindow: View {
         .confirmationDialog("Sign out of ProtonX Mail?", isPresented: $confirmSignOut) {
             Button("Sign Out", role: .destructive) { clearCredentials(); store.signOut() }
         } message: { Text("End this app’s Mail session and remove its local account data. Your messages remain with Proton.") }
+        .alert("Reset local Mail cache and switch to encrypted storage?", isPresented: $confirmStorageReset) {
+            Button("Cancel", role: .cancel) {}
+            Button("Reset Cache & Continue", role: .destructive) {
+                clearCredentials()
+                store.resetLocalStorageForEncryptedUpgrade()
+            }
+        } message: {
+            Text("Your mail, folders, and synced drafts on Proton’s servers are not affected. Make sure you don’t have unsent offline drafts, then sign in once to re-sync Mail into SQLCipher-encrypted local storage.")
+        }
         .onReceive(NotificationCenter.default.publisher(for: .protonXNewMessage)) { _ in if isActive { store.compose() } }
         .onReceive(NotificationCenter.default.publisher(for: .protonXRefreshMail)) { _ in if isActive { store.refresh() } }
         .onReceive(NotificationCenter.default.publisher(for: .protonXFocusMailSearch)) { _ in if isActive { focus = "search" } }
@@ -113,6 +128,9 @@ struct MailWindow: View {
             VStack(spacing: 8) {
                 Text(title).font(.system(size: 28, weight: .semibold))
                 Text(subtitle).font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                if let notice = store.notice {
+                    Text(notice).font(.caption).foregroundStyle(MailTheme.accent).multilineTextAlignment(.center)
+                }
             }
             if store.phase == .welcome || store.phase == .signingIn {
                 VStack(alignment: .leading, spacing: 16) {

@@ -197,3 +197,26 @@ fn cache_inventory_sees_legacy_payloads_and_refuses_links() {
     std::fs::remove_file(&link).unwrap();
     assert_eq!(std::fs::read(&path).unwrap(), b"SYNTHETIC-CACHE");
 }
+
+#[test]
+fn fast_header_validation_and_format_marker_protect_encrypted_profiles() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path();
+    let db = root.join("sessions/account.db");
+    fs::create_dir_all(db.parent().unwrap()).unwrap();
+    let conn = Connection::open(&db).unwrap();
+    key_connection(&conn, &KEY).unwrap();
+    conn.execute_batch("CREATE TABLE synthetic (id INTEGER PRIMARY KEY, body TEXT); INSERT INTO synthetic VALUES (1, 'SYNTHETIC');").unwrap();
+    drop(conn);
+
+    assert!(protonx_mail_storage::validate_encrypted_header(&db, &KEY).is_ok());
+    let wrong = [0x99_u8; 32];
+    assert!(protonx_mail_storage::validate_encrypted_header(&db, &wrong).is_err());
+
+    protonx_mail_storage::write_format_marker(root).unwrap();
+    // Idempotent second call succeeds and blocks legacy unencrypted helpers.
+    protonx_mail_storage::write_format_marker(root).unwrap();
+    let guard = ProfileGuard::acquire(root).unwrap();
+    assert_eq!(guard.check_startup(false), Err(StorageError::EncryptedProfile));
+    assert!(guard.check_startup(true).is_ok());
+}
